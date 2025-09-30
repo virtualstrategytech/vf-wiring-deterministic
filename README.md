@@ -53,3 +53,45 @@ Open these side-by-side with Voiceflow:
 - `http-tests/*.http` or `scripts/*.ps1` → quick API checks
 
 Tip: Tell Copilot: “Use voiceflow-kit to help me wire C_TeachAndQuiz now.”
+
+# vf-wiring-deterministic
+
+Deterministic Voiceflow wiring kit for the **NovAIn Teach & Quiz MVP**.  
+This repo organizes docs, prompts, and API smoke tests so you can wire a stable, testable MVP without the global agent interfering.
+
+## What this includes
+
+- **docs/**: wiring map, variables, and a step-by-step test plan
+- **copilot-kit/**: Copilot prompts + snippets you can paste into VS Code to stay fast and consistent
+- **scripts/curl/**: one-file HTTP smoke tests for your Render webhook
+- **env/.example.env**: sample environment names you’ll mirror in Render
+
+## Quick start
+
+1. Clone this repo and open in VS Code.
+2. Duplicate `env/.example.env` locally to `.env` **(do not commit)** and set your values.
+3. Deploy/verify webhook (Render): run the requests in `scripts/curl/webhook-smoke.http`.
+4. In Voiceflow, wire components in this order:
+   - `C_CollectNameEmail` → `C_CaptureQuestion` → `C_OptimizeQuestion`
+   - `C_KB_Retrieve` / `C_GenerateLesson` / `C_GenerateQuiz`
+   - `C_TeachQuiz_Orchestrator` → `W_QuizRunner` (optional)
+5. Follow `docs/test-plan.md` to validate each path.
+
+## Conventions
+
+- Global variables use **TitleCase** (e.g., `FirstName`, `CustomerEmail`).
+- API outputs use `API_*` (e.g., `API_Response`, `API_LessonTitle`).
+- Counters/flags use lowercase snake when local (e.g., `quiz_mcq_idx`).
+
+## Where to put Voiceflow files
+
+- Export flows/components into `voiceflow/exports/` (keep the folder in Git with `.gitkeep`).
+- Drop reference screenshots into `voiceflow/screenshots/`.
+
+## Troubleshooting
+
+- **Agent keeps jumping in?** Project → Agent → Behavior → set to **Scripted** and route **Fallback** to **End in current flow**.
+- **Email regex refuses business domains?** See `copilot-kit/templates/outcome-guards.snippet`.
+- **Webhook returns 400/502?** Use `copilot-kit/templates/webhook-error-handler.snippet` and re-run `webhook-smoke.http`.
+
+Licensed MIT. © Virtual Strategy Tech.

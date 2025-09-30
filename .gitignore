@@ -9,3 +9,38 @@ dist/
 # Voiceflow exports/backups
 *.vf
 backups/
+# Node / tooling
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+# Env
+.env
+.env.*
+!/env/.example.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build / cache
+dist/
+build/
+.cache/
+.tmp/
+*.local
+
+# Voiceflow exports & images (keep folder, ignore big binaries)
+voiceflow/exports/**
+!voiceflow/exports/.gitkeep
+voiceflow/screenshots/**
+!voiceflow/screenshots/.gitkeep
+
+# Misc
+*.zip
+*.tgz

@@ -1,0 +1,12 @@
+# Condition: Accept business email
+# Expression (ANY):
+/^[a-z0-9._%+-]+@(?!gmail\.com$)(?!yahoo\.com$)(?!outlook\.com$)(?!hotmail\.com$)(?!aol\.com$)(?!icloud\.com$)(?!proton\.me$)(?!protonmail\.com$)(?!gmx\.com$)(?!live\.com$)(?!msn\.com$)(?!me\.com$)[a-z0-9.-]+\.[a-z]{2,}$/i.test(customer_email_lc)
+
+# Condition: Reject freemail (ANY of these)
+/@gmail\.com$/i.test(customer_email_lc)
+/@yahoo\.com$/i.test(customer_email_lc)
+/(outlook|hotmail|aol|icloud|proton(\.me|mail\.com)?|gmx|live|msn|me)\.com$/i.test(customer_email_lc)
+
+# Attempts cap (Set before Condition)
+email_attempts = Number(email_attempts)||0
+email_attempts = email_attempts + 1

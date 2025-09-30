@@ -1,0 +1,65 @@
+### Health
+GET https://vf-webhook-service.onrender.com/health
+
+### Ping
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action": "ping",
+  "name": "Smoke",
+  "question": "hello"
+}
+
+### Retrieve
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action": "retrieve",
+  "tenantId": "default",
+  "topK": 4,
+  "question": "What is SPQA and how is it applied to discovery?"
+}
+
+### Generate lesson
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action": "generate_lesson",
+  "tenantId": "default",
+  "question": "Teach me SPQA with an example"
+}
+
+### Generate quiz
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action": "generate_quiz",
+  "tenantId": "default",
+  "question": "Quiz me on SPQA basics"
+}
+
+### Export lesson (markdown data URL)
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action": "export_lesson",
+  "format": "markdown",
+  "title": "SPQA Lesson",
+  "lesson": {
+    "meta": { "question": "Churn is up—what should we do?" },
+    "objectives": ["Separate symptoms from causes","Define success criteria"],
+    "content": "SPQA = Situation → Problem → Questions → Actions.",
+    "keyTakeaways": ["Ask better questions","Tie actions to metrics"],
+    "references": [{"label":"Example","url":"https://example.com"}]
+  }
+}
