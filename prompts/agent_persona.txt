@@ -1,0 +1,2 @@
+# Paste YOUR NovAIn persona here (the long spec you wrote).
+# Keep it in one variable so you can edit in one place.

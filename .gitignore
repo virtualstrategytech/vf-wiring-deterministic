@@ -1,0 +1,11 @@
+# env & local
+.env
+*.env
+ops/render/*.env
+node_modules/
+dist/
+.DS_Store
+
+# Voiceflow exports/backups
+*.vf
+backups/

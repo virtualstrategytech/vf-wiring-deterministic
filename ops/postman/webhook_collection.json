@@ -1,0 +1,156 @@
+{
+  "info": {
+    "name": "vf-webhook-service",
+    "_postman_id": "d3f1a6b8-6a8a-4b67-9c60-cc17c8820f21",
+    "description": "Smoke + sandbox calls for Voiceflow webhook service.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://vf-webhook-service.onrender.com" },
+    { "key": "vf_signing_secret", "value": "REPLACE_ME" },
+    { "key": "use_hmac", "value": "true" },
+    { "key": "last_export_url", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Compute X-VF-Signature if enabled",
+          "const useHmac = pm.collectionVariables.get('use_hmac') === 'true';",
+          "if (!useHmac) { pm.globals.unset('vf_signature'); return; }",
+          "const secret = pm.collectionVariables.get('vf_signing_secret') || '';",
+          "const body = pm.request.body ? pm.request.body.raw || '' : '';",
+          "const sig = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+          "pm.globals.set('vf_signature', sig);"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "GET /health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('status 200', () => pm.response.code === 200);"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /webhook (Teach & Quiz orchestrator)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          {
+            "key": "X-VF-Signature",
+            "value": "{{vf_signature}}",
+            "disabled": false
+          }
+        ],
+        "url": "{{base_url}}/webhook",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"teach_and_quiz\",\n  \"inputs\": {\n    \"first_name\": \"Alex\",\n    \"optimized_question\": \"Create a short lesson on OKR pitfalls for a startup CTO; tone practical; add 5 bullets.\",\n    \"audience\": \"CTO\",\n    \"tone\": \"practical\",\n    \"length\": \"short\",\n    \"examples\": true\n  }\n}\n"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.code === 200);",
+              "pm.test('has API_Response', () => !!pm.response.json().API_Response);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /generate_lesson",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-VF-Signature", "value": "{{vf_signature}}" }
+        ],
+        "url": "{{base_url}}/generate_lesson",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"first_name\": \"Alex\",\n  \"topic\": \"How to choose a pricing model for B2B SaaS\",\n  \"audience\": \"Founder\",\n  \"tone\": \"executive\",\n  \"length\": \"short\",\n  \"examples\": true\n}\n"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('status 200', () => pm.response.code === 200);"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /generate_quiz",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-VF-Signature", "value": "{{vf_signature}}" }
+        ],
+        "url": "{{base_url}}/generate_quiz",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"lesson_title\": \"B2B SaaS Pricing 101\",\n  \"counts\": { \"mcq\": 3, \"tf\": 2, \"open\": 1 },\n  \"context\": { \"audience\": \"Founder\", \"difficulty\": \"beginner\" }\n}\n"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('status 200', () => pm.response.code === 200);"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /export_lesson",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-VF-Signature", "value": "{{vf_signature}}" }
+        ],
+        "url": "{{base_url}}/export_lesson",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"filename\": \"lesson-okrs-demo\",\n  \"markdown\": \"# Lesson Title\\n\\n- bullet 1\\n- bullet 2\\n\"\n}\n"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.code === 200);",
+              "const url = pm.response.json().export_url; pm.collectionVariables.set('last_export_url', url);",
+              "pm.test('has export_url', () => !!url);"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

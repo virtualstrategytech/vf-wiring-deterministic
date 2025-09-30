@@ -1,0 +1,14 @@
+flowchart LR
+  Entry[[Teach & Quiz Orchestrator]]
+  Clear["Set counts = 0\n(API_MCQ=0, API_TF=0, API_OPEN=0)"]
+  GenL["API: generate_lesson"]
+  SpeakL["Speak: {API_LessonTitle} ({API_BulletCount})"]
+  AgentL["C_AgentTurn"]
+  Choice{Quiz now?}
+  GenQ["API: generate_quiz"]
+  AgentQ["C_AgentTurn"]
+  Done([End])
+
+  Entry --> Clear --> GenL --> SpeakL --> AgentL --> Choice
+  Choice -->|Yes| GenQ --> AgentQ --> Done
+  Choice -->|No| Done

@@ -1,0 +1,10 @@
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action":"generate_lesson",
+  "question":"Teach me SPQA",
+  "tenantId":"default"
+}
+

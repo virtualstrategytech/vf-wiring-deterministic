@@ -1,0 +1,10 @@
+POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: test123
+
+{
+  "action":"retrieve",
+  "question":"What is SPQA?",
+  "tenantId":"default",
+  "topK": 6
+}

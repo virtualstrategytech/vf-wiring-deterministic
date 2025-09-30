@@ -1,0 +1,7 @@
+{
+  "WEBHOOK_URL": "https://vf-webhook-service.onrender.com/webhook",
+  "WEBHOOK_API_KEY": "test123",
+  "CAL_URL": "https://cal.com/<your-user-or-team>/<event>",
+  "tenantId": "default",
+  "mode": "manual"
+}

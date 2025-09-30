@@ -1,0 +1,16 @@
+{
+  "name": "vf-webhook-service",
+  "version": "1.0.0",
+  "description": "Minimal webhook router for Voiceflow deterministic MVP",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
+  }
+}

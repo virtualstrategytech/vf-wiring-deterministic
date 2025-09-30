@@ -1,0 +1,27 @@
+# Voiceflow Webhook (Deterministic MVP)
+
+## Endpoints
+
+- `GET /health` → `ok`
+- `POST /webhook` with header `x-api-key: <key>`:
+  - `action=ping` → echo
+  - `action=retrieve` → calls RETRIEVAL_URL (if configured) else returns 400
+  - `action=generate_lesson` → calls BUSINESS_URL if set, else returns stub lesson
+  - `action=generate_quiz` → calls PROMPT_URL if set, else returns stub quiz
+  - `action=export_lesson` → returns `data:` URL (base64 markdown)
+- `POST /export_lesson_file` → returns a file download (`text/markdown`)
+
+## Env
+
+- `PORT=3000`
+- `WEBHOOK_API_KEY=test123`
+- `RETRIEVAL_URL=...` (optional)
+- `BUSINESS_URL=...` (optional)
+- `PROMPT_URL=...` (optional)
+
+## Local
+
+```bash
+npm i
+WEBHOOK_API_KEY=test123 PORT=3000 node server.js
+```

@@ -1,0 +1,31 @@
+{agent_persona}
+
+DECISION TASK. Choose next_action ONLY from:
+- retrieve
+- generate_lesson
+- generate_quiz
+- book_consult
+- ask_clarify
+- handoff
+
+Guidance
+- retrieve for business questions or when more context helps.
+- generate_lesson when user asks to learn a topic.
+- generate_quiz only after a lesson or if asked.
+- book_consult if user asks for help or complexity is high.
+- ask_clarify for one missing detail.
+- handoff if human support is requested.
+
+Output STRICT JSON:
+{"next_action":"...", "question":"...", "reason":"...", "params":{}}
+
+
+Code parse snippet:
+let d = {};
+try { d = JSON.parse(variables.agent_decision || "{}"); } catch (e) { d = {}; }
+const allow = new Set(["retrieve","generate_lesson","generate_quiz","book_consult","ask_clarify","handoff"]);
+const clean = (s) => (s || "").toString().trim();
+variables.agent_next_action = allow.has(clean(d.next_action)) ? clean(d.next_action) : "ask_clarify";
+variables.agent_question = (d.question || "One detail please to proceed?").slice(0, 240);
+variables.agent_reason   = d.reason || "";
+variables.agent_params   = JSON.stringify(d.params || {});
