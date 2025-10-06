@@ -46,3 +46,4 @@ voiceflow/screenshots/**
 *.tgz
 novain-platform/webhook/Pinecone.txt
 backup-do not commit/
+.env
