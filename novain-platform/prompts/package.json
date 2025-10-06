@@ -1,0 +1,10 @@
+{
+  "name": "vf-agent-prompt-engineer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": "20.x" },
+  "dependencies": { "express": "^5.1.0" }
+}
