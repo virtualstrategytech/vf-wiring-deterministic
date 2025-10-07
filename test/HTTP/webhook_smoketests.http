@@ -1,37 +1,37 @@
-### Health
+﻿### Health
 GET https://vf-webhook-service.onrender.com/health
 
 ### Ping
 POST https://vf-webhook-service.onrender.com/webhook
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 Content-Type: application/json
 
 { "action":"ping", "question":"hello", "name":"Test" }
 
 ### Retrieve
 POST https://vf-webhook-service.onrender.com/webhook
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 Content-Type: application/json
 
 { "action":"retrieve", "question":"What is SPQA?", "tenantId":"default", "topK": 6 }
 
 ### Generate Lesson
 POST https://vf-webhook-service.onrender.com/webhook
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 Content-Type: application/json
 
 { "action":"generate_lesson", "question":"Teach me SPQA basics", "tenantId":"default" }
 
 ### Generate Quiz
 POST https://vf-webhook-service.onrender.com/webhook
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 Content-Type: application/json
 
 { "action":"generate_quiz", "question":"Quiz me on SPQA", "tenantId":"default" }
 
 ### Export Lesson (data URL)
 POST https://vf-webhook-service.onrender.com/webhook
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 Content-Type: application/json
 
 {
@@ -41,3 +41,4 @@ Content-Type: application/json
   "title":"SPQA Lesson",
   "lesson":{"content":"Example"}
 }
+

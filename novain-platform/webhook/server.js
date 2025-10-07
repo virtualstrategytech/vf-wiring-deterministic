@@ -1,11 +1,11 @@
-// server.js
+﻿// server.js
 // Minimal webhook router for Voiceflow → Render microservices
 
 const express = require('express');
 const app = express();
 
 // ---- Config (env vars)
-const API_KEY       = process.env.WEBHOOK_API_KEY || 'test123';
+const API_KEY       = process.env.WEBHOOK_API_KEY || '%%WEBHOOK_API_KEY%%';
 const PORT          = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL  = process.env.BUSINESS_URL  || ''; // (future)
@@ -257,3 +257,4 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+

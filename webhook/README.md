@@ -1,4 +1,4 @@
-# Voiceflow Webhook (Deterministic MVP)
+﻿# Voiceflow Webhook (Deterministic MVP)
 
 ## Endpoints
 
@@ -14,7 +14,7 @@
 ## Env
 
 - `PORT=3000`
-- `WEBHOOK_API_KEY=test123`
+- `WEBHOOK_API_KEY=%%WEBHOOK_API_KEY%%`
 - `RETRIEVAL_URL=...` (optional)
 - `BUSINESS_URL=...` (optional)
 - `PROMPT_URL=...` (optional)
@@ -23,5 +23,6 @@
 
 ```bash
 npm i
-WEBHOOK_API_KEY=test123 PORT=3000 node server.js
+WEBHOOK_API_KEY=%%WEBHOOK_API_KEY%% PORT=3000 node server.js
 ```
+

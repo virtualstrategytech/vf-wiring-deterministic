@@ -1,6 +1,6 @@
-POST https://vf-webhook-service.onrender.com/webhook
+﻿POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: %%WEBHOOK_API_KEY%%
 
 {
   "action":"export_lesson",
@@ -15,3 +15,4 @@ x-api-key: test123
     "references":[{"label":"VST Playbook: Discovery","url":"https://example.com"}]
   }
 }
+

@@ -1,16 +1,16 @@
-<#
+﻿<#
 Saves a lesson markdown file using your Render webhook service.
 - First option calls /webhook with action=export_lesson and receives a data: URL (good for quick checks).
 - Second option calls /export_lesson_file and streams the file directly to disk (preferred).
 
 USAGE:
-  ./export_lesson.ps1 -BaseUrl https://vf-webhook-service.onrender.com -ApiKey test123 `
+  ./export_lesson.ps1 -BaseUrl https://vf-webhook-service.onrender.com -ApiKey %%WEBHOOK_API_KEY%% `
     -Title "SPQA Lesson" -OutFile "$env:USERPROFILE\Desktop\lesson.md"
 #>
 
 param(
   [string]$BaseUrl = "https://vf-webhook-service.onrender.com",
-  [string]$ApiKey  = "test123",
+  [string]$ApiKey  = "%%WEBHOOK_API_KEY%%",
   [string]$Title   = "SPQA Lesson",
   [string]$OutFile = "$env:USERPROFILE\Desktop\lesson.md"
 )
@@ -75,3 +75,4 @@ catch {
   Write-Error $_.Exception.Message
   exit 1
 }
+

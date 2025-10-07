@@ -1,4 +1,4 @@
-// webhook/server.js
+﻿// webhook/server.js
 // Minimal Voiceflow webhook with retrieve, generate_lesson, generate_quiz, exports.
 
 const express = require("express");
@@ -7,7 +7,7 @@ const cors = require("cors");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.WEBHOOK_API_KEY || "test123";
+const API_KEY = process.env.WEBHOOK_API_KEY || "%%WEBHOOK_API_KEY%%";
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ""; // e.g. https://.../v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ""; // e.g. https://... business service
 const PROMPT_URL = process.env.PROMPT_URL || ""; // e.g. https://... prompt/quiz service
@@ -258,3 +258,4 @@ app.post("/export_lesson_file", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Webhook listening on :${PORT}`));
+
