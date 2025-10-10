@@ -1,6 +1,6 @@
-POST https://vf-webhook-service.onrender.com/webhook
+﻿POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action":"retrieve",
@@ -8,3 +8,4 @@ x-api-key: test123
   "tenantId":"default",
   "topK": 6
 }
+

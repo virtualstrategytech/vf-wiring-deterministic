@@ -1,10 +1,10 @@
-### Health
+﻿### Health
 GET https://vf-webhook-service.onrender.com/health
 
 ### Ping
 POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action": "ping",
@@ -15,7 +15,7 @@ x-api-key: test123
 ### Retrieve
 POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action": "retrieve",
@@ -27,7 +27,7 @@ x-api-key: test123
 ### Generate lesson
 POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action": "generate_lesson",
@@ -38,7 +38,7 @@ x-api-key: test123
 ### Generate quiz
 POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action": "generate_quiz",
@@ -49,17 +49,18 @@ x-api-key: test123
 ### Export lesson (markdown data URL)
 POST https://vf-webhook-service.onrender.com/webhook
 Content-Type: application/json
-x-api-key: test123
+x-api-key: {WEBHOOK_KEY}
 
 {
   "action": "export_lesson",
   "format": "markdown",
   "title": "SPQA Lesson",
   "lesson": {
-    "meta": { "question": "Churn is up—what should we do?" },
+    "meta": { "question": "Churn is upâ€”what should we do?" },
     "objectives": ["Separate symptoms from causes","Define success criteria"],
-    "content": "SPQA = Situation → Problem → Questions → Actions.",
+    "content": "SPQA = Situation â†’ Problem â†’ Questions â†’ Actions.",
     "keyTakeaways": ["Ask better questions","Tie actions to metrics"],
     "references": [{"label":"Example","url":"https://example.com"}]
   }
 }
+
