@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# node
+node_modules/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# logs & runtime
+/logs/
+/novain-platform/webhook/logs/
+*.log
+
+# backups and editor cruft
+*.bak
+*.tmp
+.vscode/
+.DS_Store
+Thumbs.db
+
+# other
+server.js.bak
+package-lock.json
+npm-debug.log
