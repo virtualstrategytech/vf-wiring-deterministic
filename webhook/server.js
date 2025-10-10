@@ -1,4 +1,4 @@
-// webhook/server.js
+﻿// webhook/server.js
 // Minimal Voiceflow webhook with retrieve, generate_lesson, generate_quiz, exports.
 
 const express = require("express");
@@ -7,7 +7,7 @@ const cors = require("cors");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.WEBHOOK_API_KEY || "test123";
+const API_KEY = process.env.WEBHOOK_API_KEY || "<REDACTED>";
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ""; // e.g. https://.../v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ""; // e.g. https://... business service
 const PROMPT_URL = process.env.PROMPT_URL || ""; // e.g. https://... prompt/quiz service
@@ -138,7 +138,7 @@ app.post("/webhook", async (req, res) => {
             "Identify next best action",
           ],
           content:
-            "Use SPQA: Situation → Problem → Questions → Actions. Start by restating the situation in plain language, isolate one measurable problem, list the 3 top clarifying questions, and choose one 48-hour action.",
+            "Use SPQA: Situation â†’ Problem â†’ Questions â†’ Actions. Start by restating the situation in plain language, isolate one measurable problem, list the 3 top clarifying questions, and choose one 48-hour action.",
           keyTakeaways: [
             "Answer the right questions",
             "Tie actions to metrics",
@@ -258,3 +258,4 @@ app.post("/export_lesson_file", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Webhook listening on :${PORT}`));
+
