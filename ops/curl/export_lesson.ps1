@@ -4,22 +4,20 @@ Saves a lesson markdown file using your Render webhook service.
 - Second option calls /export_lesson_file and streams the file directly to disk (preferred).
 
 USAGE:
-  ./export_lesson.ps1 -BaseUrl https://vf-webhook-service.onrender.com -ApiKey <REDACTED> `
+  ./export_lesson.ps1 -BaseUrl https://vf-webhook-service.onrender.com -ApiKey {WEBHOOK_KEY} `
     -Title "SPQA Lesson" -OutFile "$env:USERPROFILE\Desktop\lesson.md"
 #>
 
 param(
   [string]$BaseUrl = "https://vf-webhook-service.onrender.com",
-  [string]$ApiKey  = "<REDACTED>",
+  [string]$ApiKey  = "{WEBHOOK_KEY}",
   [string]$Title   = "SPQA Lesson",
   [string]$OutFile = "$env:USERPROFILE\Desktop\lesson.md"
 )
 
-# Example lesson payload (adjust freely)
 $lesson = @{
-  meta         = @{ question = "Churn is up â€” what should we do?" }
   objectives   = @("Separate symptoms from root problems","Define precise success criteria","Prioritize decisions & risks")
-  content      = "Use SPQA: Situation â†’ Problem â†’ Questions â†’ Actions. Start by restating the situation, isolate the real problem, list your top 3 questions to reduce uncertainty, then pick 1â€“2 actions for the next 48 hours."
+  content      = "Use SPQA: Situation -> Problem -> Questions -> Actions. Start by restating the situation, isolate the real problem, list your top 3 questions to reduce uncertainty, then pick 1-2 actions for the next 48 hours."
   keyTakeaways = @("Answer the right questions","Tie actions to metrics","Take a 48h step")
   references   = @(@{ label="VST Playbook: Discovery"; url="https://example.com/spqa" })
 } | ConvertTo-Json -Depth 8

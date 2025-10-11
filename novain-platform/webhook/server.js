@@ -5,11 +5,11 @@ const express = require('express');
 const app = express();
 
 // ---- Config (env vars)
-const API_KEY = process.env.WEBHOOK_API_KEY || '<REDACTED>';
+const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
 const PORT = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
-const PROMPT_URL = process.env.PROMPT_URL || ''; // (future)
+const PROMPT_URL = process.env.PROMPT_URL || ''; // // e.g. https://vf-prompt-service.onrender.com
 
 console.log('WEBHOOK_API_KEY present:', !!API_KEY, 'len=', (API_KEY || '').length);
 console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
@@ -354,4 +354,3 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
