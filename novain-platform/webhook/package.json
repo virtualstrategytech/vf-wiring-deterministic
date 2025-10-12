@@ -1,17 +1,20 @@
-﻿{
-    "name":  "vf-webhook-service",
-    "version":  "1.0.0",
-    "private":  true,
-    "main":  "server.js",
-    "type":  "commonjs",
-    "scripts":  {
-                    "start":  "node server.js",
-                    "test":  "echo \"no tests\""
-                },
-    "engines":  {
-                    "node":  "20.x"
-                },
-    "dependencies":  {
-                         "express":  "^5.1.0"
-                     }
+{
+    "name": "vf-webhook-service",
+    "version": "1.0.0",
+    "private": true,
+    "main": "server.js",
+    "type": "commonjs",
+    "scripts": {
+        "start": "node server.js",
+        "test": "echo \"no tests\""
+    },
+    "engines": {
+        "node": "20.x"
+    },
+    "dependencies": {
+        "express": "^5.1.0"
+    },
+    "devDependencies": {
+        "eslint": "^9.37.0"
+    }
 }
