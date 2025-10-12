@@ -214,3 +214,8 @@ __marimo__/
 # other
 server.js.bak
 npm-debug.log
+# local backups/logs
+*.bak
+powershell-session.log
+repo-scan-report.txt
+novain-platform/webhook/ngrok_recovery_codes.txt
