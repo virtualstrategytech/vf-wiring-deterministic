@@ -221,3 +221,4 @@ repo-scan-report.txt
 novain-platform/webhook/ngrok_recovery_codes.txt
 # local env
 novain-platform/webhook/.env
+'n# local achive'nlocal_backups/
