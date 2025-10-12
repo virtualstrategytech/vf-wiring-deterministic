@@ -219,3 +219,5 @@ npm-debug.log
 powershell-session.log
 repo-scan-report.txt
 novain-platform/webhook/ngrok_recovery_codes.txt
+# local env
+novain-platform/webhook/.env

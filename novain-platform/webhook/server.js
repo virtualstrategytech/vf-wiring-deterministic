@@ -11,6 +11,22 @@ const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrie
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
 const PROMPT_URL = process.env.PROMPT_URL || ''; // // e.g. https://vf-prompt-service.onrender.com
 
+let fetchFn = globalThis.fetch;
+if (!fetchFn) {
+  try {
+    const nf = require('node-fetch'); // install: npm i node-fetch@2 (or v3)
+    fetchFn = nf;
+    globalThis.fetch = fetchFn;
+  } catch (err) {
+    console.warn('fetch not available. Install node 18+ or node-fetch@2', err);
+  }
+}
+// Minimal runtime safety notice (no secret printed)
+if (!API_KEY) {
+  console.warn(
+    'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
+  );
+}
 console.log('WEBHOOK_API_KEY present:', !!API_KEY, 'len=', (API_KEY || '').length);
 console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
 
@@ -79,7 +95,7 @@ app.post('/export_lesson_file', (req, res) => {
     }
 
     const md = makeMarkdownFromLesson(title, lesson);
-    const safe = title.replace(/[^a-z0-9_\-]+/gi, '_unused').slice(0, 64) || 'lesson';
+    const safe = title.replace(/[^a-z0-9_-]+/gi, '_unused').slice(0, 64) || 'lesson';
     res.set('Content-Type', 'text/markdown; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="${safe}.md"`);
 
@@ -105,8 +121,7 @@ app.post('/webhook', async (req, res) => {
 
   // Safely coerce question (handles non-strings so .trim() never throws)
   const qRaw = (req.body && (req.body.question ?? req.body.message)) ?? '';
-  const question = typeof qRaw === 'string' ? qRaw : JSON.stringify(qRaw);
-
+  const question = String(qRaw);
   console.log(`webhook: action=${action} name=${name} tenantId=${tenantId}`);
 
   try {

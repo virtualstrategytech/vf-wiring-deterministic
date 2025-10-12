@@ -10,7 +10,7 @@ app.get('/', (_req, res) => res.status(200).send('ok'));
 
 // Combined: teach + quiz
 app.post('/v1/teach-and-quiz', (req, res) => {
-const question = String(req.body?.question ?? '');
+void String(req.body?.question ?? '');
   const tenantId = String(req.body?.tenantId ?? 'default');
 
   const promptLesson = {
@@ -63,6 +63,8 @@ const question = String(req.body?.question ?? '');
 
 // Quiz-only (optional)
 app.post('/v1/quizzes/generate', (req, res) => {
+void String(req.body?.question ?? '');
+  const tenantId = String(req.body?.tenantId ?? 'default');
 
   const quiz = {
     mcq: [
@@ -85,8 +87,5 @@ app.post('/v1/quizzes/generate', (req, res) => {
 app.listen(process.env.PORT || 3000, () =>
   console.log('prompt-coach up on', process.env.PORT || 3000)
 );
-
-
-
 
 

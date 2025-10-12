@@ -81,8 +81,7 @@ app.post('/webhook', async (req, res) => {
   const topK = Number(req.body?.topK) || 6;
 
   const qRaw = (req.body && (req.body.question ?? req.body.message)) ?? '';
-  const question = typeof qRaw === 'string' ? qRaw : JSON.stringify(qRaw);
-
+  const question = String(qRaw);
   try {
     if (action === 'ping') {
       return res.status(200).json({
@@ -249,7 +248,7 @@ app.post('/export_lesson_file', async (req, res) => {
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${title.replace(/[^\w\-]+/g, '_')}.md"`
+      `attachment; filename="${title.replace(/[^\w-]+/g, '_')}.md"`
     );
     return res.status(200).send(md);
   } catch (e) {

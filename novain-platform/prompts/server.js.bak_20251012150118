@@ -63,6 +63,7 @@ const question = String(req.body?.question ?? '');
 
 // Quiz-only (optional)
 app.post('/v1/quizzes/generate', (req, res) => {
+  const tenantId = String(req.body?.tenantId ?? 'default');
 
   const quiz = {
     mcq: [
