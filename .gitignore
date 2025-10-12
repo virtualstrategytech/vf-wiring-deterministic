@@ -222,3 +222,4 @@ novain-platform/webhook/ngrok_recovery_codes.txt
 # local env
 novain-platform/webhook/.env
 'n# local achive'nlocal_backups/
+'n# allow checked-in example env'n!.env.example
