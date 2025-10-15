@@ -42,6 +42,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// new safe logging:
+if (process.env.WEBHOOK_API_KEY) {
+  console.info('WEBHOOK_API_KEY is set (not printed)');
+} else {
+  console.warn('WEBHOOK_API_KEY is not set');
+}
+
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
 function makeMarkdownFromLesson(title, lesson) {

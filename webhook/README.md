@@ -28,10 +28,35 @@
 
 ## Local
 
-```bash
+bash
 npm i
 WEBHOOK_API_KEY={WEBHOOK_KEY}
-```
 
+novain-platform/webhook — Local dev & Render deploy notes
 
+Environment (local / Render)
 
+- WEBHOOK_API_KEY — secret key (do NOT commit real secret). Example: test123 for local testing.
+- PORT — optional locally (Render supplies PORT).
+- PROMPT_URL — full URL to prompts service (http://localhost:4001 for local prompts).
+- RETRIEVAL_URL — optional retrieval service URL.
+
+Local start
+
+1. Copy example env: cp env/.example.env .env (or edit .env)
+2. npm install
+3. WEBHOOK_API_KEY=test123 PORT=3000 PROMPT_URL=http://localhost:4001 node server.js
+
+Render settings (paste into Render UI)
+
+- Root Directory: novain-platform/webhook
+- Build Command: npm install
+- Start Command: node server.js
+- Environment:
+  - WEBHOOK_API_KEY = <your_key>
+  - PROMPT_URL = https://<prompts-service>.onrender.com
+  - RETRIEVAL_URL = https://<retrieval-service>.onrender.com
+
+Security
+
+- Do not commit real secrets. Ensure .env is listed in .gitignore.

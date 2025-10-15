@@ -2,7 +2,8 @@ param(
   [string]$ApiKey = 'test123',
   [int]$WebhookPort = 3000,
   [int]$PromptsPort = 4001,
-  [int]$MockBizPort = 4002
+  [int]$MockBizPort = 4002,
+  [string]$DeployedWebhookUrl = ''  # NEW: optional public URL (https://your-service.onrender.com)
 )
 
 # ensure logs dir exists
@@ -20,6 +21,16 @@ if (-not (Test-Path .\.env)) {
   }
 }
 
+# If a deployed URL is provided, skip starting local webhook and run checks against it.
+if ($DeployedWebhookUrl -ne '') {
+  Write-Output "Testing deployed webhook at $DeployedWebhookUrl"
+  $base = $DeployedWebhookUrl.TrimEnd('/')
+  # health endpoint (some deployments may not expose /health publicly)
+  try { $h = Invoke-RestMethod -Uri "$base/health" -Method Get -Headers @{ 'x-api-key' = $ApiKey } -TimeoutSec 10; Write-Output "health -> $h" } catch { Write-Output "health failed: $_" }
+  PostJson "$base/webhook" @{ action='ping'; question='hello'; name='Verifier'; tenantId='default' } | Out-File -FilePath .\logs\webhook_ping_deployed.json -Force
+  Write-Output 'Deployed tests saved to .\logs\*'
+  return
+}
 # Start services in new PowerShell windows
 $webhookCmd = "Set-Location -LiteralPath 'novain-platform/webhook'; `$env:WEBHOOK_API_KEY='$ApiKey'; `$env:PORT='$WebhookPort'; `$env:RETRIEVAL_URL='http://localhost:$MockBizPort/v1/retrieve'; `$env:PROMPT_URL='http://localhost:$PromptsPort'; node server.js"
 Start-Process -FilePath pwsh -ArgumentList '-NoExit','-Command',$webhookCmd -WorkingDirectory (Get-Location).Path

@@ -30,6 +30,13 @@ if (!API_KEY) {
 console.log('WEBHOOK_API_KEY present:', !!API_KEY, 'len=', (API_KEY || '').length);
 console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
 
+// new safe logging:
+if (process.env.WEBHOOK_API_KEY) {
+  console.info('WEBHOOK_API_KEY is set (not printed)');
+} else {
+  console.warn('WEBHOOK_API_KEY is not set');
+}
+
 // ---- Middleware (body parser + JSON error handler)
 app.use(
   express.json({
