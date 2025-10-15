@@ -228,3 +228,8 @@ novain-platform/webhook/.env
 .env
 logs/
 
+
+# local dev
+.env
+logs/
+
