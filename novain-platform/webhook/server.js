@@ -3,6 +3,9 @@
 
 const express = require('express');
 const app = express();
+const cors = require('cors');
+// add crypto for request-id
+const _crypto = require('crypto');
 
 // ---- Config (env vars)
 const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
@@ -21,21 +24,17 @@ if (!fetchFn) {
     console.warn('fetch not available. Install node 18+ or node-fetch@2', err);
   }
 }
+
 // Minimal runtime safety notice (no secret printed)
 if (!API_KEY) {
   console.warn(
     'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
   );
 }
-console.log('WEBHOOK_API_KEY present:', !!API_KEY, 'len=', (API_KEY || '').length);
 console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
-
-// new safe logging:
-if (process.env.WEBHOOK_API_KEY) {
-  console.info('WEBHOOK_API_KEY is set (not printed)');
-} else {
-  console.warn('WEBHOOK_API_KEY is not set');
-}
+console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
+// CORS (optional; enable if browser/iframe clients will call the webhook)
+app.use(cors());
 
 // ---- Middleware (body parser + JSON error handler)
 app.use(
@@ -46,6 +45,22 @@ app.use(
     },
   })
 );
+
+// Insert request-id propagation middleware (after body parser or before routes)
+app.use((req, res, next) => {
+  const incoming = req.get('x-request-id');
+  const rid =
+    incoming ||
+    (_crypto.randomUUID
+      ? _crypto.randomUUID()
+      : _crypto
+          .createHash('sha1')
+          .update(String(Date.now()) + Math.random())
+          .digest('hex'));
+  req.id = rid;
+  res.setHeader('x-request-id', rid);
+  next();
+});
 
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {

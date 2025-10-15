@@ -6,6 +6,44 @@ param(
   [string]$DeployedWebhookUrl = ''  # NEW: optional public URL (https://your-service.onrender.com)
 )
 
+
+# ensure logs dir exists
+New-Item -ItemType Directory -Path (Join-Path (Get-Location) 'logs') -Force | Out-Null
+
+Write-Output 'Running webhook verification from: ' + (Get-Location).Path
+
+# Ensure local .env exists (safe copy from example)
+if (-not (Test-Path .\.env)) {
+  if (Test-Path '.\env\.example.env') {
+    Copy-Item '.\env\.example.env' '.\.env' -Force
+    Write-Output 'Copied env/.example.env -> .env (edit .env if needed)'
+  } else {
+    Write-Output 'No env/.example.env found; continuing (you can set envs inline)'
+  }
+}
+
+# define helper before any calls
+function PostJson($uri, $body) {
+  try {
+    $resp = Invoke-RestMethod -Uri $uri -Method Post -Headers @{ 'x-api-key' = $ApiKey } -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 6) -TimeoutSec 20
+    Write-Output "POST $uri -> OK"
+    return ($resp | ConvertTo-Json -Depth 6)
+  } catch {
+    Write-Output "POST $uri -> ERROR: $_"
+    return $null
+  }
+}
+
+# If a deployed URL is provided, skip starting local webhook and run checks against it.
+if ($DeployedWebhookUrl -ne '') {
+  Write-Output "Testing deployed webhook at $DeployedWebhookUrl"
+  $base = $DeployedWebhookUrl.TrimEnd('/')
+  # health endpoint (some deployments may not expose /health publicly)
+  try { $h = Invoke-RestMethod -Uri "$base/health" -Method Get -Headers @{ 'x-api-key' = $ApiKey } -TimeoutSec 10; Write-Output "health -> $h" } catch { Write-Output "health failed: $_" }
+  PostJson "$base/webhook" @{ action='ping'; question='hello'; name='Verifier'; tenantId='default' } | Out-File -FilePath .\logs\webhook_ping_deployed.json -Force
+  Write-Output 'Deployed tests saved to .\logs\*'
+  return
+}
 # ensure logs dir exists
 New-Item -ItemType Directory -Path (Join-Path (Get-Location) 'logs') -Force | Out-Null
 
