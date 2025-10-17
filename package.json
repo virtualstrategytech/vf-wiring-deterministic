@@ -1,0 +1,29 @@
+{
+  "name": "vf-wiring-deterministic",
+  "version": "1.0.0",
+  "description": "A project to determine wiring configurations.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --detectOpenHandles --globalSetup=tests/globalSetup.js --globalTeardown=tests/globalTeardown.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "axios": "^1.12.2",
+    "jest": "^27.5.1"
+  },
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/virtualstrategytech/vf-wiring-deterministic.git"
+  },
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/virtualstrategytech/vf-wiring-deterministic/issues"
+  },
+  "homepage": "https://github.com/virtualstrategytech/vf-wiring-deterministic#readme"
+}
