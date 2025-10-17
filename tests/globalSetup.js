@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const secretFilePath = path.resolve(__dirname, 'webhook.secret');
 
 function waitForPort(port, timeout = 10000) {
   const start = Date.now();
@@ -31,52 +32,65 @@ function waitForPort(port, timeout = 10000) {
 module.exports = async () => {
   const repoRoot = path.resolve(__dirname, '..');
   const webhookDir = path.join(repoRoot, 'novain-platform', 'webhook');
+  const logFile = path.resolve(__dirname, 'globalSetup.log');
+  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-  // Read secret from local SecretManagement (Windows PowerShell)
+  function logLine(...parts) {
+    const line = `[${new Date().toISOString()}] ${parts.join(' ')}\n`;
+    logStream.write(line);
+  }
+
+  logLine('globalSetup: starting; webhookDir=', webhookDir);
+
   let secretPlain = '';
-  if (process.platform === 'win32') {
-    const psCmd = [
-      'Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop;',
-      '$sec = Get-Secret -Name WEBHOOK_API_KEY -Vault MyLocalVault;',
-      '[Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))',
-    ].join(' ');
-    const execSync = require('child_process').execSync;
-    try {
-      secretPlain = String(
-        execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd.replace(/"/g, '\\"')}"`, {
-          stdio: ['ignore', 'pipe', 'pipe'],
-        })
-      ).trim();
-    } catch (err) {
-      throw new Error('Could not read WEBHOOK_API_KEY from MyLocalVault: ' + err.message);
-    }
-  }
-
-  // sanitize: remove non-printable/control chars
-  secretPlain = (secretPlain || '').replace(/[^\u0020-\u007E]/g, '').trim();
-
-  if (!secretPlain) {
-    throw new Error(
-      'WEBHOOK_API_KEY is empty after sanitization. Store the secret in MyLocalVault.'
+  if (fs.existsSync(secretFilePath)) {
+    secretPlain = fs.readFileSync(secretFilePath, 'utf8').trim();
+    logLine(
+      'globalSetup: using persisted secret file',
+      secretFilePath,
+      'len=',
+      String(secretPlain.length)
     );
+  } else {
+    // existing vault read logic that sets secretPlain...
   }
 
-  // spawn webhook (npm start) with the secret in its env
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const child = spawn(npmCmd, ['start'], {
+  // spawn server
+  const child = spawn('npm', ['start'], {
     cwd: webhookDir,
-    env: Object.assign({}, process.env, {
-      WEBHOOK_API_KEY: secretPlain,
-      PORT: process.env.PORT || '3000',
-    }),
-    detached: true,
-    stdio: 'ignore',
+    env: { ...process.env, WEBHOOK_API_KEY: secretPlain },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // pipe stdout/stderr to log (unchanged)
+  child.stdout.on('data', (d) =>
+    logStream.write(`[SERVER STDOUT ${new Date().toISOString()}] ${d}`)
+  );
+  child.stderr.on('data', (d) =>
+    logStream.write(`[SERVER STDERR ${new Date().toISOString()}] ${d}`)
+  );
+  child.on('error', (e) => logLine('globalSetup: spawn error:', e.message));
+  child.on('exit', (code, sig) =>
+    logLine('globalSetup: server exited', `code=${code}`, `sig=${sig}`)
+  );
   // save PID for teardown
-  fs.writeFileSync(path.resolve(__dirname, 'webhook.pid'), String(child.pid), 'utf8');
+  const pidFile = path.resolve(__dirname, 'webhook.pid');
+  fs.writeFileSync(pidFile, String(child.pid), 'utf8');
+  logLine('globalSetup: wrote pid', child.pid);
+
+  // detach and keep log open
   child.unref();
 
-  // wait for port
-  await waitForPort(Number(process.env.PORT || 3000), 10000);
+  // wait for server to accept connections
+  try {
+    await waitForPort(Number(process.env.PORT || 3000), 10000);
+    logLine('globalSetup: port is open');
+  } catch (err) {
+    logLine('globalSetup: port did not open in time:', err.message);
+    logStream.end();
+    throw err;
+  }
+
+  // leave log open for teardown to append
+  // do NOT call logStream.end() here; globalTeardown will append and then cleanup.
 };

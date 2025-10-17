@@ -230,4 +230,5 @@ logs/
 # local dev
 .env
 logs/
-
+# local tests secret (do not commit)
+tests/webhook.secret

@@ -4,7 +4,8 @@
   "description": "A project to determine wiring configurations.",
   "main": "index.js",
   "scripts": {
-    "test": "jest --detectOpenHandles --globalSetup=tests/globalSetup.js --globalTeardown=tests/globalTeardown.js"
+    "pretest": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (-not $env:CI) { & .\\scripts\\sync_secret.ps1 }\"",
+    "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js"
   },
   "keywords": [],
   "author": "",
