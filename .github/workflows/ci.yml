@@ -1,0 +1,28 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [ main, feat/wiring-agent ]
+  pull_request:
+    branches: [ main, feat/wiring-agent ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test --silent
