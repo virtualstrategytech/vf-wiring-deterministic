@@ -1,28 +1,43 @@
 ﻿name: CI
 
-on:
-  push:
-    branches: [ main, feat/wiring-agent ]
-  pull_request:
-    branches: [ main, feat/wiring-agent ]
+on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      CI: 'true'
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+    strategy:
+      matrix:
+        node-version: [18.x]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      # Inject the secret into the runner environment only for pushes or same-repo PRs.
+      # Avoids evaluating secrets for fork PRs while still making the secret available
+      # to the subsequent Run tests step when allowed.
+      - name: Inject WEBHOOK_API_KEY for same-repo runs
+        if: ${{ github.event_name != 'pull_request' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
+        run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+        shell: bash
+
       - name: Run tests
+        env:
+          CI: 'true'
         run: npm test --silent
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: tests/globalSetup.log
