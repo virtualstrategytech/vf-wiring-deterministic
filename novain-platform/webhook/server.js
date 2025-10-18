@@ -130,6 +130,33 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
+  const incomingKey = (req.get('x-api-key') || '').toString();
+  const incomingPrefix = incomingKey.slice(0, 6);
+  const crypto = require('crypto');
+  const incomingHash = incomingKey
+    ? crypto.createHash('sha256').update(incomingKey, 'utf8').digest('hex')
+    : '';
+  console.log(
+    'incoming x-api-key prefix:',
+    incomingPrefix,
+    'len=',
+    incomingKey.length,
+    'sha256=',
+    incomingHash
+  );
+
+  // server-side configured key (masked)
+  const serverKey = (API_KEY || '').toString();
+  const serverPrefix = serverKey.slice(0, 6);
+  const serverHash = serverKey
+    ? crypto.createHash('sha256').update(serverKey, 'utf8').digest('hex')
+    : '';
+  console.log('server key prefix:', serverPrefix, 'len=', serverKey.length, 'sha256=', serverHash);
+
+  if (incomingKey !== API_KEY) {
+    console.warn('unauthorized: key mismatch (masked shown above)');
+    return res.status(401).json({ ok: false, reply: 'unauthorized' });
+  }
   const key = req.get('x-api-key');
   if (key !== API_KEY) return res.status(401).json({ ok: false, reply: 'unauthorized' });
 
