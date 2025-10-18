@@ -331,7 +331,6 @@ app.post('/webhook', async (req, res) => {
         return res.status(500).json({ ok: false, reply: 'export_failed' });
       }
     }
-
     // ---- llm_elicit (LLM elicit / optimize)
     if (action === 'llm_elicit') {
       try {
@@ -371,6 +370,35 @@ app.post('/webhook', async (req, res) => {
         console.error('llm_elicit handler error:', _e);
         return res.status(502).json({ ok: false, reply: 'llm_elicit_failed' });
       }
+    }
+    // ---- invoke_component
+    if (action === 'invoke_component') {
+      const comp = String(req.body?.component || '').trim();
+      // base summary used by most component stubs
+      const summary = (question || '').toString().slice(0, 400);
+
+      // per-component behavior
+      if (comp === 'C_CaptureQuestion') {
+        const qLower = (question || '').toLowerCase();
+        const needs_clarify = qLower.includes('clarify') || qLower.includes('?');
+        const followup_question = needs_clarify ? 'Can you clarify what you mean by X?' : '';
+        return res.status(200).json({
+          ok: true,
+          summary,
+          needs_clarify,
+          followup_question,
+          raw: { component: comp, source: 'invoke_component_stub' },
+        });
+      }
+
+      // default invoke_component stub
+      return res.status(200).json({
+        ok: true,
+        summary,
+        needs_clarify: false,
+        followup_question: '',
+        raw: { component: comp || 'unknown', source: 'invoke_component_default' },
+      });
     }
 
     // unknown action
