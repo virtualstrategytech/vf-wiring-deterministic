@@ -1,4 +1,4 @@
-﻿const { spawn } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
