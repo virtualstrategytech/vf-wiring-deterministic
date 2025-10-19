@@ -25,12 +25,13 @@ if (!fetchFn) {
   }
 }
 
-// add fetchWithTimeout helper for robust downstream calls
-const fetchWithTimeout = async (url, opts = {}, ms = 10000) => {
+// add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
+const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
   try {
     opts.signal = controller.signal;
+    console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
     const r = await fetch(url, opts);
     const elapsed = Date.now() - start;
@@ -41,7 +42,7 @@ const fetchWithTimeout = async (url, opts = {}, ms = 10000) => {
       /* ignore */
     }
     console.info(`fetch ${opts.method || 'GET'} ${url} => ${r.status} (${elapsed}ms)`);
-    if (bodyText) console.debug('fetch response body:', bodyText.slice(0, 2000));
+    if (bodyText) console.info('fetch response body:', bodyText.slice(0, 8000));
     clearTimeout(id);
     return r;
   } catch (err) {
@@ -189,10 +190,6 @@ app.post('/webhook', async (req, res) => {
 
     // ---- retrieve
     if (action === 'retrieve') {
-      if (!RETRIEVAL_URL)
-        return res.status(400).json({ ok: false, reply: 'RETRIEVAL_URL not configured' });
-      if (!question.trim()) return res.status(400).json({ ok: false, reply: 'Missing `question`' });
-
       const r = await fetchWithTimeout(
         RETRIEVAL_URL,
         {
@@ -200,7 +197,7 @@ app.post('/webhook', async (req, res) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: question, topK, tenantId }),
         },
-        10000
+        45000
       );
 
       if (!r.ok) {
@@ -217,39 +214,6 @@ app.post('/webhook', async (req, res) => {
 
     // ---- generate_lesson (stub or remote)
     if (action === 'generate_lesson') {
-      if (!question.trim()) return res.status(400).json({ ok: false, reply: 'Missing `question`' });
-
-      // If BUSINESS_URL is configured, call the remote service
-      if (BUSINESS_URL) {
-        const r = await fetchWithTimeout(
-          `${BUSINESS_URL}/v1/lessons/generate`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, tenantId }),
-          },
-          15000
-        );
-
-        if (!r.ok) {
-          const text = await r.text().catch(() => '');
-          console.error('business generate error:', r.status, text);
-          return res.status(502).json({ ok: false, reply: 'business_generate_failed' });
-        }
-
-        const data = await r.json().catch(() => ({}));
-        const lesson = data.lesson || {};
-        const bulletCount = Array.isArray(lesson.keyTakeaways) ? lesson.keyTakeaways.length : 0;
-
-        return res.status(200).json({
-          ok: true,
-          reply: 'Lesson ready.',
-          lessonTitle: lesson.title || '',
-          bulletCount,
-          lesson,
-        });
-      }
-
       // Fallback: return a local deterministic stub so Voiceflow can run without BUSINESS_URL
       console.warn('BUSINESS_URL not configured — returning local generate_lesson stub');
       const stubLesson = {
