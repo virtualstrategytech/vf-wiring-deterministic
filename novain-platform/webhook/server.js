@@ -25,6 +25,32 @@ if (!fetchFn) {
   }
 }
 
+// add fetchWithTimeout helper for robust downstream calls
+const fetchWithTimeout = async (url, opts = {}, ms = 10000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    opts.signal = controller.signal;
+    const start = Date.now();
+    const r = await fetch(url, opts);
+    const elapsed = Date.now() - start;
+    let bodyText = '';
+    try {
+      bodyText = await r.clone().text();
+    } catch {
+      /* ignore */
+    }
+    console.info(`fetch ${opts.method || 'GET'} ${url} => ${r.status} (${elapsed}ms)`);
+    if (bodyText) console.debug('fetch response body:', bodyText.slice(0, 2000));
+    clearTimeout(id);
+    return r;
+  } catch (err) {
+    clearTimeout(id);
+    console.error(`fetch error ${url}:`, err && err.message ? err.message : err);
+    throw err;
+  }
+};
+
 // Minimal runtime safety notice (no secret printed)
 if (!API_KEY) {
   console.warn(
@@ -130,35 +156,16 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
-  const incomingKey = (req.get('x-api-key') || '').toString();
-  const incomingPrefix = incomingKey.slice(0, 6);
-  const crypto = require('crypto');
-  const incomingHash = incomingKey
-    ? crypto.createHash('sha256').update(incomingKey, 'utf8').digest('hex')
-    : '';
-  console.log(
-    'incoming x-api-key prefix:',
-    incomingPrefix,
-    'len=',
-    incomingKey.length,
-    'sha256=',
-    incomingHash
-  );
-
-  // server-side configured key (masked)
-  const serverKey = (API_KEY || '').toString();
-  const serverPrefix = serverKey.slice(0, 6);
-  const serverHash = serverKey
-    ? crypto.createHash('sha256').update(serverKey, 'utf8').digest('hex')
-    : '';
-  console.log('server key prefix:', serverPrefix, 'len=', serverKey.length, 'sha256=', serverHash);
-
-  if (incomingKey !== API_KEY) {
-    console.warn('unauthorized: key mismatch (masked shown above)');
+  // authenticate request
+  const key = (req.get('x-api-key') || '').toString();
+  if (key !== API_KEY) {
+    console.warn('unauthorized: key mismatch');
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
-  const key = req.get('x-api-key');
-  if (key !== API_KEY) return res.status(401).json({ ok: false, reply: 'unauthorized' });
+  {
+    // Replace verbose log with a masked/info-only message
+    console.info('WEBHOOK_API_KEY configured (masked)');
+  }
 
   // ✅ SAFE coercion
   const actionRaw = (req.body && req.body.action) ?? 'ping';
@@ -186,11 +193,15 @@ app.post('/webhook', async (req, res) => {
         return res.status(400).json({ ok: false, reply: 'RETRIEVAL_URL not configured' });
       if (!question.trim()) return res.status(400).json({ ok: false, reply: 'Missing `question`' });
 
-      const r = await fetch(RETRIEVAL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: question, topK, tenantId }),
-      });
+      const r = await fetchWithTimeout(
+        RETRIEVAL_URL,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: question, topK, tenantId }),
+        },
+        10000
+      );
 
       if (!r.ok) {
         const text = await r.text().catch(() => '');
@@ -204,34 +215,70 @@ app.post('/webhook', async (req, res) => {
       return res.status(200).json({ ok: true, reply, hitCount, tenantId });
     }
 
-    // ---- generate_lesson (stub)
+    // ---- generate_lesson (stub or remote)
     if (action === 'generate_lesson') {
-      if (!BUSINESS_URL)
-        return res.status(500).json({ ok: false, reply: 'BUSINESS_URL not configured' });
       if (!question.trim()) return res.status(400).json({ ok: false, reply: 'Missing `question`' });
 
-      const r = await fetch(`${BUSINESS_URL}/v1/lessons/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, tenantId }),
-      });
+      // If BUSINESS_URL is configured, call the remote service
+      if (BUSINESS_URL) {
+        const r = await fetchWithTimeout(
+          `${BUSINESS_URL}/v1/lessons/generate`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, tenantId }),
+          },
+          15000
+        );
 
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        console.error('business generate error:', r.status, text);
-        return res.status(502).json({ ok: false, reply: 'business_generate_failed' });
+        if (!r.ok) {
+          const text = await r.text().catch(() => '');
+          console.error('business generate error:', r.status, text);
+          return res.status(502).json({ ok: false, reply: 'business_generate_failed' });
+        }
+
+        const data = await r.json().catch(() => ({}));
+        const lesson = data.lesson || {};
+        const bulletCount = Array.isArray(lesson.keyTakeaways) ? lesson.keyTakeaways.length : 0;
+
+        return res.status(200).json({
+          ok: true,
+          reply: 'Lesson ready.',
+          lessonTitle: lesson.title || '',
+          bulletCount,
+          lesson,
+        });
       }
 
-      const data = await r.json().catch(() => ({}));
-      const lesson = data.lesson || {};
-      const bulletCount = Array.isArray(lesson.keyTakeaways) ? lesson.keyTakeaways.length : 0;
+      // Fallback: return a local deterministic stub so Voiceflow can run without BUSINESS_URL
+      console.warn('BUSINESS_URL not configured — returning local generate_lesson stub');
+      const stubLesson = {
+        title: `Stub Lesson: ${String(question).slice(0, 80)}`,
+        objectives: [
+          'Clarify the user intent and scope',
+          'Provide a concise lesson outline',
+          'Deliver actionable next steps',
+        ],
+        content: `This is a deterministic stub lesson generated for the question:\n\n"${question}"\n\nUse the business service for production content.`,
+        keyTakeaways: [
+          'Restate the problem concisely',
+          'List 2–3 actionable next steps',
+          'Suggest follow-up diagnostic questions',
+        ],
+        references: [],
+        meta: { question },
+      };
+
+      const bulletCount = Array.isArray(stubLesson.keyTakeaways)
+        ? stubLesson.keyTakeaways.length
+        : 0;
 
       return res.status(200).json({
         ok: true,
-        reply: 'Lesson ready.',
-        lessonTitle: lesson.title || '',
+        reply: 'Lesson (stub) ready.',
+        lessonTitle: stubLesson.title,
         bulletCount,
-        lesson,
+        lesson: stubLesson,
       });
     }
 
@@ -362,7 +409,7 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
-          const r = await fetch(PROMPT_URL, {
+          const r = await fetchWithTimeout(PROMPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),

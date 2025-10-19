@@ -231,3 +231,5 @@ logs/
 logs/
 # local tests secret (do not commit)
 tests/webhook.secret
+# ignore temporary markdown outputs
+tmp.md
