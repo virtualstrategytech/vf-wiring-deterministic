@@ -6,7 +6,10 @@ const app = express();
 const cors = require('cors');
 // add crypto for request-id
 const _crypto = require('crypto');
-
+// Production check
+const IS_PROD = process.env.NODE_ENV === 'production';
+// Debug flag to enable verbose webhook logs in non-production or when explicitly set
+const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
 // ---- Config (env vars)
 const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
 const PORT = process.env.PORT || 3000;
@@ -15,6 +18,7 @@ const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
 const PROMPT_URL = process.env.PROMPT_URL || ''; // // e.g. https://vf-prompt-service.onrender.com
 
 let fetchFn = globalThis.fetch;
+
 if (!fetchFn) {
   try {
     const nf = require('node-fetch'); // install: npm i node-fetch@2 (or v3)
@@ -31,7 +35,7 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const id = setTimeout(() => controller.abort(), ms);
   try {
     opts.signal = controller.signal;
-    console.info('fetch start', opts.method || 'GET', url);
+    if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
     const r = await fetch(url, opts);
     const elapsed = Date.now() - start;
@@ -41,8 +45,10 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     } catch {
       /* ignore */
     }
-    console.info(`fetch ${opts.method || 'GET'} ${url} => ${r.status} (${elapsed}ms)`);
-    if (bodyText) console.info('fetch response body:', bodyText.slice(0, 8000));
+    if (!IS_PROD || DEBUG_WEBHOOK) {
+      console.info(`fetch ${opts.method || 'GET'} ${url} => ${r.status} (${elapsed}ms)`);
+      if (bodyText) console.info('fetch response body:', bodyText.slice(0, 8000));
+    }
     clearTimeout(id);
     return r;
   } catch (err) {
@@ -53,13 +59,21 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
 };
 
 // Minimal runtime safety notice (no secret printed)
-if (!API_KEY) {
+if (!API_KEY && !IS_PROD) {
   console.warn(
     'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
   );
 }
-console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
-console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
+// Gate presence logs behind DEBUG_WEBHOOK in non-production to avoid leaking
+// configuration truthiness in production logs. Developers can enable DEBUG_WEBHOOK=true
+// when debugging locally to see these flags.
+if (!IS_PROD && DEBUG_WEBHOOK) {
+  console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
+  console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
+  // log presence only (true/false) — never print the actual key value
+  console.info('WEBHOOK_API_KEY present:', !!API_KEY);
+}
+
 // CORS (optional; enable if browser/iframe clients will call the webhook)
 app.use(cors());
 
@@ -164,8 +178,8 @@ app.post('/webhook', async (req, res) => {
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
   {
-    // Replace verbose log with a masked/info-only message
-    console.info('WEBHOOK_API_KEY configured (masked)');
+    // (per-request key log removed for production)
+    // ...existing code...
   }
 
   // ✅ SAFE coercion
@@ -190,6 +204,10 @@ app.post('/webhook', async (req, res) => {
 
     // ---- retrieve
     if (action === 'retrieve') {
+      if (!RETRIEVAL_URL) {
+        // explicit controlled error when retrieval not configured
+        return res.status(400).json({ ok: false, reply: 'RETRIEVAL_URL_not_configured' });
+      }
       const r = await fetchWithTimeout(
         RETRIEVAL_URL,
         {
@@ -214,8 +232,38 @@ app.post('/webhook', async (req, res) => {
 
     // ---- generate_lesson (stub or remote)
     if (action === 'generate_lesson') {
-      // Fallback: return a local deterministic stub so Voiceflow can run without BUSINESS_URL
-      console.warn('BUSINESS_URL not configured — returning local generate_lesson stub');
+      if (BUSINESS_URL) {
+        try {
+          const r = await fetchWithTimeout(
+            `${BUSINESS_URL.replace(/\/$/, '')}/v1/lessons/generate`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ question, tenantId }),
+            },
+            60000
+          );
+          if (!r.ok) {
+            const text = await r.text().catch(() => '');
+            console.error('business generate error:', r.status, text);
+            // fall through to stub fallback if remote fails
+            throw new Error('business_generate_failed');
+          }
+          const data = await r.json().catch(() => ({}));
+          const lesson = data.lesson || data;
+          const bulletCount = Array.isArray(lesson.keyTakeaways) ? lesson.keyTakeaways.length : 0;
+          return res.status(200).json({
+            ok: true,
+            reply: 'Lesson ready.',
+            lessonTitle: lesson.title || '',
+            bulletCount,
+            lesson,
+          });
+        } catch (e) {
+          console.warn('generate_lesson: remote call failed, using stub fallback', e && e.message);
+        }
+      }
+      // local deterministic stub fallback
       const stubLesson = {
         title: `Stub Lesson: ${String(question).slice(0, 80)}`,
         objectives: [
@@ -223,20 +271,14 @@ app.post('/webhook', async (req, res) => {
           'Provide a concise lesson outline',
           'Deliver actionable next steps',
         ],
-        content: `This is a deterministic stub lesson generated for the question:\n\n"${question}"\n\nUse the business service for production content.`,
-        keyTakeaways: [
-          'Restate the problem concisely',
-          'List 2–3 actionable next steps',
-          'Suggest follow-up diagnostic questions',
-        ],
+        content: `This is a deterministic stub lesson generated for the question:\n\n"${question}"`,
+        keyTakeaways: ['Restate the problem concisely', 'List 2–3 actionable next steps'],
         references: [],
         meta: { question },
       };
-
       const bulletCount = Array.isArray(stubLesson.keyTakeaways)
         ? stubLesson.keyTakeaways.length
         : 0;
-
       return res.status(200).json({
         ok: true,
         reply: 'Lesson (stub) ready.',
@@ -245,7 +287,6 @@ app.post('/webhook', async (req, res) => {
         lesson: stubLesson,
       });
     }
-
     // ---- generate_quiz (stub)
     if (action === 'generate_quiz') {
       if (!question.trim()) return res.status(400).json({ ok: false, reply: 'Missing `question`' });
@@ -383,12 +424,59 @@ app.post('/webhook', async (req, res) => {
             console.error('prompt service error:', r.status, text);
             return res.status(502).json({ ok: false, reply: 'prompt_service_failed' });
           }
+
           const payload = await r.json().catch(() => ({}));
+          // debug: log trimmed payload only when explicitly enabled (DEBUG_WEBHOOK)
+          // and not in production. This prevents accidental leakage of LLM outputs.
+          if (!IS_PROD && DEBUG_WEBHOOK) {
+            try {
+              console.info('llm payload snippet:', JSON.stringify(payload).slice(0, 2000));
+            } catch {}
+          }
+
+          // tolerant mapping: try multiple fields and combine if useful
+          let summary = '';
+          if (payload.summary && String(payload.summary).trim()) {
+            summary = String(payload.summary).trim();
+          } else if (payload.promptLesson && payload.promptLesson.strategySummary) {
+            summary = String(payload.promptLesson.strategySummary).trim();
+          } else if (
+            payload.promptLesson &&
+            Array.isArray(payload.promptLesson.demonstrationPrompts) &&
+            payload.promptLesson.demonstrationPrompts[0]?.prompt
+          ) {
+            summary = String(payload.promptLesson.demonstrationPrompts[0].prompt)
+              .slice(0, 800)
+              .trim();
+          } else {
+            // last resort: try common top-level text fields
+            const candidates = ['text', 'result', 'output', 'answer']
+              .map((k) => payload[k])
+              .filter(Boolean);
+            if (candidates.length) summary = String(candidates[0]).slice(0, 800).trim();
+          }
+
+          // If still empty, optionally synthesise from promptLesson pieces
+          if (!summary && payload.promptLesson) {
+            const parts = [];
+            if (payload.promptLesson.strategySummary)
+              parts.push(payload.promptLesson.strategySummary);
+            if (Array.isArray(payload.promptLesson.demonstrationPrompts)) {
+              payload.promptLesson.demonstrationPrompts.slice(0, 2).forEach((p) => {
+                if (p?.prompt) parts.push(p.prompt);
+              });
+            }
+            summary = parts.join(' — ').slice(0, 1000).trim();
+          }
+
+          const needs_clarify = Boolean(payload.needs_clarify) || false;
+          const followup_question = payload.followup_question || payload.suggested_followup || '';
+
           return res.status(200).json({
             ok: true,
-            summary: payload.summary ?? '',
-            needs_clarify: Boolean(payload.needs_clarify),
-            followup_question: payload.followup_question ?? '',
+            summary,
+            needs_clarify,
+            followup_question,
             raw: payload,
           });
         }
@@ -409,6 +497,7 @@ app.post('/webhook', async (req, res) => {
         return res.status(502).json({ ok: false, reply: 'llm_elicit_failed' });
       }
     }
+
     // ---- invoke_component
     if (action === 'invoke_component') {
       const comp = String(req.body?.component || '').trim();
