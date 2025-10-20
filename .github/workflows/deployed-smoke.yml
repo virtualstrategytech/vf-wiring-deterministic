@@ -14,6 +14,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Inject secrets into the runtime environment to avoid placing them directly under `env:` keys
+      - name: Inject webhook secrets into environment
+        run: |
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> $GITHUB_ENV
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+        shell: bash
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -21,8 +28,8 @@ jobs:
 
       - name: Validate workflow inputs and secrets
         env:
-          WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
-          WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           echo "Validating inputs..."
           if [ -z "$WEBHOOK_BASE" ]; then
@@ -37,7 +44,7 @@ jobs:
 
       - name: Quick health check
         env:
-          WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
         run: |
           echo "Checking $WEBHOOK_BASE/health"
           # show HTTP response code and body for fast diagnostics
@@ -50,10 +57,9 @@ jobs:
 
       - name: Run deployed smoke tests
         env:
-          WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
-          WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
-          # Only run the webhook smoke tests file
           npm ci
           npm test --silent -- tests/webhook.smoke.test.js
