@@ -4,12 +4,10 @@
   "description": "A project to determine wiring configurations.",
   "main": "index.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "scripts": {
-    "start": "node novain-platform/webhook/server.js"
-  },
-  "scripts": {
+    "start": "node novain-platform/webhook/server.js",
     "pretest": "node ./scripts/pretest.js",
     "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js"
   },
