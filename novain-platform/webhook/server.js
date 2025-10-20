@@ -134,6 +134,22 @@ app.use((req, _res, next) => {
 // ---- Health
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
+// ---- Internal: API key fingerprint (non-production only)
+// Returns a SHA-256 hex fingerprint of the configured API key so operators
+// can verify that the secret set on the server matches a local secret without
+// exposing the secret value itself. Only enabled when not running in production.
+app.get('/internal/api_key_fingerprint', (_req, res) => {
+  if (IS_PROD) return res.status(404).send('not_found');
+  try {
+    const key = API_KEY || '';
+    const hash = _crypto.createHash('sha256').update(String(key)).digest('hex');
+    return res.status(200).json({ ok: true, fingerprint: hash, warning: 'non-production only' });
+  } catch (e) {
+    console.error('fingerprint error', e && e.message);
+    return res.status(500).json({ ok: false });
+  }
+});
+
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;
   const objectives = (lesson.objectives || []).map((o) => `- ${o}`).join('\n');
