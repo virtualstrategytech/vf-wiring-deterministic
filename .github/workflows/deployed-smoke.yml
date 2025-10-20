@@ -10,11 +10,12 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Inject secrets into the runtime environment to avoid placing them directly under `env:` keys
+      # Inject secrets into the runtime environment (single place)
       - name: Inject webhook secrets into environment
         run: |
           echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> $GITHUB_ENV
@@ -27,27 +28,21 @@ jobs:
           node-version: 18
 
       - name: Validate workflow inputs and secrets
-        env:
-          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           echo "Validating inputs..."
           if [ -z "$WEBHOOK_BASE" ]; then
-            echo "ERROR: WEBHOOK_BASE secret is empty. Set repository secret WEBHOOK_BASE to the deployed webhook base URL (e.g. https://vf-webhook-staging.onrender.com)" >&2
+            echo "ERROR: WEBHOOK_BASE secret is empty." >&2
             exit 1
           fi
           if [ -z "$WEBHOOK_API_KEY" ]; then
-            echo "ERROR: WEBHOOK_API_KEY secret is empty. Set repository secret WEBHOOK_API_KEY to the webhook API key used by Voiceflow." >&2
+            echo "ERROR: WEBHOOK_API_KEY secret is empty." >&2
             exit 1
           fi
           echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
 
       - name: Quick health check
-        env:
-          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
         run: |
           echo "Checking $WEBHOOK_BASE/health"
-          # show HTTP response code and body for fast diagnostics
           http_status=$(curl --silent --show-error --max-time 10 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" || true)
           echo "HTTP status: $http_status"
           echo "Body:" && cat /tmp/health_body.txt || true
@@ -56,10 +51,8 @@ jobs:
           fi
 
       - name: Run deployed smoke tests
-        env:
-          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
           npm ci
+          # tests read $WEBHOOK_BASE and $WEBHOOK_API_KEY from the environment (set above)
           npm test --silent -- tests/webhook.smoke.test.js

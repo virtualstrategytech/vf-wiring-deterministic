@@ -14,7 +14,7 @@ git fetch origin
 # Robust branch existence check (avoid relying on shell redirection)
 $branchExists = $false
 try {
-  & git rev-parse --verify $branch > $null 2>&1
+  & git rev-parse --verify $branch *> $null
   $branchExists = $true
 } catch {
   $branchExists = $false
@@ -26,14 +26,6 @@ if (-not $branchExists) {
 } else {
   Write-Host "Switching to existing branch $branch"
   & git checkout $branch
-}
-
-if (-not (git rev-parse --verify $branch 2>$null)) {
-  Write-Host "Creating branch $branch (local)"
-  git checkout -b $branch
-} else {
-  Write-Host "Switching to existing branch $branch"
-  git checkout $branch
 }
 
 # Find duplicate basenames tracked by git
@@ -73,8 +65,8 @@ $patterns = @(
 Write-Host "`nSearching for common backup/duplicate patterns..."
 $found = @()
 foreach ($p in $patterns) {
-  $matches = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue -Filter $p | Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
-  if ($matches) { $found += $matches }
+  $matchedFiles = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue -Filter $p | Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
+  if ($matchedFiles) { $found += $matchedFiles }
 }
 $found = $found | Sort-Object -Unique
 
