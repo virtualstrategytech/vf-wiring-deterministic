@@ -95,3 +95,21 @@ This repo organizes docs, prompts, and API smoke tests so you can wire a stable,
 - **Webhook returns 400/502?** Use `copilot-kit/templates/webhook-error-handler.snippet` and re-run `webhook-smoke.http`.
 
 Licensed MIT. © Virtual Strategy Tech.
+
+## Manual deployed smoke tests
+
+To run the manual smoke tests against a deployed webhook (staging or production):
+
+1. Add repository secrets in GitHub (Settings → Secrets → Actions):
+   - `WEBHOOK_API_KEY` — the webhook API key
+   - `WEBHOOK_BASE` — the base URL of the deployed webhook (e.g. `https://vf-webhook-service.onrender.com`)
+
+2. From the GitHub UI, open the Actions tab → select `Deployed smoke (manual)` workflow → Run workflow.
+   - The workflow reads `WEBHOOK_BASE` and `WEBHOOK_API_KEY` from repository secrets and runs `tests/webhook.smoke.test.js` against the target.
+
+3. Prefer running against a staging deployment first. Create a staging Render service and add the same secrets there.
+
+Notes:
+
+- Keep `DEBUG_WEBHOOK` unset in production. Enable it only on a staging service if you need verbose logs.
+- If you prefer automated smoke runs on a staging branch, we can add a restricted workflow that triggers only on `push` to `staging`.

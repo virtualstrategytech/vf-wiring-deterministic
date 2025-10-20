@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A project to determine wiring configurations.",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "pretest": "node ./scripts/pretest.js",
     "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js"
