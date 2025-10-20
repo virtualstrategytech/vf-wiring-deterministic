@@ -8,8 +8,19 @@ const cors = require('cors');
 const _crypto = require('crypto');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
-// Debug flag to enable verbose webhook logs in non-production or when explicitly set
-const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
+
+// Debug flag requested via env (string check)
+const _requestedDebug = process.env.DEBUG_WEBHOOK === 'true';
+// Soft guard: if running in production and DEBUG_WEBHOOK was requested, auto-disable it
+// and emit a single startup warning. This prevents accidental leakage of sensitive
+// debug output in production while still allowing staging/dev to enable verbose logs.
+let DEBUG_WEBHOOK = _requestedDebug;
+if (IS_PROD && _requestedDebug) {
+  // log a succinct warning; avoid printing secrets or payloads
+  // Use console.warn once at startup so it's visible in logs but not noisy
+  console.warn('WARNING: DEBUG_WEBHOOK was requested in production. For safety it has been disabled.');
+  DEBUG_WEBHOOK = false;
+}
 // ---- Config (env vars)
 const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
 const PORT = process.env.PORT || 3000;
