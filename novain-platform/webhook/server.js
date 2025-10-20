@@ -18,7 +18,9 @@ let DEBUG_WEBHOOK = _requestedDebug;
 if (IS_PROD && _requestedDebug) {
   // log a succinct warning; avoid printing secrets or payloads
   // Use console.warn once at startup so it's visible in logs but not noisy
-  console.warn('WARNING: DEBUG_WEBHOOK was requested in production. For safety it has been disabled.');
+  console.warn(
+    'WARNING: DEBUG_WEBHOOK was requested in production. For safety it has been disabled.'
+  );
   DEBUG_WEBHOOK = false;
 }
 // ---- Config (env vars)

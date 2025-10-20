@@ -19,6 +19,35 @@ jobs:
         with:
           node-version: 18
 
+      - name: Validate workflow inputs and secrets
+        env:
+          WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+          WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+        run: |
+          echo "Validating inputs..."
+          if [ -z "$WEBHOOK_BASE" ]; then
+            echo "ERROR: WEBHOOK_BASE secret is empty. Set repository secret WEBHOOK_BASE to the deployed webhook base URL (e.g. https://vf-webhook-staging.onrender.com)" >&2
+            exit 1
+          fi
+          if [ -z "$WEBHOOK_API_KEY" ]; then
+            echo "ERROR: WEBHOOK_API_KEY secret is empty. Set repository secret WEBHOOK_API_KEY to the webhook API key used by Voiceflow." >&2
+            exit 1
+          fi
+          echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
+
+      - name: Quick health check
+        env:
+          WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+        run: |
+          echo "Checking $WEBHOOK_BASE/health"
+          # show HTTP response code and body for fast diagnostics
+          http_status=$(curl --silent --show-error --max-time 10 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" || true)
+          echo "HTTP status: $http_status"
+          echo "Body:" && cat /tmp/health_body.txt || true
+          if [ "$http_status" != "200" ] && [ "$http_status" != "204" ] && [ "$http_status" != "0" ]; then
+            echo "Warning: health endpoint did not return 200/204. Continuing to run smoke tests for best-effort diagnostics."
+          fi
+
       - name: Run deployed smoke tests
         env:
           WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
