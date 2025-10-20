@@ -18,6 +18,9 @@
     "axios": "^1.12.2",
     "jest": "^27.5.1"
   },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
   "directories": {
     "doc": "docs",
     "test": "tests"
