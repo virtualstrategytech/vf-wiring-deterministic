@@ -134,18 +134,23 @@ app.use((req, _res, next) => {
 // ---- Health
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// ---- Internal: API key fingerprint (non-production only)
-// Returns a SHA-256 hex fingerprint of the configured API key so operators
-// can verify that the secret set on the server matches a local secret without
-// exposing the secret value itself. Only enabled when not running in production.
-app.get('/internal/api_key_fingerprint', (_req, res) => {
+// ---- Internal: debug flags (non-production only)
+// Returns a small set of non-sensitive runtime flags to help with debugging.
+app.get('/internal/debug', (_req, res) => {
   if (IS_PROD) return res.status(404).send('not_found');
   try {
-    const key = API_KEY || '';
-    const hash = _crypto.createHash('sha256').update(String(key)).digest('hex');
-    return res.status(200).json({ ok: true, fingerprint: hash, warning: 'non-production only' });
+    return res.status(200).json({
+      ok: true,
+      node_env: process.env.NODE_ENV || 'not_set',
+      debug_webhook_enabled: _requestedDebug === true,
+      api_key_present: !!API_KEY,
+      retrieval_url_present: !!RETRIEVAL_URL,
+      prompt_url_present: !!PROMPT_URL,
+      business_url_present: !!BUSINESS_URL,
+      port: PORT,
+    });
   } catch (e) {
-    console.error('fingerprint error', e && e.message);
+    console.error('internal debug error', e && e.message);
     return res.status(500).json({ ok: false });
   }
 });
