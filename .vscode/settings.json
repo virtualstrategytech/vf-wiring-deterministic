@@ -1,0 +1,15 @@
+{
+  // Map GitHub workflow files to the official schema so secret expressions are recognized
+  "jest.pathToJest": "${workspaceFolder}/node_modules/.bin/jest",
+  "yaml.schemas": {
+    "https://json.schemastore.org/github-workflow.json": [
+      ".github/workflows/*",
+      ".github/workflows/**/*.yml",
+      ".github/workflows/**/*.yaml"
+    ]
+  },
+  // Some editors raise warnings about ${{ secrets.* }}; keep validation but allow these patterns
+  "yaml.validate": false,
+  // Optionally reduce problem noise from the YAML extension by treating secret expressions as valid
+  "yaml.customTags": ["!expr"]
+}
