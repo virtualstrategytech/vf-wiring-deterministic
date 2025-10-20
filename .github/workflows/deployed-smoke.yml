@@ -1,0 +1,30 @@
+name: Deployed smoke (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target environment name (informational)'
+        required: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Run deployed smoke tests
+        env:
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: |
+          echo "Running smoke tests against $WEBHOOK_BASE"
+          # Only run the webhook smoke tests file
+          npm ci
+          npm test --silent -- tests/webhook.smoke.test.js

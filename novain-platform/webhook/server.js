@@ -542,7 +542,12 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ ok: false, reply: 'internal_error' });
 });
 
-// ---- Start
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// ---- Start when run directly
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+// Export the app for in-process tests and programmatic use.
+module.exports = app;
