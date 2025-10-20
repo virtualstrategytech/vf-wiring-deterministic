@@ -14,7 +14,7 @@ git fetch origin
 # Robust branch existence check (avoid relying on shell redirection)
 $branchExists = $false
 try {
-  & git rev-parse --verify $branch *> $null
+  & git rev-parse --verify $branch > $null 2>&1
   $branchExists = $true
 } catch {
   $branchExists = $false
@@ -65,17 +65,11 @@ $patterns = @(
 Write-Host "`nSearching for common backup/duplicate patterns..."
 $found = @()
 foreach ($p in $patterns) {
-  $matchedFiles = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue -Filter $p | Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
-  if ($matchedFiles) { $found += $matchedFiles }
+  # avoid using the automatic $Matches variable name
+  $foundMatches = Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue -Filter $p | Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
+  if ($foundMatches) { $found += $foundMatches }
 }
 $found = $found | Sort-Object -Unique
-
-if (-not $found) {
-  Write-Host "No files/folders matching common backup patterns found."
-} else {
-  Write-Host "Found candidates to archive:"
-  $found | ForEach-Object { Write-Host " - $_" }
-}
 
 # Also find any files with duplicate basenames in the working tree (not just git index)
 Write-Host "`nAlso listing duplicate basenames across working tree (non-git):"
