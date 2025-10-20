@@ -6,7 +6,6 @@ process.env.PROMPT_URL = process.env.PROMPT_URL || '';
 process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
 
-const { spawn } = require('child_process');
 const app = require('../novain-platform/webhook/server');
 
 // Helpers to capture stdout/stderr during an async action
