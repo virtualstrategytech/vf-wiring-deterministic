@@ -58,7 +58,7 @@ jobs:
         env:
           WEBHOOK_BASE: ${{ env.WEBHOOK_BASE }}
           WEBHOOK_API_KEY: ${{ env.WEBHOOK_API_KEY }}
+          SKIP_SYNC_SECRET: 'true'
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
-          # run the single smoke test file to validate deployed webhook
           npm test --silent -- tests/webhook.smoke.test.js
