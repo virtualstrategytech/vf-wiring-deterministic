@@ -22,7 +22,7 @@ globalThis.fetch = async (url, opts) => {
   };
 };
 
-const http = require('http');
+const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
 
 async function captureConsoleAsync(action) {
@@ -45,48 +45,28 @@ async function captureConsoleAsync(action) {
 
 describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
-  let server;
-  let port;
+  // use supertest to avoid creating a real server (prevents Jest open handles)
 
-  beforeAll(async () => {
-    server = app.listen(0);
+  afterAll(() => {
     try {
-      server.keepAliveTimeout = 0;
-      server.on('connection', (sock) => {
-        try {
-          sock.unref();
-        } catch {}
-      });
+      const http = require('http');
+      const https = require('https');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+        http.globalAgent.destroy();
+      }
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+        https.globalAgent.destroy();
+      }
     } catch {}
-    if (server.unref) server.unref();
-    await new Promise((resolve) => server.once('listening', resolve));
-    port = server.address().port;
-  });
-
-  afterAll(async () => {
-    if (server && server.close) {
-      await new Promise((resolve) => {
-        try {
-          server.close(() => resolve());
-        } catch {
-          resolve();
-        }
-      });
-      if (server.removeAllListeners) server.removeAllListeners();
-      try {
-        server = null;
-      } catch {}
-      await new Promise((r) => setTimeout(r, 50));
-    }
   });
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const resp = await postJson(
-        `http://localhost:${port}/webhook`,
-        { action: 'llm_elicit', question: 'Q', tenantId: 't' },
-        { 'x-api-key': process.env.WEBHOOK_API_KEY }
-      );
+      const resp = await request(app)
+        .post('/webhook')
+        .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
+        .timeout({ response: 5000, deadline: 6000 });
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
     });
@@ -95,67 +75,3 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
     expect(combined.includes('llm payload snippet:')).toBe(true);
   });
 });
-
-function postJson(url, body, headers = {}, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(url);
-      const data = JSON.stringify(body);
-      const options = {
-        method: 'POST',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        agent: false,
-        headers: Object.assign(
-          {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            Connection: 'close',
-          },
-          headers
-        ),
-      };
-
-      const req = http.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            const text = Buffer.concat(chunks).toString();
-            let json;
-            try {
-              json = text.length ? JSON.parse(text) : undefined;
-            } catch {
-              json = text;
-            }
-            resolve({ status: res.statusCode, data: json });
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        clearTimeout(timer);
-        try {
-          req.destroy();
-        } catch {}
-        reject(err);
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      req.write(data);
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
-}

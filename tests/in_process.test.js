@@ -1,4 +1,4 @@
-const http = require('http');
+const request = require('supertest');
 // Ensure required env vars are set before importing the app so module-level
 // initialization uses the correct values (API key and debug flags).
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
@@ -29,69 +29,24 @@ async function captureConsoleAsync(action) {
 
 describe('in-process webhook app', () => {
   jest.setTimeout(20000);
-  let server;
-  let port;
-
-  beforeAll(async () => {
-    // Let the OS pick an available port
-    server = app.listen(0);
-    // prevent keep-alive sockets from keeping the event loop alive
-    try {
-      server.keepAliveTimeout = 0;
-      server.on('connection', (sock) => {
-        try {
-          sock.unref();
-        } catch {}
-      });
-    } catch {}
-    // allow the server not to keep the event loop alive for Jest
-    if (server.unref) server.unref();
-    await new Promise((resolve) => server.once('listening', resolve));
-    port = server.address().port;
-  });
-
-  afterAll(async () => {
-    if (server && server.close) {
-      // Await server.close to ensure Node clears the handle
-      await new Promise((resolve) => {
-        try {
-          server.close(() => resolve());
-        } catch {
-          resolve();
-        }
-      });
-      if (server.removeAllListeners) server.removeAllListeners();
-      // allow GC and ensure no lingering refs
-      try {
-        server = null;
-      } catch {}
-      // short pause to allow sockets to close
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  });
+  // use supertest agent to avoid starting a real server (prevents open handles)
 
   it('should return llm_elicit stub with raw.source = "stub"', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const resp = await postJson(
-        `http://localhost:${port}/webhook`,
-        {
-          action: 'llm_elicit',
-          question: 'Please clarify X?',
-          tenantId: 'default',
-        },
-        {
-          'x-api-key': process.env.WEBHOOK_API_KEY,
-        }
-      );
+      const resp = await request(app)
+        .post('/webhook')
+        .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
+        .timeout({ response: 5000, deadline: 6000 });
 
       // Basic status checks
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
-      expect(resp.data).toBeDefined();
-
+      // supertest exposes parsed body as resp.body
+      expect(resp.body).toBeDefined();
       // llm_elicit stub returns raw.source === 'stub'
-      expect(resp.data.raw).toBeDefined();
-      expect(resp.data.raw.source).toBe('stub');
+      expect(resp.body.raw).toBeDefined();
+      expect(resp.body.raw.source).toBe('stub');
     });
 
     const outText = logs.out.join('\n') + '\n' + logs.err.join('\n');
@@ -139,6 +94,35 @@ function postJson(url, body, headers = {}, timeout = 5000) {
           } catch (e) {
             reject(e);
           }
+        });
+        afterAll(async () => {
+          if (server && server.close) {
+            // Await server.close to ensure Node clears the handle
+            await new Promise((resolve) => {
+              try {
+                server.close(() => resolve());
+              } catch {
+                resolve();
+              }
+            });
+            if (server.removeAllListeners) server.removeAllListeners();
+            // allow GC and ensure no lingering refs
+            try {
+              server = null;
+            } catch {}
+            // short pause to allow sockets to close
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          try {
+            const http = require('http');
+            const https = require('https');
+            if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+              http.globalAgent.destroy();
+            }
+            if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+              https.globalAgent.destroy();
+            }
+          } catch {}
         });
       });
 
