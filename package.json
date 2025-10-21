@@ -10,7 +10,8 @@
     "pretest": "node ./scripts/pretest.js",
     "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
     "lint": "eslint . --ext .js,.ts,.tsx",
-    "lint:fix": "eslint . --ext .js,.ts,.tsx --fix"
+    "lint:fix": "eslint . --ext .js,.ts,.tsx --fix",
+    "prepare": "husky install"
   },
   "keywords": [],
   "author": "",
@@ -19,7 +20,9 @@
     "axios": "^1.12.2",
     "eslint": "^9.37.0",
     "jest": "^27.5.1",
-    "supertest": "^6.3.3"
+    "supertest": "^6.3.3",
+    "husky": "^8.0.3",
+    "lint-staged": "^13.2.2"
   },
   "directories": {
     "doc": "docs",
@@ -33,5 +36,11 @@
   "bugs": {
     "url": "https://github.com/virtualstrategytech/vf-wiring-deterministic/issues"
   },
-  "homepage": "https://github.com/virtualstrategytech/vf-wiring-deterministic#readme"
+  "homepage": "https://github.com/virtualstrategytech/vf-wiring-deterministic#readme",
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "git add"
+    ]
+  }
 }
