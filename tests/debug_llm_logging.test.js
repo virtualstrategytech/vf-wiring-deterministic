@@ -22,9 +22,7 @@ globalThis.fetch = async () => {
   };
 };
 
-const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
-// use request(app) directly to avoid persistent agent sockets
 
 async function captureConsoleAsync(action) {
   const logs = { out: [], err: [] };
@@ -65,17 +63,32 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      // Find the POST /webhook route handler on the express app and call it directly.
-      const layer = ((app && app._router && app._router.stack) || []).find(
+      const stack = (app && app._router && app._router.stack) || [];
+      // Try a couple of heuristics to locate the POST /webhook route
+      let layer = stack.find(
         (s) => s.route && s.route.path === '/webhook' && s.route.methods && s.route.methods.post
       );
-      const handler =
+      if (!layer) layer = stack.find((s) => s.route && String(s.route.path).includes('webhook'));
+
+      const entry =
         layer &&
         layer.route &&
-        layer.route.stack &&
-        layer.route.stack[0] &&
-        layer.route.stack[0].handle;
-      expect(typeof handler).toBe('function');
+        Array.isArray(layer.route.stack) &&
+        layer.route.stack.find((e) => typeof e.handle === 'function');
+      const handler = entry && entry.handle;
+      if (!handler) {
+        const routes = stack
+          .filter((s) => s.route)
+          .map((s) => ({
+            path: s.route.path,
+            methods: s.route.methods,
+            stackLen: s.route.stack && s.route.stack.length,
+          }))
+          .slice(0, 20);
+        throw new Error(
+          'webhook route handler not found. router stack routes: ' + JSON.stringify(routes, null, 2)
+        );
+      }
 
       const headers = { 'x-api-key': process.env.WEBHOOK_API_KEY };
       const req = {
