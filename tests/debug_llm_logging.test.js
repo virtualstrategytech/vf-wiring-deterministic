@@ -5,7 +5,7 @@ process.env.DEBUG_WEBHOOK = 'true';
 process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
 
 // Mock global fetch so the server's fetchWithTimeout receives a predictable payload
-globalThis.fetch = async (url, opts) => {
+globalThis.fetch = async () => {
   // Simulate a Response-like object used by fetchWithTimeout
   const payload = {
     summary: 'Test summary',
