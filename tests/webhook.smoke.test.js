@@ -1,4 +1,5 @@
 ﻿const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
@@ -93,7 +94,8 @@ function postJson(url, body, headers = {}, timeout = 5000) {
         ),
       };
 
-      const req = http.request(options, (res) => {
+      const transport = u.protocol === 'https:' ? https : http;
+      const req = transport.request(options, (res) => {
         clearTimeout(timer);
         let chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -150,7 +152,8 @@ function getText(url, timeout = 3000) {
         headers: { Connection: 'close' },
       };
 
-      const req = http.request(options, (res) => {
+      const transport = u.protocol === 'https:' ? https : http;
+      const req = transport.request(options, (res) => {
         clearTimeout(timer);
         let chunks = [];
         res.on('data', (c) => chunks.push(c));
