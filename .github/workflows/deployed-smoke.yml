@@ -1,4 +1,4 @@
-name: Deployed smoke (manual)
+﻿name: Deployed smoke (manual)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,9 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    outputs:
+      webhook_key_fingerprint: ${{ steps.set-fingerprint.outputs.fingerprint }}
 
     steps:
       - name: Checkout
@@ -40,19 +43,45 @@ jobs:
           fi
           echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
 
-      - name: Quick health check
+      - name: Quick health check (with retries)
+        id: health
         run: |
-          echo "Checking $WEBHOOK_BASE/health"
-          http_status=$(curl --silent --show-error --max-time 10 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" || true)
-          echo "HTTP status: $http_status"
-          echo "Body:" && cat /tmp/health_body.txt || true
-          if [ "$http_status" -ne 200 ]; then
-            echo "Health check failed (status $http_status)" >&2
+          echo "Checking $WEBHOOK_BASE/health (retries)"
+          attempts=0
+          max=12
+          http_status=0
+          until [ $attempts -ge $max ]
+          do
+            attempts=$((attempts+1))
+            echo "Attempt $attempts/$max..."
+            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+            echo "HTTP status: $http_status"
+            if [ "$http_status" = "200" ]; then
+              echo "Health OK"
+              cat /tmp/health_body.txt || true
+              break
+            fi
+            echo "Body/Error:"
+            cat /tmp/health_body.txt || true
+            cat /tmp/health_err || true
+            sleep 5
+          done
+          if [ "$http_status" != "200" ]; then
+            echo "Health check failed after $max attempts (status $http_status)" >&2
             exit 1
           fi
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Compute fingerprint and export to outputs
+        id: set-fingerprint
+        env:
+          WEBHOOK_API_KEY: ${{ env.WEBHOOK_API_KEY }}
+        run: |
+          node -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt
+          echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> $GITHUB_OUTPUT
+        shell: bash
 
       - name: Run deployed smoke tests
         env:
@@ -61,4 +90,4 @@ jobs:
           SKIP_SYNC_SECRET: 'true'
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
-          npm test --silent -- tests/webhook.smoke.test.js
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose
