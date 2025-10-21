@@ -1,0 +1,33 @@
+name: Staging smoke
+
+on:
+  push:
+    branches: ['staging']
+  workflow_dispatch: {}
+
+jobs:
+  run-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write runtime secrets to environment
+        shell: bash
+        env:
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: |
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE=$WEBHOOK_BASE" >> $GITHUB_ENV; fi
+          if [ -n "$WEBHOOK_API_KEY" ]; then echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV; fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run staging smoke tests
+        run: npm test --silent
