@@ -63,61 +63,19 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const stack = (app && app._router && app._router.stack) || [];
-      // Try a couple of heuristics to locate the POST /webhook route
-      let layer = stack.find(
-        (s) => s.route && s.route.path === '/webhook' && s.route.methods && s.route.methods.post
-      );
-      if (!layer) layer = stack.find((s) => s.route && String(s.route.path).includes('webhook'));
-
-      const entry =
-        layer &&
-        layer.route &&
-        Array.isArray(layer.route.stack) &&
-        layer.route.stack.find((e) => typeof e.handle === 'function');
-      const handler = entry && entry.handle;
-      if (!handler) {
-        const routes = stack
-          .filter((s) => s.route)
-          .map((s) => ({
-            path: s.route.path,
-            methods: s.route.methods,
-            stackLen: s.route.stack && s.route.stack.length,
-          }))
-          .slice(0, 20);
-        throw new Error(
-          'webhook route handler not found. router stack routes: ' + JSON.stringify(routes, null, 2)
-        );
+      const server = app.listen(0);
+      try {
+        const resp = await require('supertest')(server)
+          .post('/webhook')
+          .set('x-api-key', process.env.WEBHOOK_API_KEY)
+          .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
+        expect(resp.status).toBeGreaterThanOrEqual(200);
+        expect(resp.status).toBeLessThan(300);
+      } finally {
+        try {
+          await new Promise((resolve) => server.close(resolve));
+        } catch { }
       }
-
-      const headers = { 'x-api-key': process.env.WEBHOOK_API_KEY };
-      const req = {
-        body: { action: 'llm_elicit', question: 'Q', tenantId: 't' },
-        get: (k) => headers[k.toLowerCase()],
-        rawBody: Buffer.from(JSON.stringify({})),
-        method: 'POST',
-        originalUrl: '/webhook',
-      };
-
-      let resBody = null;
-      const res = {
-        status(code) {
-          this._status = code;
-          return this;
-        },
-        json(obj) {
-          resBody = obj;
-          return this;
-        },
-        send(s) {
-          resBody = s;
-          return this;
-        },
-        set() {},
-      };
-
-      await handler(req, res);
-      expect(resBody).toBeTruthy();
     });
 
     const combined = logs.out.join('\n') + '\n' + logs.err.join('\n');
