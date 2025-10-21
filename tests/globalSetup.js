@@ -7,7 +7,11 @@ const crypto = require('crypto');
 const secretFilePath = path.resolve(__dirname, 'webhook.secret');
 const pidFilePath = path.resolve(__dirname, 'webhook.pid');
 const logFilePath = path.resolve(__dirname, 'globalSetup.log');
-
+if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
+  console.log('globalSetup skipped in CI / SKIP_SYNC_SECRET=true');
+  module.exports = async () => {};
+  return;
+}
 function waitForPort(port, timeout = 30000) {
   // increased default timeout
   const start = Date.now();
