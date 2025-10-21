@@ -70,6 +70,13 @@
   - When set to `true` and `NODE_ENV` is not `production`, the webhook will print additional debug output (fetch start/response snippets and LLM payload snippets).
   - Do NOT set `DEBUG_WEBHOOK` in production.
 
+### Enabling debug logs for tests
+
+- To assert or inspect debug logging from tests, set `NODE_ENV` to a non-production value and `DEBUG_WEBHOOK=true` before requiring the server in your test. The test suite includes `tests/debug_llm_logging.test.js` as an example.
+- Example (PowerShell):
+
+  $env:NODE_ENV = 'development'; $env:DEBUG_WEBHOOK = 'true'; node .\server.js
+
 ## Render configuration (recommended)
 
 - Set `NODE_ENV=production` for the webhook service.

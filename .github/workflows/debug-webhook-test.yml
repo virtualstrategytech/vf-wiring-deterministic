@@ -1,0 +1,22 @@
+name: Debug webhook test
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  debug-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install deps
+        run: npm ci
+      - name: Run debug logging test
+        run: npx jest tests/debug_llm_logging.test.js --runInBand --silent
+        env:
+          NODE_ENV: development
+          DEBUG_WEBHOOK: 'true'
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}

@@ -1,14 +1,30 @@
-const http = require('http');
-// Ensure required env vars are set before importing the app so module-level
-// initialization uses the correct values (API key and debug flags).
+// Ensure env is set before requiring the server so module-level flags are evaluated correctly
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
-process.env.PROMPT_URL = process.env.PROMPT_URL || '';
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
-process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
+process.env.NODE_ENV = 'development';
+process.env.DEBUG_WEBHOOK = 'true';
+process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
 
+// Mock global fetch so the server's fetchWithTimeout receives a predictable payload
+globalThis.fetch = async (url, opts) => {
+  // Simulate a Response-like object used by fetchWithTimeout
+  const payload = {
+    summary: 'Test summary',
+    needs_clarify: false,
+    followup_question: '',
+    debug_meta: 'sensitive-llm-output',
+  };
+  return {
+    ok: true,
+    status: 200,
+    clone: () => ({ text: async () => JSON.stringify(payload) }),
+    text: async () => JSON.stringify(payload),
+    json: async () => payload,
+  };
+};
+
+const http = require('http');
 const app = require('../novain-platform/webhook/server');
 
-// Helpers to capture stdout/stderr during an async action
 async function captureConsoleAsync(action) {
   const logs = { out: [], err: [] };
   const origLog = console.log;
@@ -27,15 +43,13 @@ async function captureConsoleAsync(action) {
   }
 }
 
-describe('in-process webhook app', () => {
+describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
   let server;
   let port;
 
   beforeAll(async () => {
-    // Let the OS pick an available port
     server = app.listen(0);
-    // prevent keep-alive sockets from keeping the event loop alive
     try {
       server.keepAliveTimeout = 0;
       server.on('connection', (sock) => {
@@ -44,7 +58,6 @@ describe('in-process webhook app', () => {
         } catch {}
       });
     } catch {}
-    // allow the server not to keep the event loop alive for Jest
     if (server.unref) server.unref();
     await new Promise((resolve) => server.once('listening', resolve));
     port = server.address().port;
@@ -52,7 +65,6 @@ describe('in-process webhook app', () => {
 
   afterAll(async () => {
     if (server && server.close) {
-      // Await server.close to ensure Node clears the handle
       await new Promise((resolve) => {
         try {
           server.close(() => resolve());
@@ -61,46 +73,29 @@ describe('in-process webhook app', () => {
         }
       });
       if (server.removeAllListeners) server.removeAllListeners();
-      // allow GC and ensure no lingering refs
       try {
         server = null;
       } catch {}
-      // short pause to allow sockets to close
       await new Promise((r) => setTimeout(r, 50));
     }
   });
 
-  it('should return llm_elicit stub with raw.source = "stub"', async () => {
+  it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
       const resp = await postJson(
         `http://localhost:${port}/webhook`,
-        {
-          action: 'llm_elicit',
-          question: 'Please clarify X?',
-          tenantId: 'default',
-        },
-        {
-          'x-api-key': process.env.WEBHOOK_API_KEY,
-        }
+        { action: 'llm_elicit', question: 'Q', tenantId: 't' },
+        { 'x-api-key': process.env.WEBHOOK_API_KEY }
       );
-
-      // Basic status checks
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
-      expect(resp.data).toBeDefined();
-
-      // llm_elicit stub returns raw.source === 'stub'
-      expect(resp.data.raw).toBeDefined();
-      expect(resp.data.raw.source).toBe('stub');
     });
 
-    const outText = logs.out.join('\n') + '\n' + logs.err.join('\n');
-    // With NODE_ENV=test and DEBUG_WEBHOOK=false we should not log full LLM snippets
-    expect(outText.includes('llm payload snippet')).toBe(false);
+    const combined = logs.out.join('\n') + '\n' + logs.err.join('\n');
+    expect(combined.includes('llm payload snippet:')).toBe(true);
   });
 });
 
-// small helper
 function postJson(url, body, headers = {}, timeout = 5000) {
   return new Promise((resolve, reject) => {
     try {

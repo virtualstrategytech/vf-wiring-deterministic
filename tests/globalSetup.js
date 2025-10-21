@@ -10,7 +10,6 @@ const logFilePath = path.resolve(__dirname, 'globalSetup.log');
 // If running in CI or SKIP_SYNC_SECRET is set, short-circuit the interactive
 // secret sync and server spawn. Workflows set SKIP_SYNC_SECRET=true to avoid
 // interactive prompts when running tests against deployed services.
-const _GLOBAL_SETUP_SKIP = process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true';
 if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
   console.log('globalSetup skipped in CI / SKIP_SYNC_SECRET=true');
   module.exports = async () => {};
