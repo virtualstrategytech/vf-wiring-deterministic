@@ -11,10 +11,8 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
 
-    # Inject secrets once at the job level so later steps can read them via $WEBHOOK_BASE/$WEBHOOK_API_KEY
-    env:
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+    # We'll inject secrets at runtime into the job environment using a dedicated step.
+    # This writes them into $GITHUB_ENV so subsequent steps can read $WEBHOOK_BASE and $WEBHOOK_API_KEY.
 
     steps:
       - name: Checkout
@@ -24,6 +22,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
+
+      - name: Inject secrets into job env
+        run: |
+          echo "Injecting secrets into job environment"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> $GITHUB_ENV
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
 
       - name: Validate workflow inputs and secrets
         run: |
