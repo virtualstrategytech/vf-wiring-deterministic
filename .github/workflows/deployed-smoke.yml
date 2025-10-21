@@ -10,9 +10,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-
-    # We'll inject secrets at runtime into the job environment using a dedicated step.
-    # This writes them into $GITHUB_ENV so subsequent steps can read $WEBHOOK_BASE and $WEBHOOK_API_KEY.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -48,9 +46,19 @@ jobs:
           http_status=$(curl --silent --show-error --max-time 10 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" || true)
           echo "HTTP status: $http_status"
           echo "Body:" && cat /tmp/health_body.txt || true
+          if [ "$http_status" -ne 200 ]; then
+            echo "Health check failed (status $http_status)" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run deployed smoke tests
+        env:
+          WEBHOOK_BASE: ${{ env.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ env.WEBHOOK_API_KEY }}
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
-          npm ci
+          # run the single smoke test file to validate deployed webhook
           npm test --silent -- tests/webhook.smoke.test.js
