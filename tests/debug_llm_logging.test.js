@@ -24,6 +24,7 @@ globalThis.fetch = async () => {
 
 const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
+// use request(app) directly to avoid persistent agent sockets
 
 async function captureConsoleAsync(action) {
   const logs = { out: [], err: [] };
@@ -47,7 +48,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
   // use supertest to avoid creating a real server (prevents Jest open handles)
 
-  afterAll(() => {
+  afterAll(async () => {
     try {
       const http = require('http');
       const https = require('https');
@@ -57,6 +58,8 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
         https.globalAgent.destroy();
       }
+      // give Node one tick to let any async cleanup settle (helps Jest detect closed handles)
+      await new Promise((resolve) => setImmediate(resolve));
     } catch {}
   });
 
@@ -65,10 +68,10 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       const resp = await request(app)
         .post('/webhook')
         .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
-        .timeout({ response: 5000, deadline: 6000 });
+        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
+      // no persistent agent to close when using request(app)
     });
 
     const combined = logs.out.join('\n') + '\n' + logs.err.join('\n');
