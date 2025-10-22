@@ -100,7 +100,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
                 let parsedBody = null;
                 try {
                   parsedBody = JSON.parse(text);
-                } catch (_e) {
+                } catch {
                   parsedBody = text;
                 }
                 resolve({ status: res.statusCode, body: parsedBody });
@@ -130,6 +130,18 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         try {
           await new Promise((resolve) => server.close(resolve));
         } catch {}
+        try {
+          const http = require('http');
+          const https = require('https');
+          if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+            http.globalAgent.destroy();
+          }
+          if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+            https.globalAgent.destroy();
+          }
+        } catch {}
+        // Give Node a tick to let any sockets/timers settle
+        await new Promise((resolve) => setImmediate(resolve));
       }
     });
 
