@@ -63,18 +63,73 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const server = app.listen(0);
+      const http = require('http');
+      // Create an explicit server so we can control lifecycle and avoid
+      // supertest/superagent internal listeners keeping the process alive.
+      const server = http.createServer(app);
+      await new Promise((resolve) => server.listen(0, resolve));
+      if (typeof server.unref === 'function') server.unref();
+      const port = server.address().port;
+      const postUrl = `http://127.0.0.1:${port}/webhook`;
+
+      function postJson(url, data, opts = {}) {
+        return new Promise((resolve, reject) => {
+          try {
+            const parsed = new URL(url);
+            const body = JSON.stringify(data || {});
+            const requestOptions = {
+              protocol: parsed.protocol,
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.pathname + (parsed.search || ''),
+              method: 'POST',
+              headers: Object.assign(
+                {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(body),
+                },
+                opts.headers || {}
+              ),
+            };
+
+            const req = http.request(requestOptions, (res) => {
+              const chunks = [];
+              res.on('data', (c) => chunks.push(c));
+              res.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                let parsedBody = null;
+                try {
+                  parsedBody = JSON.parse(text);
+                } catch (_e) {
+                  parsedBody = text;
+                }
+                resolve({ status: res.statusCode, body: parsedBody });
+              });
+            });
+            req.on('error', reject);
+            if (opts.timeout) req.setTimeout(opts.timeout, () => req.destroy(new Error('timeout')));
+            req.end(body);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+
       try {
-        const resp = await require('supertest')(server)
-          .post('/webhook')
-          .set('x-api-key', process.env.WEBHOOK_API_KEY)
-          .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
+        const resp = await postJson(
+          postUrl,
+          { action: 'llm_elicit', question: 'Q', tenantId: 't' },
+          {
+            headers: { 'x-api-key': process.env.WEBHOOK_API_KEY, Connection: 'close' },
+            timeout: 5000,
+          }
+        );
         expect(resp.status).toBeGreaterThanOrEqual(200);
         expect(resp.status).toBeLessThan(300);
       } finally {
         try {
           await new Promise((resolve) => server.close(resolve));
-        } catch { }
+        } catch {}
       }
     });
 
