@@ -13,6 +13,18 @@ const base = process.env.WEBHOOK_BASE || 'http://127.0.0.1:3000';
 describe('webhook smoke', () => {
   jest.setTimeout(30000);
 
+  afterAll(async () => {
+    try {
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+        http.globalAgent.destroy();
+      }
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+        https.globalAgent.destroy();
+      }
+      await new Promise((r) => setImmediate(r));
+    } catch {}
+  });
+
   test('GET /health returns ok', async () => {
     const url = `${base}/health`;
     const resp = await getText(url, 5000);

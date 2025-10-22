@@ -33,6 +33,10 @@
     "url": "git+https://github.com/virtualstrategytech/vf-wiring-deterministic.git"
   },
   "type": "commonjs",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
   "bugs": {
     "url": "https://github.com/virtualstrategytech/vf-wiring-deterministic/issues"
   },
