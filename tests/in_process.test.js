@@ -33,12 +33,27 @@ describe('in-process webhook app', () => {
 
   it('should return llm_elicit stub with raw.source = "stub"', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const resp = await request(app)
-        .post('/webhook')
-        .set('Connection', 'close')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-        .timeout({ response: 5000, deadline: 6000 });
+      const http = require('http');
+      // Create an explicit server so we can control its lifecycle.
+      const server = http.createServer(app);
+      await new Promise((resolve) => server.listen(0, resolve));
+      const port = server.address().port;
+      const baseUrl = `http://127.0.0.1:${port}`;
+      let resp;
+      try {
+        resp = await request(baseUrl)
+          .post('/webhook')
+          .set('Connection', 'close')
+          .set('x-api-key', process.env.WEBHOOK_API_KEY)
+          .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
+          .timeout({ response: 5000, deadline: 6000 });
+      } finally {
+        try {
+          await new Promise((resolve) => server.close(resolve));
+        } catch (e) {
+          /* ignore */
+        }
+      }
 
       // Basic status checks
       expect(resp.status).toBeGreaterThanOrEqual(200);
