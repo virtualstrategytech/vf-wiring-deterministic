@@ -33,24 +33,12 @@ describe('in-process webhook app', () => {
 
   it('should return llm_elicit stub with raw.source = "stub"', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const agent = request.agent(app);
-      let resp;
-      try {
-        resp = await agent
-          .post('/webhook')
-          .set('x-api-key', process.env.WEBHOOK_API_KEY)
-          .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-          .timeout({ response: 5000, deadline: 6000 });
-      } finally {
-        // Ensure the internal server/socket is closed
-        if (agent && typeof agent.close === 'function') {
-          try {
-            agent.close();
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      const resp = await request(app)
+        .post('/webhook')
+        .set('Connection', 'close')
+        .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
+        .timeout({ response: 5000, deadline: 6000 });
 
       // Basic status checks
       expect(resp.status).toBeGreaterThanOrEqual(200);
