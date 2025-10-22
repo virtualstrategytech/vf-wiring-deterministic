@@ -253,6 +253,22 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
                 (process._getActiveRequests && process._getActiveRequests()) || []
               );
             } catch (e) {}
+            try {
+              // Aggressive cleanup: destroy any remaining non-stdio Sockets.
+              const raw = process._getActiveHandles() || [];
+              raw.forEach((h) => {
+                try {
+                  const name = h && h.constructor && h.constructor.name;
+                  if (name === 'Socket' && !h.destroyed) {
+                    // Avoid destroying stdio-like pipes (fd 0/1/2 handled above)
+                    if (typeof h.fd === 'number' && (h.fd === 0 || h.fd === 1 || h.fd === 2)) return;
+                    try {
+                      h.destroy();
+                    } catch (e) {}
+                  }
+                } catch (e) {}
+              });
+            } catch (e) {}
           } catch (e) {
             // ignore
           }
