@@ -562,5 +562,19 @@ if (require.main === module) {
   });
 }
 
+// Attach a helper to create a raw http.Server for tests that need explicit
+// start/stop control. Keep the default export as the Express `app` for
+// backward compatibility with existing code that requires the app directly.
+try {
+  const _http = require('http');
+  Object.defineProperty(app, 'createServer', {
+    value: () => _http.createServer(app),
+    writable: false,
+    enumerable: false,
+  });
+} catch {
+  // ignore in constrained environments
+}
+
 // Export the app for in-process tests and programmatic use.
 module.exports = app;
