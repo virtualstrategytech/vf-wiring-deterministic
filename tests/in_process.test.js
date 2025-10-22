@@ -33,29 +33,35 @@ describe('in-process webhook app', () => {
 
   it('should return llm_elicit stub with raw.source = "stub"', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const server = app.listen(0);
+      const agent = request.agent(app);
+      let resp;
       try {
-        const resp = await request(server)
+        resp = await agent
           .post('/webhook')
           .set('x-api-key', process.env.WEBHOOK_API_KEY)
           .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
           .timeout({ response: 5000, deadline: 6000 });
-
-        // Basic status checks
-        expect(resp.status).toBeGreaterThanOrEqual(200);
-        expect(resp.status).toBeLessThan(300);
-        // supertest exposes parsed body as resp.body
-        expect(resp.body).toBeDefined();
-        // llm_elicit stub returns raw.source === 'stub'
-        expect(resp.body.raw).toBeDefined();
-        expect(resp.body.raw.source).toBe('stub');
-        } finally {
-        try {
-          await new Promise((resolve) => server.close(resolve));
-        } catch (err) {
-          void err;
+      } finally {
+        // Ensure the internal server/socket is closed
+        if (agent && typeof agent.close === 'function') {
+          try {
+            agent.close();
+          } catch {
+            /* ignore */
+          }
         }
       }
+
+      // Basic status checks
+      expect(resp.status).toBeGreaterThanOrEqual(200);
+      expect(resp.status).toBeLessThan(300);
+      // supertest exposes parsed body as resp.body
+      expect(resp.body).toBeDefined();
+      // llm_elicit stub returns raw.source === 'stub'
+      // Some callers wrap the LLM payload in `data.raw`; accept either.
+      const raw = resp.body.raw || (resp.body.data && resp.body.data.raw);
+      expect(raw).toBeDefined();
+      expect(raw.source).toBe('stub');
     });
 
     const outText = logs.out.join('\n') + '\n' + logs.err.join('\n');

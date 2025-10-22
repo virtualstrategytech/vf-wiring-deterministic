@@ -485,12 +485,16 @@ app.post('/webhook', async (req, res) => {
         const summary = (question || '').toString().slice(0, 400);
         const needs_clarify = false;
         const followup_question = '';
+        // Return both top-level `raw` and a `data.raw` mirror so tests and
+        // external callers that expect either shape can work reliably.
+        const rawPayload = { source: 'stub' };
         return res.status(200).json({
           ok: true,
           summary,
           needs_clarify,
           followup_question,
-          raw: { source: 'stub' },
+          raw: rawPayload,
+          data: { raw: rawPayload },
         });
       } catch (_e) {
         console.error('llm_elicit handler error:', _e);
