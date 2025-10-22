@@ -47,7 +47,11 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
     function logLine(...parts) {
       const line = `[${new Date().toISOString()}] ${parts.join(' ')}\n`;
-      logStream.write(line);
+      try {
+        logStream.write(line);
+      } catch {
+        // ignore write failures in constrained environments
+      }
     }
 
     logLine('globalSetup: starting; webhookDir=', webhookDir);
@@ -90,6 +94,9 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     let child;
     try {
       logLine('globalSetup: spawning webhook via', nodeCmd, serverFile);
+      // Avoid piping child stdout/stderr into the test process to prevent
+      // leaving pipe/socket handles open after tests complete. We still log
+      // useful lifecycle events to a file via logLine.
       child = spawn(nodeCmd, [serverFile], {
         cwd: webhookDir,
         env: {
@@ -97,7 +104,7 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
           WEBHOOK_API_KEY: secretPlain,
           PORT: String(process.env.PORT || '3000'),
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'ignore', 'ignore'],
       });
     } catch (e) {
       logLine('globalSetup: failed to spawn node directly:', e.message);
@@ -122,12 +129,6 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     }
 
     if (child) {
-      child.stdout.on('data', (d) =>
-        logStream.write(`[SERVER STDOUT ${new Date().toISOString()}] ${d}`)
-      );
-      child.stderr.on('data', (d) =>
-        logStream.write(`[SERVER STDERR ${new Date().toISOString()}] ${d}`)
-      );
       child.on('error', (e) => logLine('globalSetup: spawn error:', e.message));
       child.on('exit', (code, sig) =>
         logLine('globalSetup: server exited', `code=${code}`, `sig=${sig}`)
@@ -159,6 +160,13 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
       throw err;
     }
 
-    // leave logStream open for globalTeardown to append/close
+    // Close the log stream now to avoid leaving an open file handle that
+    // keeps the Node process alive. globalTeardown will append via
+    // synchronous fs operations when it runs.
+    try {
+      logStream.end();
+    } catch {
+      // ignore
+    }
   };
 }
