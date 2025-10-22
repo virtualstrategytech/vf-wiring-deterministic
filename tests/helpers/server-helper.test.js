@@ -1,4 +1,3 @@
-const http = require('http');
 const supertest = require('supertest');
 const { startTestServer } = require('./server-helper');
 

@@ -20,7 +20,7 @@ function startTestServer(app) {
         for (const s of sockets) {
           try {
             s.destroy();
-          } catch (e) {
+          } catch {
             /* ignore */
           }
         }
