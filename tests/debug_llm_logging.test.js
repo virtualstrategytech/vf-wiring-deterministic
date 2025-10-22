@@ -67,6 +67,11 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       // Create an explicit server so we can control lifecycle and avoid
       // supertest/superagent internal listeners keeping the process alive.
       const server = http.createServer(app);
+      const sockets = new Set();
+      server.on('connection', (sock) => {
+        sockets.add(sock);
+        sock.on('close', () => sockets.delete(sock));
+      });
       await new Promise((resolve) => server.listen(0, resolve));
       if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
@@ -129,6 +134,14 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       } finally {
         try {
           await new Promise((resolve) => server.close(resolve));
+        } catch {}
+        // Destroy any remaining sockets that may keep the event loop alive.
+        try {
+          for (const s of sockets) {
+            try {
+              s.destroy();
+            } catch {}
+          }
         } catch {}
         try {
           const http = require('http');
