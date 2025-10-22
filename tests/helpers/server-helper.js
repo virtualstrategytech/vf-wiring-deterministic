@@ -7,6 +7,11 @@ const _sockets = new Set();
 
 function _attachSocketTracking(server, sockets) {
   server.on('connection', (s) => {
+    // attach a creation stack trace to the socket for CI diagnostics
+    try {
+      const stack = new Error('socket-created-at').stack;
+      s._createdStack = stack;
+    } catch {}
     sockets.add(s);
     _sockets.add(s);
     try {
