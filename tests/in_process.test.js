@@ -42,14 +42,23 @@ describe('in-process webhook app', () => {
       if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
       const baseUrl = `http://127.0.0.1:${port}`;
+      const axios = require('axios');
+      const http = require('http');
+      const postUrl = `${baseUrl}/webhook`;
       let resp;
       try {
-        resp = await request(baseUrl)
-          .post('/webhook')
-          .set('Connection', 'close')
-          .set('x-api-key', process.env.WEBHOOK_API_KEY)
-          .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-          .timeout({ response: 5000, deadline: 6000 });
+        const agent = new http.Agent({ keepAlive: false });
+        const r = await axios.post(
+          postUrl,
+          { action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' },
+          {
+            headers: { 'x-api-key': process.env.WEBHOOK_API_KEY, Connection: 'close' },
+            timeout: 5000,
+            httpAgent: agent,
+          }
+        );
+        // Normalize axios response to supertest-like shape used below
+        resp = { status: r.status, body: r.data };
       } finally {
         try {
           await new Promise((resolve) => server.close(resolve));
