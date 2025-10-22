@@ -113,3 +113,10 @@ Notes:
 
 - Keep `DEBUG_WEBHOOK` unset in production. Enable it only on a staging service if you need verbose logs.
 - If you prefer automated smoke runs on a staging branch, we can add a restricted workflow that triggers only on `push` to `staging`.
+
+## Testing (notes)
+
+- For in-process tests we expose a helper at `tests/helpers/server-helper.js`:
+   - `startTestServer(app)` starts the Express `app` on an ephemeral port and returns `{ base, close }`.
+   - Use `await srv.close()` to deterministically close sockets and the server.
+
