@@ -37,6 +37,9 @@ describe('in-process webhook app', () => {
       // Create an explicit server so we can control its lifecycle.
       const server = http.createServer(app);
       await new Promise((resolve) => server.listen(0, resolve));
+      // Do not let the test server keep the Node.js event loop alive
+      // if something else accidentally leaves a handle open.
+      if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
       const baseUrl = `http://127.0.0.1:${port}`;
       let resp;
