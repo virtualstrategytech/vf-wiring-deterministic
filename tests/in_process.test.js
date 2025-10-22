@@ -4,15 +4,12 @@ process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
 
 const supertest = require('supertest');
 const app = require('../novain-platform/webhook/server');
-const { startTestServer } = require('./helpers/server-helper');
 
 describe('in-process webhook app (refactored)', () => {
   jest.setTimeout(20000);
 
   it('returns llm_elicit stub with source "stub"', async () => {
-    const { base, close } = await startTestServer(app);
-
-    const resp = await supertest(base)
+    const resp = await supertest(app)
       .post('/webhook')
       .set('x-api-key', process.env.WEBHOOK_API_KEY)
       .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
@@ -25,7 +22,5 @@ describe('in-process webhook app (refactored)', () => {
       (body && body.raw && body.raw.source) ||
       (body && body.data && body.data.raw && body.data.raw.source);
     expect(rawSource).toBe('stub');
-
-    await close();
   });
 });

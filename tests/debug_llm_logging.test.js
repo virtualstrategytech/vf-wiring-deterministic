@@ -23,6 +23,7 @@ globalThis.fetch = async () => {
 
 const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
+const { startTestServer } = require('./helpers/server-helper');
 
 async function captureConsoleAsync(action) {
   const logs = { out: [], err: [] };

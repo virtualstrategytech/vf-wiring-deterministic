@@ -426,6 +426,10 @@ app.post('/webhook', async (req, res) => {
           }
 
           const payload = await r.json().catch(() => ({}));
+          // Mirror payload into both `raw` and `data.raw` so callers/tests that
+          // expect either shape will receive the same information.
+          const rawPayload = payload || {};
+
           // debug: log trimmed payload only when explicitly enabled (DEBUG_WEBHOOK)
           // and not in production. This prevents accidental leakage of LLM outputs.
           if (!IS_PROD && DEBUG_WEBHOOK) {
@@ -477,7 +481,8 @@ app.post('/webhook', async (req, res) => {
             summary,
             needs_clarify,
             followup_question,
-            raw: payload,
+            raw: rawPayload,
+            data: { raw: rawPayload },
           });
         }
 
@@ -513,22 +518,26 @@ app.post('/webhook', async (req, res) => {
         const qLower = (question || '').toLowerCase();
         const needs_clarify = qLower.includes('clarify') || qLower.includes('?');
         const followup_question = needs_clarify ? 'Can you clarify what you mean by X?' : '';
+        const rawPayload = { component: comp, source: 'invoke_component_stub' };
         return res.status(200).json({
           ok: true,
           summary,
           needs_clarify,
           followup_question,
-          raw: { component: comp, source: 'invoke_component_stub' },
+          raw: rawPayload,
+          data: { raw: rawPayload },
         });
       }
 
       // default invoke_component stub
+      const rawPayload = { component: comp || 'unknown', source: 'invoke_component_default' };
       return res.status(200).json({
         ok: true,
         summary,
         needs_clarify: false,
         followup_question: '',
-        raw: { component: comp || 'unknown', source: 'invoke_component_default' },
+        raw: rawPayload,
+        data: { raw: rawPayload },
       });
     }
 
