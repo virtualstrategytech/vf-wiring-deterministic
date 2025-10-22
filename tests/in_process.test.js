@@ -6,7 +6,6 @@ process.env.PROMPT_URL = process.env.PROMPT_URL || '';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
 
-const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
 
 // Helpers to capture stdout/stderr during an async action
@@ -43,7 +42,6 @@ describe('in-process webhook app', () => {
       const port = server.address().port;
       const baseUrl = `http://127.0.0.1:${port}`;
       const axios = require('axios');
-      const http = require('http');
       const postUrl = `${baseUrl}/webhook`;
       let resp;
       try {
@@ -64,6 +62,7 @@ describe('in-process webhook app', () => {
           await new Promise((resolve) => server.close(resolve));
         } catch (e) {
           /* ignore */
+          void e;
         }
       }
 
