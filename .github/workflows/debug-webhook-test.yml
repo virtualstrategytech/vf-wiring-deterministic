@@ -7,23 +7,22 @@ jobs:
   debug-test:
     runs-on: ubuntu-latest
     # Only run when explicitly enabled in repo secrets
-    env:
-      DEBUG_WEBHOOK_ENABLED: ${{ secrets.DEBUG_WEBHOOK_ENABLED }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Check DEBUG_WEBHOOK_ENABLED
         run: |
-          if [ "${{ secrets.DEBUG_WEBHOOK_ENABLED }}" != "true" ]; then
+          DEBUG_WEBHOOK_ENABLED="${{ secrets.DEBUG_WEBHOOK_ENABLED }}"
+          echo "DEBUG_WEBHOOK_ENABLED=$DEBUG_WEBHOOK_ENABLED" >> $GITHUB_ENV
+          if [ "$DEBUG_WEBHOOK_ENABLED" != "true" ]; then
             echo "DEBUG_WEBHOOK_ENABLED is not 'true'. Skipping job."
             exit 0
           fi
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '18.x'
 
       - name: Install deps
         run: npm ci
