@@ -41,32 +41,62 @@ describe('in-process webhook app', () => {
       if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
       const baseUrl = `http://127.0.0.1:${port}`;
-      const axios = require('axios');
       const postUrl = `${baseUrl}/webhook`;
-      let resp;
-      try {
-        const agent = new http.Agent({ keepAlive: false });
-        const r = await axios.post(
-          postUrl,
-          { action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' },
-          {
-            headers: { 'x-api-key': process.env.WEBHOOK_API_KEY, Connection: 'close' },
-            timeout: 5000,
-            httpAgent: agent,
+      function postJson(url, data, opts = {}) {
+        return new Promise((resolve, reject) => {
+          try {
+            const parsed = new URL(url);
+            const body = JSON.stringify(data || {});
+            const requestOptions = {
+              protocol: parsed.protocol,
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.pathname + (parsed.search || ''),
+              method: 'POST',
+              headers: Object.assign(
+                {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(body),
+                },
+                opts.headers || {}
+              ),
+            };
+
+            const req = http.request(requestOptions, (res) => {
+              const chunks = [];
+              res.on('data', (c) => chunks.push(c));
+              res.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                let parsedBody = null;
+                try {
+                  parsedBody = JSON.parse(text);
+                } catch (_e) {
+                  parsedBody = text;
+                }
+                resolve({ status: res.statusCode, body: parsedBody });
+              });
+            });
+            req.on('error', reject);
+            if (opts.timeout) req.setTimeout(opts.timeout, () => req.destroy(new Error('timeout')));
+            req.end(body);
+          } catch (e) {
+            reject(e);
           }
-        );
-        // Normalize axios response to supertest-like shape used below
-        resp = { status: r.status, body: r.data };
-      } finally {
-        try {
-          await new Promise((resolve) => server.close(resolve));
-        } catch (e) {
-          /* ignore */
-          void e;
-        }
+        });
       }
 
-      // Basic status checks
+      let resp;
+      try {
+        resp = await postJson(postUrl, { action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' }, { headers: { 'x-api-key': process.env.WEBHOOK_API_KEY, Connection: 'close' }, timeout: 5000 });
+} finally {
+  try {
+    await new Promise((resolve) => server.close(resolve));
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+// Basic status checks
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
       // supertest exposes parsed body as resp.body
