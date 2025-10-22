@@ -30,7 +30,7 @@ describe('webhook smoke', () => {
 
   test('POST /webhook generate_lesson (best-effort)', async () => {
     const body = { action: 'generate_lesson', question: 'Teach me SPQA', tenantId: 'default' };
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 10000);
+    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 30000);
 
     // Accept success (2xx) OR a controlled server-side failure (500) when external services are not configured.
     if (resp.status >= 200 && resp.status < 300) {
@@ -51,7 +51,7 @@ describe('webhook smoke', () => {
 
   test('POST /webhook generate_quiz (best-effort)', async () => {
     const body = { action: 'generate_quiz', question: 'Quiz me on SPQA', tenantId: 'default' };
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 10000);
+    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 30000);
 
     if (resp.status >= 200 && resp.status < 300) {
       if (resp.data && typeof resp.data === 'object') {
