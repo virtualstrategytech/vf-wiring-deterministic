@@ -35,6 +35,52 @@ afterAll(async () => {
 
     // tiny additional delay to allow native handles to fully close on CI/Windows
     await new Promise((r) => setTimeout(r, 20));
+
+    // CI diagnostic: if Jest still sees open handles, try to list them and aggressively close
+    try {
+      if (typeof process._getActiveHandles === 'function') {
+        const handles = process._getActiveHandles();
+        if (handles && handles.length) {
+          console.warn('CI diagnostic: active handles after test cleanup:', handles.length);
+          try {
+            handles.forEach((h, i) => {
+              try {
+                const name = h && h.constructor && h.constructor.name;
+                // log a brief summary about the handle
+                console.warn(`  handle[${i}] type=${String(name)}`);
+              } catch {}
+            });
+          } catch {}
+
+          // Attempt to close/destroy known handle types (sockets, servers)
+          for (const h of handles) {
+            try {
+              if (!h) continue;
+              // sockets
+              if (typeof h.destroy === 'function') {
+                try {
+                  h.destroy();
+                } catch {}
+              }
+              // servers
+              if (typeof h.close === 'function') {
+                try {
+                  h.close(() => {});
+                } catch {}
+              }
+            } catch {}
+          }
+
+          // give the runtime a short moment to settle after forced cleanup
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      }
+    } catch (err) {
+      // swallow any diagnostic errors - diagnostics must not fail tests
+      try {
+        console.warn('handle-dump error', err && err.stack ? err.stack : String(err));
+      } catch {}
+    }
   } catch {
     // swallow errors to avoid masking test failures
   }
