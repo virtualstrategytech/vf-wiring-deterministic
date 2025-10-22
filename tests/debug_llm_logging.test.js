@@ -96,7 +96,37 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         sockets.add(sock);
         sock.on('close', () => sockets.delete(sock));
       });
+
+      // Optional handle snapshots to see what the server creates
+      const takeHandles = () => {
+        try {
+          return (process._getActiveHandles() || []).map((h) => {
+            const ctor = h && h.constructor && h.constructor.name;
+            const info = { ctor };
+            try {
+              if (ctor === 'Socket') {
+                info.localAddress = h.localAddress;
+                info.localPort = h.localPort;
+                info.remoteAddress = h.remoteAddress;
+                info.remotePort = h.remotePort;
+              }
+              if (ctor === 'WriteStream' || ctor === 'ReadStream') {
+                info.fd = h.fd;
+              }
+              if (ctor === 'Server') {
+                info.address = typeof h.address === 'function' ? h.address() : undefined;
+              }
+            } catch (e) {}
+            return info;
+          });
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const beforeHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
       await new Promise((resolve) => server.listen(0, resolve));
+      const afterListenHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
       if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
       const postUrl = `http://127.0.0.1:${port}/webhook`;
@@ -159,7 +189,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         try {
           await new Promise((resolve) => server.close(resolve));
         } catch {}
-        // Destroy any remaining sockets that may keep the event loop alive.
+        const afterCloseHandles = (process.env.DEBUG_HANDLE_INSPECT === '1') ? takeHandles() : null;
         try {
           for (const s of sockets) {
             try {
@@ -179,6 +209,18 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         } catch {}
         // Give Node a tick to let any sockets/timers settle
         await new Promise((resolve) => setImmediate(resolve));
+
+        if (process.env.DEBUG_HANDLE_INSPECT === '1') {
+          try {
+            // Print a concise diff of before/after to identify leftovers
+            // eslint-disable-next-line no-console
+            console.error('--- HANDLE SNAPSHOT BEFORE LISTEN ---', beforeHandles);
+            // eslint-disable-next-line no-console
+            console.error('--- HANDLE SNAPSHOT AFTER LISTEN ---', afterListenHandles);
+            // eslint-disable-next-line no-console
+            console.error('--- HANDLE SNAPSHOT AFTER CLOSE ---', afterCloseHandles);
+          } catch (e) {}
+        }
       }
     });
 
