@@ -60,6 +60,7 @@ jobs:
       - name: Run tests
         env:
           CI: 'true'
+          SKIP_SMOKE: 'true'
         run: npm test --silent
 
       - name: Upload logs on failure

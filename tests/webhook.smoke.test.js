@@ -11,6 +11,11 @@ const key =
 const base = process.env.WEBHOOK_BASE || 'http://127.0.0.1:3000';
 
 describe('webhook smoke', () => {
+  if (process.env.SKIP_SMOKE === 'true') {
+    // Skip entire smoke suite in CI when no deployed service is available
+    console.warn('SKIP_SMOKE=true, skipping webhook smoke tests');
+    return;
+  }
   // Allow longer for remote operations in CI (business/prompt services may be slower)
   jest.setTimeout(60000);
 
