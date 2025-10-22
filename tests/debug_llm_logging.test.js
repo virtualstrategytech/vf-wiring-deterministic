@@ -189,7 +189,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         try {
           await new Promise((resolve) => server.close(resolve));
         } catch {}
-        const afterCloseHandles = (process.env.DEBUG_HANDLE_INSPECT === '1') ? takeHandles() : null;
+        const afterCloseHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
         try {
           for (const s of sockets) {
             try {
@@ -212,14 +212,42 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
         if (process.env.DEBUG_HANDLE_INSPECT === '1') {
           try {
-            // Print a concise diff of before/after to identify leftovers
+            const summarize = (arr) => {
+              const map = Object.create(null);
+              (arr || []).forEach((h) => {
+                const k = (h && h.ctor) || (h && h.constructor && h.constructor.name) || String(h);
+                map[k] = (map[k] || 0) + 1;
+              });
+              return map;
+            };
+            const before = summarize(beforeHandles);
+            const afterListen = summarize(afterListenHandles);
+            const afterClose = summarize(afterCloseHandles);
             // eslint-disable-next-line no-console
-            console.error('--- HANDLE SNAPSHOT BEFORE LISTEN ---', beforeHandles);
+            console.error('--- HANDLE SUMMARY BEFORE LISTEN ---', before);
             // eslint-disable-next-line no-console
-            console.error('--- HANDLE SNAPSHOT AFTER LISTEN ---', afterListenHandles);
+            console.error('--- HANDLE SUMMARY AFTER LISTEN ---', afterListen);
             // eslint-disable-next-line no-console
-            console.error('--- HANDLE SNAPSHOT AFTER CLOSE ---', afterCloseHandles);
-          } catch (e) {}
+            console.error('--- HANDLE SUMMARY AFTER CLOSE ---', afterClose);
+            const diff = Object.create(null);
+            Object.keys(afterClose).forEach((k) => {
+              const b = before[k] || 0;
+              const a = afterClose[k] || 0;
+              if (a > b) diff[k] = a - b;
+            });
+            // eslint-disable-next-line no-console
+            console.error('--- HANDLE LEFTOVER (afterClose - before) ---', diff);
+            try {
+              // also print active requests if any
+              // eslint-disable-next-line no-console
+              console.error(
+                'activeRequests:',
+                (process._getActiveRequests && process._getActiveRequests()) || []
+              );
+            } catch (e) {}
+          } catch (e) {
+            // ignore
+          }
         }
       }
     });
