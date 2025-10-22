@@ -64,7 +64,7 @@ jobs:
           PROMPT_URL: ''
           RETRIEVAL_URL: ''
           BUSINESS_URL: ''
-        run: npm test --silent
+        run: npm test --silent -- --runInBand
 
       - name: Upload logs on failure
         if: failure()
