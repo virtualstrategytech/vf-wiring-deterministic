@@ -124,9 +124,11 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         }
       };
 
-      const beforeHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
-      await new Promise((resolve) => server.listen(0, resolve));
-      const afterListenHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
+  const beforeHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
+  const beforeRaw = process.env.DEBUG_HANDLE_INSPECT === '1' ? (process._getActiveHandles() || []).slice() : null;
+  await new Promise((resolve) => server.listen(0, resolve));
+  const afterListenHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
+  const afterListenRaw = process.env.DEBUG_HANDLE_INSPECT === '1' ? (process._getActiveHandles() || []).slice() : null;
       if (typeof server.unref === 'function') server.unref();
       const port = server.address().port;
       const postUrl = `http://127.0.0.1:${port}/webhook`;
@@ -189,7 +191,8 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         try {
           await new Promise((resolve) => server.close(resolve));
         } catch {}
-        const afterCloseHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
+  const afterCloseHandles = process.env.DEBUG_HANDLE_INSPECT === '1' ? takeHandles() : null;
+  const afterCloseRaw = process.env.DEBUG_HANDLE_INSPECT === '1' ? (process._getActiveHandles() || []).slice() : null;
         try {
           for (const s of sockets) {
             try {
@@ -237,6 +240,11 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
             });
             // eslint-disable-next-line no-console
             console.error('--- HANDLE LEFTOVER (afterClose - before) ---', diff);
+            try {
+              const newHandles = (afterCloseRaw || []).filter((h) => (beforeRaw || []).indexOf(h) === -1);
+              // eslint-disable-next-line no-console
+              console.error('--- NEW HANDLES (references) ---', newHandles.map((h) => ({ ctor: h && h.constructor && h.constructor.name })));
+            } catch (e) {}
             try {
               // also print active requests if any
               // eslint-disable-next-line no-console
