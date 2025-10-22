@@ -61,6 +61,30 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
     } catch {}
   });
 
+  // Optional diagnostic: print active handles when debugging open-handle issues.
+  if (process.env.DEBUG_HANDLE_INSPECT === '1') {
+    afterAll(() => {
+      try {
+        // eslint-disable-next-line no-console
+        console.error('--- HANDLE INSPECT START ---');
+        const handles = process._getActiveHandles();
+        handles.forEach((h, i) => {
+          try {
+            // eslint-disable-next-line no-console
+            console.error(i, h && h.constructor && h.constructor.name, h);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error(i, 'handle', String(h));
+          }
+        });
+        // eslint-disable-next-line no-console
+        console.error('--- HANDLE INSPECT END ---');
+      } catch (e) {
+        // ignore
+      }
+    });
+  }
+
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
       const http = require('http');
