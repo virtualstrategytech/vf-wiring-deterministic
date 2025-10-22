@@ -32,6 +32,9 @@ afterAll(async () => {
 
     // yield to the event loop to allow handles to close
     await new Promise((r) => setImmediate(r));
+
+    // tiny additional delay to allow native handles to fully close on CI/Windows
+    await new Promise((r) => setTimeout(r, 20));
   } catch {
     // swallow errors to avoid masking test failures
   }

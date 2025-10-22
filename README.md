@@ -117,6 +117,5 @@ Notes:
 ## Testing (notes)
 
 - For in-process tests we expose a helper at `tests/helpers/server-helper.js`:
-   - `startTestServer(app)` starts the Express `app` on an ephemeral port and returns `{ base, close }`.
-   - Use `await srv.close()` to deterministically close sockets and the server.
-
+  - `startTestServer(app)` starts the Express `app` on an ephemeral port and returns `{ base, close }`.
+  - Use `await srv.close()` to deterministically close sockets and the server.

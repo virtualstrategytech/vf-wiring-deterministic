@@ -111,8 +111,7 @@ node .\server.js
     // ... run requests against srv.base ...
     await srv.close();
 
- - Run tests with `npm test` (Jest uses `jest.config.cjs`). Ensure `WEBHOOK_API_KEY` is set for tests.
-
+- Run tests with `npm test` (Jest uses `jest.config.cjs`). Ensure `WEBHOOK_API_KEY` is set for tests.
 
 - The webhook intentionally never logs full secret values. Presence checks (true/false) and debug output require explicit enabling.
 - For CI, provide `WEBHOOK_API_KEY` as a secret environment variable to the runner so tests can authenticate.

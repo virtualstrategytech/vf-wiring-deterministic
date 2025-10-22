@@ -49,7 +49,12 @@ jobs:
       # to the subsequent Run tests step when allowed.
       - name: Inject WEBHOOK_API_KEY for same-repo runs
         if: ${{ github.event_name != 'pull_request' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
-        run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+        env:
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: |
+          if [ -n "$WEBHOOK_API_KEY" ]; then
+            echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV
+          fi
         shell: bash
 
       - name: Run tests
