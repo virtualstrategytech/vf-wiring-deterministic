@@ -27,7 +27,7 @@
     "husky": "^8.0.3",
     "jest": "^27.5.1",
     "lint-staged": "^13.3.0",
-    "supertest": "^6.3.3",
+    "supertest": "7.1.4",
     "typescript": "5.5.4"
   },
   "directories": {

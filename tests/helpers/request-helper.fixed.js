@@ -5,18 +5,12 @@ async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
 ) {
+  let closeServer = null;
   let client;
 
-  // If `app` is a string, treat it as a base URL.
-  // If `app` looks like an Express app (has .listen), prefer using
-  // `supertest(app)` (in-process) to avoid creating a real TCP listener
-  // which can lead to Jest open-handle diagnostics. Only start a real
-  // server when the caller provides a string base URL.
-  let closeServerFn = null;
+  // If `app` is a string assume it's a base URL. Otherwise pass the Express
+  // app directly to supertest so we don't need to start an ephemeral server.
   if (typeof app === 'string') {
-    client = supertest(app);
-  } else if (app && typeof app.listen === 'function') {
-    // Use in-process supertest to avoid ephemeral TCP servers in tests.
     client = supertest(app);
   } else {
     client = supertest(app);
@@ -33,7 +27,16 @@ async function requestApp(
     const res = await req;
     return res;
   } finally {
-    // nothing to close for in-process supertest(app)
+    // close any server we started
+    try {
+      if (typeof closeServer === 'function') await closeServer();
+    } catch {}
+    // fallback: ensure helper-tracked sockets are destroyed
+    try {
+      if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+        serverHelper._forceCloseAllSockets();
+      }
+    } catch {}
   }
 }
 

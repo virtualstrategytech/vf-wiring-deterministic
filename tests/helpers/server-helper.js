@@ -180,7 +180,10 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    server.once('listening', onListen);
+    // Start listening and use the named `onListen` callback directly.
+    // Passing a named callback avoids creating an internal bound anonymous
+    // function that Jest sometimes reports as an open handle.
+    server.listen(0, '127.0.0.1', onListen);
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
@@ -194,10 +197,8 @@ function startTestServer(app) {
         });
       }
     } catch {}
-    // bind explicitly to 127.0.0.1 to avoid platform differences (IPv6 vs IPv4)
-    // Call listen without a callback to avoid creating a bound callback
-    // handle that some Jest diagnostics report as a persistent open handle.
-    server.listen(0, '127.0.0.1');
+    // Note: we already called `server.listen(..., onListen)` above. Ensure
+    // the server is unref'd so it doesn't keep the Node process alive.
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
