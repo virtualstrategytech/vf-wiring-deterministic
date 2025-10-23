@@ -7,4 +7,5 @@
   testTimeout: 30000,
   // ignore folders that contain package.json files with colliding names
   modulePathIgnorePatterns: ['<rootDir>/webhook.legacy', '<rootDir>/novain-platform/webhook'],
+  setupFilesAfterEnv: ['<rootDir>/tests/jest.setup.js'],
 };

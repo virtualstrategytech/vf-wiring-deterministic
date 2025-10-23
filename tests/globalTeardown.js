@@ -109,4 +109,26 @@ module.exports = async () => {
 
   // Append final marker
   appendLog('globalTeardown: finished');
+  // Best-effort: destroy global http/https agents to avoid Jest open-handle warnings
+  try {
+    try {
+      const http = require('http');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+        http.globalAgent.destroy();
+        appendLog('globalTeardown: destroyed http.globalAgent');
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: http agent destroy error: ${e && e.message}`);
+    }
+
+    try {
+      const https = require('https');
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+        https.globalAgent.destroy();
+        appendLog('globalTeardown: destroyed https.globalAgent');
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: https agent destroy error: ${e && e.message}`);
+    }
+  } catch {}
 };

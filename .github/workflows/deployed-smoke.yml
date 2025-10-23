@@ -25,10 +25,13 @@ jobs:
           node-version: 18
 
       - name: Inject secrets into job env
+        env:
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           echo "Injecting secrets into job environment"
-          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> $GITHUB_ENV
-          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE=$WEBHOOK_BASE" >> $GITHUB_ENV; fi
+          if [ -n "$WEBHOOK_API_KEY" ]; then echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV; fi
 
       - name: Validate workflow inputs and secrets
         run: |
@@ -76,8 +79,6 @@ jobs:
 
       - name: Compute fingerprint and export to outputs
         id: set-fingerprint
-        env:
-          WEBHOOK_API_KEY: ${{ env.WEBHOOK_API_KEY }}
         run: |
           node -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt
           echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> $GITHUB_OUTPUT
@@ -85,8 +86,6 @@ jobs:
 
       - name: Run deployed smoke tests
         env:
-          WEBHOOK_BASE: ${{ env.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ env.WEBHOOK_API_KEY }}
           SKIP_SYNC_SECRET: 'true'
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"

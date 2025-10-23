@@ -7,13 +7,15 @@ jobs:
   debug-test:
     runs-on: ubuntu-latest
     env:
-      DEBUG_WEBHOOK_ENABLED: ${{ secrets.DEBUG_WEBHOOK_ENABLED }}
+      DEBUG_WEBHOOK_ENABLED: '${{ secrets.DEBUG_WEBHOOK_ENABLED }}'
+      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
     # Only run when explicitly enabled in repo secrets
 
     steps:
       - name: Exit early if DEBUG_WEBHOOK_ENABLED is not 'true'
         run: |
-          if [ "${{ secrets.DEBUG_WEBHOOK_ENABLED }}" != 'true' ]; then
+          if [ "$DEBUG_WEBHOOK_ENABLED" != 'true' ]; then
             echo "DEBUG_WEBHOOK_ENABLED is not 'true', skipping tests."
             exit 0
           fi
@@ -34,7 +36,8 @@ jobs:
 
       - name: Validate required secrets
         run: |
-          if [ -z "${{ secrets.WEBHOOK_API_KEY }}" ] || [ -z "${{ secrets.WEBHOOK_BASE }}" ]; then
+          # use job-level env vars; secrets are injected by GitHub and also available as env
+          if [ -z "$WEBHOOK_API_KEY" ] || [ -z "$WEBHOOK_BASE" ]; then
             echo "Required secrets WEBHOOK_API_KEY and WEBHOOK_BASE are not set. Failing."
             exit 1
           fi
@@ -44,11 +47,11 @@ jobs:
         env:
           NODE_ENV: development
           DEBUG_WEBHOOK: 'true'
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+          WEBHOOK_API_KEY: $WEBHOOK_API_KEY
 
       - name: Run smoke tests
         run: npx jest tests/webhook.smoke.test.js --runInBand
         env:
           NODE_ENV: test
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: $WEBHOOK_API_KEY
+          WEBHOOK_BASE: $WEBHOOK_BASE

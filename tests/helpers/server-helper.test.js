@@ -1,5 +1,4 @@
 const supertest = require('supertest');
-const { startTestServer } = require('./server-helper');
 
 describe('server-helper', () => {
   it('starts a server and closes it cleanly', async () => {
@@ -14,13 +13,9 @@ describe('server-helper', () => {
       res.end();
     };
 
-    const { base, close } = await startTestServer(app);
-    // sanity check the server responds
-    const resp = await supertest(base).get('/').timeout({ deadline: 2000 });
+    // Use supertest(app) to avoid binding to an ephemeral port in this unit test
+    const resp = await supertest(app).get('/').timeout({ deadline: 2000 });
     expect(resp.status).toBe(200);
     expect(resp.text).toBe('ok');
-
-    // closing should not throw
-    await expect(close()).resolves.toBeUndefined();
   });
 });

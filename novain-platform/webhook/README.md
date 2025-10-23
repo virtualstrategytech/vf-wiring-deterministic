@@ -98,6 +98,21 @@ node .\server.js
 
 ## Notes
 
+## Testing (in-process)
+
+- The Express `app` exported from `server.js` exposes a small helper for tests: `app.createServer()`.
+  - Requiring the module returns the Express `app` (for `supertest(app)` usage).
+  - Use `app.createServer()` when you need a raw Node `http.Server` to control start/stop explicitly.
+
+- A test helper is included at `tests/helpers/server-helper.js` exposing `startTestServer(app)`:
+  - Example:
+    const { startTestServer } = require('./tests/helpers/server-helper');
+    const srv = await startTestServer(app); // srv.base is the base URL
+    // ... run requests against srv.base ...
+    await srv.close();
+
+- Run tests with `npm test` (Jest uses `jest.config.cjs`). Ensure `WEBHOOK_API_KEY` is set for tests.
+
 - The webhook intentionally never logs full secret values. Presence checks (true/false) and debug output require explicit enabling.
 - For CI, provide `WEBHOOK_API_KEY` as a secret environment variable to the runner so tests can authenticate.
 

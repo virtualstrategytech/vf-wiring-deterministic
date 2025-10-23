@@ -1,4 +1,3 @@
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -7,94 +6,48 @@ const key =
   process.env.WEBHOOK_API_KEY ||
   (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
 
-const base = process.env.WEBHOOK_BASE || 'http://127.0.0.1:3000';
+// Ensure the in-process server reads the same API key at module-load time
+process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || key;
+
+const app = require('../novain-platform/webhook/server');
+// This test uses `requestApp` helper (supertest) so no TCP server is required.
 
 describe('llm_elicit stub behavior', () => {
   // tolerate slightly longer network/CI delays
   jest.setTimeout(20000);
 
   test('POST /webhook llm_elicit returns stub when PROMPT_URL not set', async () => {
-    const body = { action: 'llm_elicit', question: 'Explain SPQA', tenantId: 'default' };
+    try {
+      const body = { action: 'llm_elicit', question: 'Explain SPQA', tenantId: 'default' };
 
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 7000);
+      const { requestApp } = require('./helpers/request-helper');
+      const respSuper = await requestApp(app, {
+        method: 'post',
+        path: '/webhook',
+        body,
+        headers: { 'x-api-key': String(key) },
+        timeout: 7000,
+      });
 
-    // Accept 2xx success or 400 when a prompt service is intentionally not configured
-    expect(resp.status).toBeGreaterThanOrEqual(200);
-    expect(resp.status).toBeLessThan(500);
-    expect(resp.data).toBeDefined();
-    // When prompt service is not configured the webhook returns raw.source === 'stub'
-    if (resp.data && typeof resp.data === 'object') {
-      expect(resp.data.raw).toBeDefined();
-      expect(
-        resp.data.raw.source === 'stub' ||
-          resp.data.raw.source === 'invoke_component_stub' ||
-          resp.data.raw.source === 'invoke_component_default'
-      ).toBeTruthy();
+      const resp = { status: respSuper.status, data: respSuper.body };
+
+      // Accept 2xx success or 400 when a prompt service is intentionally not configured
+      expect(resp.status).toBeGreaterThanOrEqual(200);
+      expect(resp.status).toBeLessThan(500);
+      expect(resp.data).toBeDefined();
+      // When prompt service is not configured the webhook returns raw.source === 'stub'
+      if (resp.data && typeof resp.data === 'object') {
+        expect(resp.data.raw).toBeDefined();
+        expect(
+          resp.data.raw.source === 'stub' ||
+            resp.data.raw.source === 'invoke_component_stub' ||
+            resp.data.raw.source === 'invoke_component_default'
+        ).toBeTruthy();
+      }
+    } finally {
+      // nothing to close when using supertest(app)
     }
   });
 });
 
-// copy helpers from webhook.smoke.test.js
-function postJson(url, body, headers = {}, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(url);
-      const data = JSON.stringify(body);
-      const options = {
-        method: 'POST',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        agent: false,
-        headers: Object.assign(
-          {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            Connection: 'close',
-          },
-          headers
-        ),
-      };
-
-      const req = http.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            const text = Buffer.concat(chunks).toString();
-            let json;
-            try {
-              json = JSON.parse(text);
-            } catch {
-              json = text;
-            }
-            resolve({ status: res.statusCode, data: json });
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        clearTimeout(timer);
-        try {
-          req.destroy();
-        } catch {}
-        reject(err);
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      req.write(data);
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
+// postJson helper intentionally removed: request-helper is used instead.
