@@ -54,10 +54,20 @@ function startTestServer(app) {
       const addr = server.address();
       const base = `http://127.0.0.1:${addr.port}`;
       try {
+        if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
+      } catch {}
+      try {
         if (typeof server.unref === 'function') server.unref();
       } catch {}
 
       const close = async () => {
+        try {
+          if (process.env.DEBUG_TESTS)
+            console.warn &&
+              console.warn(
+                `test-server close requested ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+              );
+        } catch {}
         // Remove connection listener first to avoid new sockets being tracked
         server.removeAllListeners('connection');
 
@@ -116,11 +126,28 @@ function startTestServer(app) {
           }
         });
 
+        try {
+          if (process.env.DEBUG_TESTS) {
+            const handles = process._getActiveHandles && process._getActiveHandles();
+            try {
+              console.warn && console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
+            } catch {}
+          }
+        } catch {}
+
         // After close completes, give Node a short moment to release native handles
         await new Promise((r) => setImmediate(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
+        } catch {}
+
+        try {
+          if (process.env.DEBUG_TESTS)
+            console.warn &&
+              console.warn(
+                `test-server close completed ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+              );
         } catch {}
 
         // Remove from module-level registry

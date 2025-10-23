@@ -21,9 +21,8 @@ globalThis.fetch = async () => {
   };
 };
 
-const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
-const { startTestServer } = require('./helpers/server-helper');
+// Note: tests use `requestApp` helper which internally uses supertest(app).
 
 async function captureConsoleAsync(action) {
   const logs = { out: [], err: [] };
@@ -61,14 +60,16 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   });
 
   it('logs llm payload snippet when enabled', async () => {
-    const srv = await startTestServer(app);
     try {
+      const { requestApp } = require('./helpers/request-helper');
       const logs = await captureConsoleAsync(async () => {
-        const resp = await request(srv.base)
-          .post('/webhook')
-          .set('x-api-key', process.env.WEBHOOK_API_KEY)
-          .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
-          .timeout({ deadline: 5000 });
+        const resp = await requestApp(app, {
+          method: 'post',
+          path: '/webhook',
+          body: { action: 'llm_elicit', question: 'Q', tenantId: 't' },
+          headers: { 'x-api-key': process.env.WEBHOOK_API_KEY },
+          timeout: 5000,
+        });
 
         expect(resp.status).toBeGreaterThanOrEqual(200);
         expect(resp.status).toBeLessThan(300);
@@ -78,7 +79,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       // Server should log a short snippet of the LLM payload when DEBUG_WEBHOOK=true
       expect(/llm payload snippet|llm payload|raw payload/i.test(combined)).toBe(true);
     } finally {
-      await srv.close();
+      // nothing to close when using supertest(app)
     }
   });
 });
