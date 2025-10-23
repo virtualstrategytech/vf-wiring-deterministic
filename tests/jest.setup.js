@@ -48,6 +48,17 @@ afterAll(async () => {
                 const name = h && h.constructor && h.constructor.name;
                 // log a brief summary about the handle
                 console.warn(`  handle[${i}] type=${String(name)}`);
+                // If the socket has a recorded creation stack, print it (shortened)
+                try {
+                  if (h && typeof h._createdStack === 'string') {
+                    const lines = h._createdStack
+                      .split('\n')
+                      .slice(0, 6)
+                      .map((l) => l.trim());
+                    console.warn(`    created at:`);
+                    lines.forEach((ln) => console.warn(`      ${ln}`));
+                  }
+                } catch {}
               } catch {}
             });
           } catch {}
