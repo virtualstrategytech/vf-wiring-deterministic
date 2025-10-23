@@ -130,7 +130,8 @@ function startTestServer(app) {
           if (process.env.DEBUG_TESTS) {
             const handles = process._getActiveHandles && process._getActiveHandles();
             try {
-              console.warn && console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
+              console.warn &&
+                console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
             } catch {}
           }
         } catch {}
@@ -180,8 +181,31 @@ function startTestServer(app) {
 
     server.once('error', onError);
     server.once('listening', onListen);
+    // attach a close event logger when debugging
+    try {
+      if (process.env.DEBUG_TESTS) {
+        server.once('close', () => {
+          try {
+            console.warn &&
+              console.warn(
+                `test-server received close event for ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+              );
+          } catch {}
+        });
+      }
+    } catch {}
     // bind explicitly to 127.0.0.1 to avoid platform differences (IPv6 vs IPv4)
-    server.listen(0, '127.0.0.1');
+    // Provide an explicit no-op callback so some runtimes do not retain a
+    // bound anonymous function handle (Jest sometimes reports this).
+    // use a named no-op callback (avoids creating a "bound-anonymous-fn"
+    // handle that some Jest diagnostics flag)
+    function __noop_listen_callback() {}
+    try {
+      server.listen(0, '127.0.0.1', __noop_listen_callback);
+    } catch (e) {
+      // fallback to simpler signature
+      server.listen(0, '127.0.0.1');
+    }
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}

@@ -7,9 +7,9 @@ jobs:
   debug-test:
     runs-on: ubuntu-latest
     env:
-      DEBUG_WEBHOOK_ENABLED: ${{ secrets.DEBUG_WEBHOOK_ENABLED }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      DEBUG_WEBHOOK_ENABLED: '${{ secrets.DEBUG_WEBHOOK_ENABLED }}'
+      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
     # Only run when explicitly enabled in repo secrets
 
     steps:

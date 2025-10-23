@@ -41,14 +41,40 @@ afterAll(async () => {
       if (typeof process._getActiveHandles === 'function') {
         const handles = process._getActiveHandles();
         if (handles && handles.length) {
-          console.warn('CI diagnostic: active handles after test cleanup:', handles.length);
+          // Filter out benign handles (stdout/stderr WriteStreams and some
+          // bound anonymous functions) to reduce diagnostic noise in CI.
+          // Keep other handles for actionable logs.
+          const meaningful = (handles || []).filter((h) => {
+            try {
+              const name = h && h.constructor && h.constructor.name;
+              // drop WriteStream (console/stdout/stderr)
+              if (String(name) === 'WriteStream') return false;
+              // drop plain Function handles that look like bound anonymous
+              // functions (their string representation often contains "bound").
+              if (String(name) === 'Function') {
+                try {
+                  const s = String(h);
+                  if (s && s.includes('bound')) return false;
+                } catch {}
+              }
+              return true;
+            } catch {
+              return true;
+            }
+          });
+          if (!meaningful.length) {
+            // nothing actionable to show
+            return;
+          }
+          console.warn(
+            'CI diagnostic: active handles after test cleanup (non-WriteStream):',
+            meaningful.length
+          );
           try {
-            handles.forEach((h, i) => {
+            meaningful.forEach((h, i) => {
               try {
                 const name = h && h.constructor && h.constructor.name;
-                // log a brief summary about the handle
                 console.warn(`  handle[${i}] type=${String(name)}`);
-                // If the socket has a recorded creation stack, print it (shortened)
                 try {
                   if (h && typeof h._createdStack === 'string') {
                     const lines = h._createdStack
@@ -59,21 +85,32 @@ afterAll(async () => {
                     lines.forEach((ln) => console.warn(`      ${ln}`));
                   }
                 } catch {}
+                try {
+                  if (name === 'Socket' || name === 'TLSSocket') {
+                    const info = {
+                      localAddress: h.localAddress,
+                      localPort: h.localPort,
+                      remoteAddress: h.remoteAddress,
+                      remotePort: h.remotePort,
+                      destroyed: h.destroyed,
+                      pending: h.pending,
+                    };
+                    console.warn(`    socket-info: ${JSON.stringify(info)}`);
+                  }
+                } catch {}
               } catch {}
             });
           } catch {}
 
           // Attempt to close/destroy known handle types (sockets, servers)
-          for (const h of handles) {
+          for (const h of meaningful) {
             try {
               if (!h) continue;
-              // sockets
               if (typeof h.destroy === 'function') {
                 try {
                   h.destroy();
                 } catch {}
               }
-              // servers
               if (typeof h.close === 'function') {
                 try {
                   h.close(() => {});
@@ -81,6 +118,40 @@ afterAll(async () => {
               }
             } catch {}
           }
+
+          // Additionally, aggressively clear any sockets held in http/https global agent pools
+          try {
+            const drainAgent = (agent) => {
+              if (!agent) return;
+              try {
+                // agent.sockets and agent.freeSockets are objects mapping name->array
+                const mapIter = (obj) => {
+                  if (!obj) return;
+                  try {
+                    Object.values(obj).forEach((arr) => {
+                      if (Array.isArray(arr)) {
+                        arr.forEach((s) => {
+                          try {
+                            if (s && typeof s.destroy === 'function') s.destroy();
+                          } catch {}
+                        });
+                      }
+                    });
+                  } catch {}
+                };
+                mapIter(agent.sockets);
+                mapIter(agent.freeSockets);
+                // If agent has a destroy method, call it again
+                if (typeof agent.destroy === 'function') {
+                  try {
+                    agent.destroy();
+                  } catch {}
+                }
+              } catch {}
+            };
+            drainAgent(http && http.globalAgent);
+            drainAgent(https && https.globalAgent);
+          } catch {}
 
           // give the runtime a short moment to settle after forced cleanup
           await new Promise((r) => setTimeout(r, 20));
