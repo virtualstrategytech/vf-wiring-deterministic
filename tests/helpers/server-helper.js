@@ -195,17 +195,9 @@ function startTestServer(app) {
       }
     } catch {}
     // bind explicitly to 127.0.0.1 to avoid platform differences (IPv6 vs IPv4)
-    // Provide an explicit no-op callback so some runtimes do not retain a
-    // bound anonymous function handle (Jest sometimes reports this).
-    // use a named no-op callback (avoids creating a "bound-anonymous-fn"
-    // handle that some Jest diagnostics flag)
-    function __noop_listen_callback() {}
-    try {
-      server.listen(0, '127.0.0.1', __noop_listen_callback);
-    } catch (e) {
-      // fallback to simpler signature
-      server.listen(0, '127.0.0.1');
-    }
+    // Call listen without a callback to avoid creating a bound callback
+    // handle that some Jest diagnostics report as a persistent open handle.
+    server.listen(0, '127.0.0.1');
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
