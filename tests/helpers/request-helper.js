@@ -5,7 +5,6 @@ async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
 ) {
-  let closeServer = null;
   let client;
 
   // If `app` is a string, treat it as a base URL.
