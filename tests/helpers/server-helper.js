@@ -71,6 +71,13 @@ function startTestServer(app) {
 
         // Remove connection listener first to avoid new sockets being tracked
         server.removeAllListeners('connection');
+        // Also remove any 'listening' listeners that may have been attached
+        // (some Node internals can leave bound anonymous functions). Removing
+        // them proactively reduces Jest's "bound-anonymous-fn" open-handle
+        // reports when the server is closed.
+        try {
+          server.removeAllListeners('listening');
+        } catch {}
 
         // Also remove any other listeners that might keep references
         server.removeAllListeners('listening');
@@ -191,6 +198,7 @@ function startTestServer(app) {
           for (const serv of Array.from(_servers)) {
             try {
               serv.removeAllListeners('connection');
+              serv.removeAllListeners('listening');
               serv.close(() => {});
             } catch {}
           }
