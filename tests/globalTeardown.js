@@ -21,8 +21,8 @@ module.exports = async () => {
       try {
         serverHelper._forceCloseAllSockets();
         appendLog('globalTeardown: invoked serverHelper._forceCloseAllSockets');
-      } catch (e) {
-        appendLog(`globalTeardown: serverHelper._forceCloseAllSockets error: ${e && e.message}`);
+      } catch (_e) {
+        appendLog(`globalTeardown: serverHelper._forceCloseAllSockets error: ${_e && _e.message}`);
       }
     }
   } catch {
@@ -39,8 +39,8 @@ module.exports = async () => {
     let pid;
     try {
       pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
-    } catch (e) {
-      appendLog(`globalTeardown: failed reading pid file: ${e.message}`);
+    } catch (_e) {
+      appendLog(`globalTeardown: failed reading pid file: ${_e.message}`);
     }
 
     if (!pid || Number.isNaN(pid)) {
@@ -58,8 +58,8 @@ module.exports = async () => {
     try {
       process.kill(pid, 'SIGTERM');
       appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
-    } catch (e) {
-      appendLog(`globalTeardown: process.kill(SIGTERM) failed: ${e.message}`);
+    } catch (_e) {
+      appendLog(`globalTeardown: process.kill(SIGTERM) failed: ${_e.message}`);
     }
 
     // Wait up to N ms for process to exit
@@ -87,14 +87,14 @@ module.exports = async () => {
           try {
             process.kill(pid, 'SIGKILL');
             appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
-          } catch (e) {
-            appendLog(`globalTeardown: SIGKILL failed: ${e.message}; attempting pkill -P`);
+          } catch (_e) {
+            appendLog(`globalTeardown: SIGKILL failed: ${_e.message}; attempting pkill -P`);
             spawnSync('pkill', ['-TERM', '-P', String(pid)]);
             appendLog('globalTeardown: pkill invoked for child processes');
           }
         }
-      } catch (e) {
-        appendLog(`globalTeardown: force kill attempt failed: ${e.message}`);
+      } catch (_e) {
+        appendLog(`globalTeardown: force kill attempt failed: ${_e.message}`);
       }
 
       // Final short wait
@@ -115,11 +115,11 @@ module.exports = async () => {
         fs.unlinkSync(pidFile);
         appendLog('globalTeardown: pid file removed');
       }
-    } catch (e) {
-      appendLog(`globalTeardown: failed to remove pid file: ${e.message}`);
+    } catch (_e) {
+      appendLog(`globalTeardown: failed to remove pid file: ${_e.message}`);
     }
-  } catch (e) {
-    appendLog(`globalTeardown: unexpected error: ${e && e.message}`);
+  } catch (_e) {
+    appendLog(`globalTeardown: unexpected error: ${_e && _e.message}`);
   }
 
   // Append final marker
@@ -132,8 +132,8 @@ module.exports = async () => {
         http.globalAgent.destroy();
         appendLog('globalTeardown: destroyed http.globalAgent');
       }
-    } catch (e) {
-      appendLog(`globalTeardown: http agent destroy error: ${e && e.message}`);
+    } catch (_e) {
+      appendLog(`globalTeardown: http agent destroy error: ${_e && _e.message}`);
     }
 
     try {
@@ -142,8 +142,8 @@ module.exports = async () => {
         https.globalAgent.destroy();
         appendLog('globalTeardown: destroyed https.globalAgent');
       }
-    } catch (e) {
-      appendLog(`globalTeardown: https agent destroy error: ${e && e.message}`);
+    } catch (_e) {
+      appendLog(`globalTeardown: https agent destroy error: ${_e && _e.message}`);
     }
   } catch {}
 };
