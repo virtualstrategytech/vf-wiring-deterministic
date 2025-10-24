@@ -146,4 +146,93 @@ module.exports = async () => {
       appendLog(`globalTeardown: https agent destroy error: ${_e && _e.message}`);
     }
   } catch {}
+
+  // Give Node a short moment to release native handles after aggressive cleanup.
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    // Run one more proactive sweep of any test-server sockets/servers.
+    try {
+      const serverHelper = require('./helpers/server-helper');
+      if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+        serverHelper._forceCloseAllSockets();
+        appendLog('globalTeardown: post-delay invoked serverHelper._forceCloseAllSockets');
+      }
+    } catch (_e) {
+      appendLog(`globalTeardown: post-delay serverHelper sweep error: ${_e && _e.message}`);
+    }
+  } catch {}
+
+  // If requested, produce a diagnostic dump of Node active handles/requests.
+  // This is gated behind DEBUG_TESTS or DUMP_ACTIVE_HANDLES to avoid noisy logs
+  // during normal runs. The dump is best-effort and will include socket
+  // creation stacks (if available) and basic handle info to help identify the
+  // source of Jest "bound-anonymous-fn" reports.
+  try {
+    const shouldDump =
+      process.env.DEBUG_TESTS === 'true' || process.env.DUMP_ACTIVE_HANDLES === 'true';
+    if (shouldDump) {
+      appendLog('globalTeardown: dumping active handles for diagnostics');
+      try {
+        const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+        appendLog(`globalTeardown: activeHandles.count=${handles.length}`);
+        for (let i = 0; i < handles.length; i++) {
+          const h = handles[i];
+          const info = { index: i, type: typeof h };
+          try {
+            info.constructor = h && h.constructor && h.constructor.name;
+          } catch {}
+          try {
+            if (h && typeof h.address === 'function') {
+              try {
+                info.address = h.address && h.address();
+              } catch {}
+            }
+          } catch {}
+          try {
+            // socket-specific metadata
+            if (h && h.remoteAddress) {
+              info.remoteAddress = h.remoteAddress;
+            }
+            if (h && h.remotePort) info.remotePort = h.remotePort;
+            if (h && h.localPort) info.localPort = h.localPort;
+            if (h && h._createdStack)
+              info.createdStack = String(h._createdStack).split('\n').slice(0, 6).join('\n');
+            // listeners on EventEmitter-like objects
+            if (h && typeof h.eventNames === 'function') {
+              try {
+                const ev = (typeof h.eventNames === 'function' && h.eventNames()) || [];
+                info.eventNames = ev;
+                // include count of listeners for 'listening' and 'connection'
+                try {
+                  info.listeningListeners =
+                    (typeof h.listeners === 'function' &&
+                      h.listeners('listening') &&
+                      h.listeners('listening').length) ||
+                    0;
+                } catch {}
+              } catch {}
+            }
+          } catch {}
+
+          // Serialize succinctly and append
+          try {
+            appendLog(`activeHandle[${i}]: ${JSON.stringify(info)}`);
+          } catch (e) {
+            appendLog(`activeHandle[${i}]: toStringError ${e && e.message}`);
+          }
+        }
+      } catch (e) {
+        appendLog(`globalTeardown: activeHandles dump failed: ${e && e.message}`);
+      }
+
+      try {
+        const reqs = (process._getActiveRequests && process._getActiveRequests()) || [];
+        appendLog(`globalTeardown: activeRequests.count=${reqs.length}`);
+      } catch (e) {
+        appendLog(`globalTeardown: activeRequests dump error: ${e && e.message}`);
+      }
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
+  }
 };

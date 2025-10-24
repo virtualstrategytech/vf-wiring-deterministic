@@ -77,6 +77,8 @@ async function requestApp(
       } catch {}
       try {
         if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+          // allow a tick for server.close to finish, then aggressively sweep
+          await new Promise((r) => setImmediate(r));
           serverHelper._forceCloseAllSockets();
         }
       } catch {}

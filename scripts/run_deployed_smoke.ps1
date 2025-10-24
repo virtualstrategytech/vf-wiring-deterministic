@@ -5,7 +5,7 @@ param(
   [string]$ApiKey
 )
 
-Write-Host "Running deployed smoke tests against: $WebhookBase"
+Write-Output "Running deployed smoke tests against: $WebhookBase"
 
 # Set envs for the smoke test runner
 $env:WEBHOOK_BASE = $WebhookBase
@@ -13,7 +13,7 @@ $env:WEBHOOK_API_KEY = $ApiKey
 $env:SKIP_SYNC_SECRET = 'true'
 
 # Run Jest against the smoke test file only
-Write-Host "Invoking smoke tests..."
+Write-Output "Invoking smoke tests..."
 npx jest tests/webhook.smoke.test.js -t "webhook smoke" --runInBand
 
 if ($LASTEXITCODE -ne 0) {
@@ -21,4 +21,4 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-Write-Host "Smoke tests completed successfully."
+Write-Output "Smoke tests completed successfully."

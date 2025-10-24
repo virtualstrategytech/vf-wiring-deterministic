@@ -6,7 +6,7 @@ const _servers = new Set();
 const _sockets = new Set();
 
 function _attachSocketTracking(server, sockets) {
-  server.on('connection', (s) => {
+  function _onConnection(s) {
     // attach a creation stack trace to the socket for CI diagnostics
     try {
       const stack = new Error('socket-created-at').stack;
@@ -19,11 +19,19 @@ function _attachSocketTracking(server, sockets) {
       if (typeof s.setTimeout === 'function') s.setTimeout(1000);
       if (typeof s.unref === 'function') s.unref();
     } catch {}
-    s.on('close', () => {
+
+    function _onSocketClose() {
       sockets.delete(s);
       _sockets.delete(s);
-    });
-  });
+      try {
+        s.removeListener && s.removeListener('close', _onSocketClose);
+      } catch {}
+    }
+
+    s.on('close', _onSocketClose);
+  }
+
+  server.on('connection', _onConnection);
 }
 
 // Start an Express `app` on an ephemeral port and return a small helper for
@@ -138,14 +146,15 @@ function startTestServer(app) {
           try {
             server.once('close', onClose);
             server.once('error', onErrorClose);
-            server.close((err) => {
-              // In some Node versions the close callback may be called with an error.
+            // use a named callback to avoid creating anonymous bound functions
+            function _serverCloseCallback(err) {
               if (err) {
                 try {
                   onErrorClose();
                 } catch {}
               }
-            });
+            }
+            server.close(_serverCloseCallback);
           } catch {
             // If close throws (rare), destroy sockets and resolve immediately
             for (const s of Array.from(sockets)) {
@@ -199,7 +208,10 @@ function startTestServer(app) {
             try {
               serv.removeAllListeners('connection');
               serv.removeAllListeners('listening');
-              serv.close(() => {});
+              // call close without anonymous callback to avoid bound handles
+              try {
+                serv.close();
+              } catch {}
             } catch {}
           }
         } catch {}
@@ -207,6 +219,22 @@ function startTestServer(app) {
 
       // remove error listener when server is successfully listening
       server.removeListener('error', onError);
+      // prune any other 'listening' listeners that are not the named onListen
+      // This helps avoid internal bound/anonymous listeners remaining attached
+      // which can show up as Jest 'bound-anonymous-fn' open-handle reports.
+      try {
+        const ls =
+          server.listeners && typeof server.listeners === 'function'
+            ? server.listeners('listening')
+            : [];
+        for (const l of ls) {
+          if (l !== onListen) {
+            try {
+              server.removeListener('listening', l);
+            } catch {}
+          }
+        }
+      } catch {}
       resolve({ base, close });
     }
 
@@ -215,14 +243,15 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    // Start listening and attach the named `onListen` handler to the
-    // 'listening' event. Using `once('listening', onListen)` avoids
-    // creating an internal bound anonymous function that Jest reports.
-    server.once('listening', onListen);
+    // Start listening and pass the named `onListen` callback directly to
+    // `server.listen(...)`. Some Node versions create an internal bound
+    // anonymous function when `listen` is called without a callback; by
+    // supplying the named callback we avoid that and reduce Jest's false
+    // positive "bound-anonymous-fn" open handle reports.
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
-    server.listen(0, '127.0.0.1');
+    server.listen(0, '127.0.0.1', onListen);
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
@@ -255,7 +284,11 @@ function _forceCloseAllSockets() {
   for (const serv of Array.from(_servers)) {
     try {
       serv.removeAllListeners('connection');
-      serv.close(() => {});
+      // use a named callback instead of an anonymous function so Node doesn't
+      // create a bound-anonymous-fn that Jest may report as an open handle.
+      try {
+        serv.close(function _forceCloseCallback() {});
+      } catch {}
     } catch {}
   }
   _sockets.clear();
