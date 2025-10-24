@@ -1,4 +1,4 @@
-name: diagnostics-smoke (manual)
+name: diagnostics-smoke (manual + on deployed smoke failure)
 
 on:
   workflow_dispatch:
@@ -11,10 +11,19 @@ on:
         description: 'Set to true to skip smoke test execution'
         required: false
         type: boolean
+  # Also run automatically when the Deployed smoke (manual) workflow completes
+  # This lets diagnostics run automatically when the smoke workflow fails.
+  workflow_run:
+    workflows: ["Deployed smoke (manual)"]
+    types: [completed]
 
 jobs:
   diagnostics:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') }}
+    env:
+      WEBHOOK_BASE: ${{ github.event.inputs.WEBHOOK_BASE || secrets.WEBHOOK_BASE }}
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,23 +39,26 @@ jobs:
           npm ci
 
       - name: Run network diagnostics (non-secret-safe)
-        if: ${{ github.event.inputs.WEBHOOK_BASE != '' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.WEBHOOK_BASE != '') || (github.event_name == 'workflow_run' && env.WEBHOOK_BASE != '') }}
         run: |
-          echo "Masked base: ${{ github.event.inputs.WEBHOOK_BASE }}" | sed -E 's#(https?://)([^/]+).*#\1\2#g'
+          MASKED="${{ github.event.inputs.WEBHOOK_BASE || env.WEBHOOK_BASE }}"
+          echo "Masked base: $MASKED" | sed -E 's#(https?://)([^/]+).*#\1\2#g'
           echo '--- nslookup ---'
-          nslookup "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+          nslookup "$MASKED" || true
           echo '--- curl -Iv ---'
-          curl -Iv --max-time 15 "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+          curl -Iv --max-time 15 "$MASKED" || true
           echo '--- traceroute ---'
-          traceroute -m 8 "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+          traceroute -m 8 "$MASKED" || true
 
       - name: Run smoke test (jest)
         env:
-          WEBHOOK_BASE: ${{ github.event.inputs.WEBHOOK_BASE }}
+          WEBHOOK_BASE: ${{ github.event.inputs.WEBHOOK_BASE || env.WEBHOOK_BASE }}
           WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+          DEBUG_TESTS: 'true'
         run: |
           # Run only the smoke test to keep runs fast and focused
-          npx jest tests/webhook.smoke.test.js --runInBand --verbose || true
+          # Capture output for artifacts
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose 2>&1 | tee diagnostics_jest_output.txt || true
 
       - name: Upload logs/artifacts
         if: failure()
@@ -55,4 +67,6 @@ jobs:
           name: diagnostics-logs
           path: |
             ./npm-debug.log
-            ./jest* | true
+            ./diagnostics_jest_output.txt
+            ./tests/globalSetup.log
+            ./npm-debug.log || true

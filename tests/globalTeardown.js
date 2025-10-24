@@ -197,7 +197,9 @@ module.exports = async () => {
             if (h && h.localPort) info.localPort = h.localPort;
             if (h && h._createdStack)
               info.createdStack = String(h._createdStack).split('\n').slice(0, 6).join('\n');
-            // listeners on EventEmitter-like objects
+            // listeners on EventEmitter-like objects — capture names and short
+            // function snippets for diagnostic purposes to help locate
+            // bound-anonymous-fn handles reported by Jest.
             if (h && typeof h.eventNames === 'function') {
               try {
                 const ev = (typeof h.eventNames === 'function' && h.eventNames()) || [];
@@ -209,6 +211,32 @@ module.exports = async () => {
                       h.listeners('listening') &&
                       h.listeners('listening').length) ||
                     0;
+                } catch {}
+
+                // Try to get short samples of listeners (name + small src snippet)
+                try {
+                  if (typeof h.listeners === 'function') {
+                    const samples = {};
+                    for (const evName of ['listening', 'connection', 'request', 'close', 'error']) {
+                      try {
+                        const ls = h.listeners(evName) || [];
+                        samples[evName] = ls.map((fn) => {
+                          try {
+                            const fnName = fn && fn.name ? fn.name : '<anonymous>';
+                            let src = '';
+                            try {
+                              src = String(fn).split('\n').slice(0, 2).join(' ');
+                              if (src.length > 240) src = src.slice(0, 240) + '...';
+                            } catch {}
+                            return { name: fnName, src };
+                          } catch (e) {
+                            return { name: '<listener-inspect-error>', err: String(e && e.message) };
+                          }
+                        });
+                      } catch {}
+                    }
+                    info.listenerSamples = samples;
+                  }
                 } catch {}
               } catch {}
             }

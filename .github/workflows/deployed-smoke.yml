@@ -80,6 +80,8 @@ jobs:
       - name: Run deployed smoke tests
         env:
           SKIP_SYNC_SECRET: 'true'
+          # Enable test diagnostics so globalTeardown can dump active handles on failure
+          DEBUG_TESTS: 'true'
         run: |
           echo "Running smoke tests against $WEBHOOK_BASE"
           # Run a short, verbose curl trace to capture immediate network issues before Jest
@@ -99,7 +101,8 @@ jobs:
           export WEBHOOK_PING_TIMEOUT=20000
           export WEBHOOK_GENERATE_TIMEOUT=120000
           # Run jest with a slightly larger test timeout to accommodate external slowness
-          npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000
+          # Capture jest output so we can upload it on failure for debugging
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000 2>&1 | tee /tmp/jest_output.txt
 
       - name: Upload smoke diagnostics (on failure)
         if: failure()
@@ -111,6 +114,8 @@ jobs:
             /tmp/ping_trace.txt
             /tmp/health_body.txt
             /tmp/health_err
+            /tmp/jest_output.txt
+            tests/globalSetup.log
       - name: Confirm webhook envs (non-secret)
         run: |
           echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
