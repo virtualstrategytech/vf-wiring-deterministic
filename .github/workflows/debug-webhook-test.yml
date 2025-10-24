@@ -40,9 +40,6 @@ jobs:
 
       - name: Run debug logging test
         run: npx jest tests/debug_llm_logging.test.js --runInBand
-        env:
-          # optional explicit override for clarity; job-level env already provides these
-          # job-level env provides WEBHOOK_API_KEY/WEBHOOK_BASE; do not re-specify here
 
       - name: Run smoke tests
         run: |
