@@ -11,7 +11,7 @@ async function requestApp(
     // provide a clearer error when an invalid/empty base is supplied
     try {
       new URL(url);
-    } catch (err) {
+    } catch {
       throw new Error(`requestApp: invalid URL constructed from base: ${String(app)}`);
     }
     const controller = new AbortController();

@@ -41,7 +41,7 @@ try {
   if (rawBase) {
     new URL(base);
   }
-} catch (err) {
+} catch {
   throw new Error(`WEBHOOK_BASE is not a valid URL: ${_maskBaseForLogs(base)}`);
 }
 

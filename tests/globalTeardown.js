@@ -25,7 +25,7 @@ module.exports = async () => {
         appendLog(`globalTeardown: serverHelper._forceCloseAllSockets error: ${e && e.message}`);
       }
     }
-  } catch (e) {
+  } catch {
     // ignore; helper may not be present in all runs
   }
 
