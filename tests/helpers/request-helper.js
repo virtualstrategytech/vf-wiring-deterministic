@@ -1,40 +1,90 @@
-const supertest = require('supertest');
 const serverHelper = require('./server-helper');
+const fetch = require('node-fetch');
 
 async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
 ) {
-  let client;
-
-  // If `app` is a string, treat it as a base URL.
-  // If `app` looks like an Express app (has .listen), prefer using
-  // `supertest(app)` (in-process) to avoid creating a real TCP listener
-  // which can lead to Jest open-handle diagnostics. Only start a real
-  // server when the caller provides a string base URL.
-  let closeServerFn = null;
+  // If app is a string base URL, use node-fetch directly.
   if (typeof app === 'string') {
-    client = supertest(app);
-  } else if (app && typeof app.listen === 'function') {
-    // Use in-process supertest to avoid ephemeral TCP servers in tests.
-    client = supertest(app);
-  } else {
-    client = supertest(app);
+    const url = `${app}${path}`;
+    // provide a clearer error when an invalid/empty base is supplied
+    try {
+      new URL(url);
+    } catch (err) {
+      throw new Error(`requestApp: invalid URL constructed from base: ${String(app)}`);
+    }
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), timeout || 5000);
+    try {
+      const resp = await fetch(url, {
+        method: method.toUpperCase(),
+        // explicitly close connections to avoid keep-alive sockets lingering in CI
+        headers: Object.assign(
+          { 'Content-Type': 'application/json', Connection: 'close' },
+          headers || {}
+        ),
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await resp.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+      return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
+    } finally {
+      clearTimeout(to);
+    }
   }
 
-  const req = client[method](path);
-  if (headers) {
-    for (const [k, v] of Object.entries(headers)) req.set(k, v);
+  // If app looks like an Express app (function with listen), start a
+  // controlled ephemeral server and perform a normal HTTP request. This
+  // avoids letting supertest create internal servers which can leave
+  // bound anonymous handles detected by Jest.
+  if (app && typeof app.listen === 'function') {
+    const started = await serverHelper.startTestServer(app);
+    const base = started.base;
+    const close = started.close;
+    const url = `${base}${path}`;
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), timeout || 5000);
+    try {
+      const resp = await fetch(url, {
+        method: method.toUpperCase(),
+        // explicitly close connections to avoid keep-alive sockets lingering in CI
+        headers: Object.assign(
+          { 'Content-Type': 'application/json', Connection: 'close' },
+          headers || {}
+        ),
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await resp.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+      return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
+    } finally {
+      clearTimeout(to);
+      try {
+        await close();
+      } catch {}
+      try {
+        if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+          serverHelper._forceCloseAllSockets();
+        }
+      } catch {}
+    }
   }
-  if (body) req.send(body);
-  if (timeout) req.timeout({ deadline: timeout });
 
-  try {
-    const res = await req;
-    return res;
-  } finally {
-    // nothing to close for in-process supertest(app)
-  }
+  // For other inputs, fallback to throwing to surface incorrect usage.
+  throw new Error('requestApp expects an Express app or a base URL string');
 }
 
 module.exports = { requestApp };

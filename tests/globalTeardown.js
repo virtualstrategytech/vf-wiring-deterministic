@@ -14,6 +14,21 @@ module.exports = async () => {
 
   appendLog('globalTeardown: starting');
 
+  // Best-effort: ask any test server helper to close sockets before killing
+  try {
+    const serverHelper = require('./helpers/server-helper');
+    if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+      try {
+        serverHelper._forceCloseAllSockets();
+        appendLog('globalTeardown: invoked serverHelper._forceCloseAllSockets');
+      } catch (e) {
+        appendLog(`globalTeardown: serverHelper._forceCloseAllSockets error: ${e && e.message}`);
+      }
+    }
+  } catch (e) {
+    // ignore; helper may not be present in all runs
+  }
+
   // Try to kill the spawned webhook process (if any)
   try {
     if (!fs.existsSync(pidFile)) {

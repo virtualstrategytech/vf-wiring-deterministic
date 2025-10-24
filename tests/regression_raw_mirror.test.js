@@ -24,7 +24,13 @@ describe('regression: raw/data.raw mirror', () => {
       expect(body.data.raw).toBeDefined();
       expect(body.raw).toEqual(body.data.raw);
     } finally {
-      // using supertest(app) -- nothing to close
+      // ensure any helper-tracked sockets are force-closed as a fallback
+      try {
+        const serverHelper = require('./helpers/server-helper');
+        if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+          serverHelper._forceCloseAllSockets();
+        }
+      } catch {}
     }
   });
 
@@ -52,7 +58,13 @@ describe('regression: raw/data.raw mirror', () => {
       expect(body.data.raw).toBeDefined();
       expect(body.raw).toEqual(body.data.raw);
     } finally {
-      // using supertest(app) -- nothing to close
+      // ensure any helper-tracked sockets are force-closed as a fallback
+      try {
+        const serverHelper = require('./helpers/server-helper');
+        if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+          serverHelper._forceCloseAllSockets();
+        }
+      } catch {}
     }
   });
 });

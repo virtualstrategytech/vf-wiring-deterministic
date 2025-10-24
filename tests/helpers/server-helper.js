@@ -68,12 +68,14 @@ function startTestServer(app) {
                 `test-server close requested ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
               );
         } catch {}
+
         // Remove connection listener first to avoid new sockets being tracked
         server.removeAllListeners('connection');
 
         // Also remove any other listeners that might keep references
         server.removeAllListeners('listening');
         server.removeAllListeners('error');
+        server.removeAllListeners('request');
 
         // Destroy sockets synchronously
         for (const s of Array.from(sockets)) {
@@ -110,9 +112,34 @@ function startTestServer(app) {
             }
           }
 
+          function onErrorClose() {
+            if (!called) {
+              called = true;
+              try {
+                clearTimeout(timeout);
+              } catch {}
+              // ensure sockets destroyed
+              for (const s of Array.from(sockets)) {
+                try {
+                  s.destroy();
+                } catch {}
+              }
+              setImmediate(() => res());
+            }
+          }
+
           try {
-            server.close(onClose);
-          } catch (err) {
+            server.once('close', onClose);
+            server.once('error', onErrorClose);
+            server.close((err) => {
+              // In some Node versions the close callback may be called with an error.
+              if (err) {
+                try {
+                  onErrorClose();
+                } catch {}
+              }
+            });
+          } catch {
             // If close throws (rare), destroy sockets and resolve immediately
             for (const s of Array.from(sockets)) {
               try {
@@ -180,10 +207,14 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    // Start listening and use the named `onListen` callback directly.
-    // Passing a named callback avoids creating an internal bound anonymous
-    // function that Jest sometimes reports as an open handle.
-    server.listen(0, '127.0.0.1', onListen);
+    // Start listening and attach the named `onListen` handler to the
+    // 'listening' event. Using `once('listening', onListen)` avoids
+    // creating an internal bound anonymous function that Jest reports.
+    server.once('listening', onListen);
+    try {
+      if (typeof server.unref === 'function') server.unref();
+    } catch {}
+    server.listen(0, '127.0.0.1');
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
