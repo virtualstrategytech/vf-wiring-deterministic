@@ -13,13 +13,15 @@ if (!process.env.WEBHOOK_API_KEY && fs.existsSync(secretFile)) {
   }
 }
 
-console.log('KEY_JSON:', JSON.stringify(key));
-console.log('KEY_LENGTH:', key.length);
-console.log('KEY_HEX (first 80 bytes):', Buffer.from(String(key)).slice(0, 80).toString('hex'));
-for (let i = 0; i < Math.min(80, key.length); i++) {
-  const c = key.charCodeAt(i);
-  if (c < 32 || c === 127) {
-    console.log('CONTROL at', i, 'code', c);
+if (process.env.DEBUG_TESTS) {
+  console.log('KEY_JSON:', JSON.stringify(key));
+  console.log('KEY_LENGTH:', key.length);
+  console.log('KEY_HEX (first 80 bytes):', Buffer.from(String(key)).slice(0, 80).toString('hex'));
+  for (let i = 0; i < Math.min(80, key.length); i++) {
+    const c = key.charCodeAt(i);
+    if (c < 32 || c === 127) {
+      console.log('CONTROL at', i, 'code', c);
+    }
   }
 }
 
@@ -34,7 +36,7 @@ try {
       headers: { 'x-api-key': String(key) },
     },
     (res) => {
-      console.log('request created, status', res && res.statusCode);
+      if (process.env.DEBUG_TESTS) console.log('request created, status', res && res.statusCode);
       res && res.resume();
     }
   );

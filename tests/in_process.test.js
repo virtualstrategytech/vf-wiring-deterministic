@@ -18,12 +18,8 @@ describe('in-process webhook app (refactored)', () => {
         timeout: 5000,
       });
 
-      // Debug: print the response body to capture actual shape when tests fail
-      // (helps diagnose mismatch between test expectation and server response)
-      try {
-        // eslint-disable-next-line no-console
-        console.log('DEBUG resp.body:', JSON.stringify(resp.body));
-      } catch {}
+      // debug prints removed for clean test output; enable DEBUG_TESTS if you
+      // need diagnostic fetch/logging in CI or local runs.
 
       expect(resp.status).toBe(200);
 
