@@ -176,11 +176,31 @@ function startTestServer(app) {
               console.warn &&
                 console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
             } catch {}
+            // Print a short, informative summary of each active handle to
+            // help diagnose remaining bound-anonymous functions. This is
+            // intentionally defensive (try/catch) because some handles may
+            // not be serializable.
+            try {
+              for (const h of handles || []) {
+                try {
+                  const ctor = h && h.constructor && h.constructor.name;
+                  let repr = null;
+                  try {
+                    repr = String(h).slice(0, 200);
+                  } catch {}
+                  console.warn &&
+                    console.warn(`  handle: ctor=${String(ctor)}, repr=${String(repr)}`);
+                } catch {}
+              }
+            } catch {}
           }
         } catch {}
 
         // After close completes, give Node a short moment to release native handles
         await new Promise((r) => setImmediate(r));
+        // small extra delay (50ms) helps ensure OS-level socket cleanup on some
+        // platforms where handles linger briefly and Jest will report them.
+        await new Promise((r) => setTimeout(r, 50));
 
         try {
           if (typeof server.unref === 'function') server.unref();
@@ -243,15 +263,25 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    // Start listening and pass the named `onListen` callback directly to
-    // `server.listen(...)`. Some Node versions create an internal bound
-    // anonymous function when `listen` is called without a callback; by
-    // supplying the named callback we avoid that and reduce Jest's false
-    // positive "bound-anonymous-fn" open handle reports.
+    // Start listening but avoid passing the callback *into* server.listen.
+    // Some Node internals may create bound anonymous wrappers when a
+    // callback is passed directly to `listen(...)`. To avoid creating
+    // bound-anonymous functions that Jest reports as open handles, call
+    // `listen` first and attach a named 'listening' listener with
+    // `server.once('listening', onListen)` instead.
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
-    server.listen(0, '127.0.0.1', onListen);
+    // initiate listen and pass the named onListen callback directly.
+    // Passing a named function avoids creating anonymous bound wrappers
+    // that some Node internals may attach when listen() is called without
+    // a callback.
+    try {
+      server.listen(0, '127.0.0.1', onListen);
+    } catch (e) {
+      // If listen throws for some reason, rethrow to reject the promise
+      throw e;
+    }
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {

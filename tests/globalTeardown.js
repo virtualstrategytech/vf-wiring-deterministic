@@ -14,6 +14,24 @@ module.exports = async () => {
 
   appendLog('globalTeardown: starting');
 
+  // Best-effort: ask worker-server (per-worker in-process server) to close
+  // if tests started it. This complements server-helper sweeps and helps
+  // avoid bound-anonymous handles left by persistent test servers.
+  try {
+    const workerServer = require('./helpers/worker-server');
+    if (workerServer && typeof workerServer.close === 'function') {
+      try {
+        appendLog('globalTeardown: invoking worker-server.close()');
+        // await if it returns a promise
+        const res = workerServer.close();
+        if (res && typeof res.then === 'function') await res;
+        appendLog('globalTeardown: worker-server.close() completed');
+      } catch (e) {
+        appendLog(`globalTeardown: worker-server.close() error: ${e && e.message}`);
+      }
+    }
+  } catch {}
+
   // Best-effort: ask any test server helper to close sockets before killing
   try {
     const serverHelper = require('./helpers/server-helper');
@@ -118,6 +136,18 @@ module.exports = async () => {
     } catch (_e) {
       appendLog(`globalTeardown: failed to remove pid file: ${_e.message}`);
     }
+    // Remove shared base file if present
+    try {
+      const baseFile = path.resolve(__dirname, 'shared_server_base.txt');
+      if (fs.existsSync(baseFile)) {
+        try {
+          fs.unlinkSync(baseFile);
+          appendLog('globalTeardown: removed shared_server_base.txt');
+        } catch (e) {
+          appendLog(`globalTeardown: failed to remove shared base file: ${e && e.message}`);
+        }
+      }
+    } catch {}
   } catch (_e) {
     appendLog(`globalTeardown: unexpected error: ${_e && _e.message}`);
   }
@@ -230,7 +260,10 @@ module.exports = async () => {
                             } catch {}
                             return { name: fnName, src };
                           } catch (e) {
-                            return { name: '<listener-inspect-error>', err: String(e && e.message) };
+                            return {
+                              name: '<listener-inspect-error>',
+                              err: String(e && e.message),
+                            };
                           }
                         });
                       } catch {}
@@ -262,5 +295,75 @@ module.exports = async () => {
     }
   } catch (e) {
     appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
+  }
+
+  // Best-effort: close any lingering WriteStream handles (common culprits are
+  // child stdio pipes or file streams left open by tests). This helps Jest
+  // avoid reporting 'bound-anonymous-fn' when the remaining handles are
+  // simple writable streams that can be closed safely.
+  try {
+    const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+    for (const h of handles) {
+      try {
+        const ctor = h && h.constructor && h.constructor.name;
+        if (ctor === 'WriteStream') {
+          appendLog('globalTeardown: attempting to close WriteStream handle');
+          // log lightweight metadata if available
+          try {
+            if (h && typeof h.path !== 'undefined')
+              appendLog(`globalTeardown: WriteStream.path=${String(h.path)}`);
+          } catch {}
+          try {
+            if (h && typeof h.fd !== 'undefined')
+              appendLog(`globalTeardown: WriteStream.fd=${String(h.fd)}`);
+          } catch {}
+
+          // 1) attempt graceful end()
+          if (typeof h.end === 'function') {
+            try {
+              h.end();
+            } catch (e) {
+              appendLog(`globalTeardown: WriteStream.end() error: ${e && e.message}`);
+            }
+          }
+
+          // 2) if fd present, attempt synchronous close for non-stdio fds
+          try {
+            if (h && typeof h.fd === 'number') {
+              // Avoid closing parent stdio (fd 0,1,2). Only close others.
+              if (h.fd === 0 || h.fd === 1 || h.fd === 2) {
+                appendLog(`globalTeardown: skipping stdio fd=${h.fd}`);
+              } else {
+                const fs = require('fs');
+                try {
+                  fs.closeSync(h.fd);
+                  appendLog(`globalTeardown: fs.closeSync(fd=${h.fd}) succeeded`);
+                } catch (e) {
+                  appendLog(`globalTeardown: fs.closeSync(fd=${h.fd}) failed: ${e && e.message}`);
+                }
+              }
+            }
+          } catch (e) {
+            appendLog(`globalTeardown: WriteStream fd-close attempt error: ${e && e.message}`);
+          }
+
+          // 3) destroy
+          try {
+            if (typeof h.destroy === 'function') h.destroy();
+          } catch (e) {
+            appendLog(`globalTeardown: WriteStream.destroy() error: ${e && e.message}`);
+          }
+
+          // brief pause to give OS handles a moment to settle
+          try {
+            await new Promise((r) => setTimeout(r, 5));
+          } catch {}
+        }
+      } catch (innerErr) {
+        appendLog(`globalTeardown: WriteStream inner error: ${innerErr && innerErr.message}`);
+      }
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: WriteStream close sweep error: ${e && e.message}`);
   }
 };

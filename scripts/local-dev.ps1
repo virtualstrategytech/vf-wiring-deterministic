@@ -49,7 +49,7 @@ $port = if ($envMap.ContainsKey('PORT') -and $envMap['PORT']) { $envMap['PORT'] 
 if (-not (Test-Path (Join-Path $webhookDir 'node_modules'))) {
   Write-Output "Installing webhook dependencies in $webhookDir ..."
   Push-Location $webhookDir
-  npm install
+  npm ci
   Pop-Location
 } else {
   Write-Output "Webhook node_modules present."

@@ -30,6 +30,26 @@ afterAll(async () => {
       // ignore, helper may not expose force-close API
     }
 
+    // If we started a per-worker in-process server, attempt to close it.
+    try {
+      const workerServer = require('./helpers/worker-server');
+      if (workerServer && typeof workerServer.close === 'function') {
+        try {
+          await workerServer.close();
+        } catch {}
+      } else if (workerServer && typeof workerServer.get === 'function') {
+        // defensive: attempt to close underlying server if exposed on get()
+        try {
+          const s = workerServer.get();
+          if (s && s.server && typeof s.server.close === 'function') {
+            try {
+              s.server.close();
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch {}
+
     // yield to the event loop to allow handles to close
     await new Promise((r) => setImmediate(r));
 

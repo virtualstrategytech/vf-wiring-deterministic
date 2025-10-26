@@ -14,7 +14,7 @@ on:
   # Also run automatically when the Deployed smoke (manual) workflow completes
   # This lets diagnostics run automatically when the smoke workflow fails.
   workflow_run:
-    workflows: ["Deployed smoke (manual)"]
+    workflows: ['Deployed smoke (manual)']
     types: [completed]
 
 jobs:

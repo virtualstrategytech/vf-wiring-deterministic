@@ -114,6 +114,10 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     if (!child || !child.pid) {
       try {
         logLine('globalSetup: falling back to npm start');
+        // Use 'ignore' for stdout/stderr to avoid creating pipe handles in the
+        // parent test process which can remain open and show up as WriteStream
+        // handles in Jest's diagnostics. Tests write lifecycle logs to the
+        // shared `globalSetup.log` instead.
         child = spawn('npm', ['start'], {
           cwd: webhookDir,
           env: {
@@ -121,7 +125,7 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
             WEBHOOK_API_KEY: secretPlain,
             PORT: String(process.env.PORT || '3000'),
           },
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: ['ignore', 'ignore', 'ignore'],
         });
       } catch (e) {
         logLine('globalSetup: failed to spawn npm start:', e.message);
@@ -154,6 +158,14 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     try {
       await waitForPort(port, 20000);
       logLine('globalSetup: port is open', port);
+      // Write a shared base URL file so tests can reuse the spawned server
+      try {
+        const baseFile = path.resolve(__dirname, 'shared_server_base.txt');
+        fs.writeFileSync(baseFile, `http://127.0.0.1:${port}`, 'utf8');
+        logLine('globalSetup: wrote shared server base file', baseFile);
+      } catch (e) {
+        logLine('globalSetup: failed to write shared server base file:', e && e.message);
+      }
     } catch (err) {
       logLine('globalSetup: port did not open in time:', err.message);
       logStream.end();

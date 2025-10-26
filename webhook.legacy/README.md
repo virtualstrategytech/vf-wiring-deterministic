@@ -29,7 +29,7 @@
 ## Local
 
 bash
-npm i
+npm ci
 WEBHOOK_API_KEY={WEBHOOK_KEY}
 
 novain-platform/webhook — Local dev & Render deploy notes
@@ -44,13 +44,13 @@ Environment (local / Render)
 Local start
 
 1. Copy example env: cp env/.example.env .env (or edit .env)
-2. npm install
+2. npm ci
 3. WEBHOOK_API_KEY=test123 PORT=3000 PROMPT_URL=http://localhost:4001 node server.js
 
 Render settings (paste into Render UI)
 
 - Root Directory: novain-platform/webhook
-- Build Command: npm install
+- Build Command: npm ci
 - Start Command: node server.js
 - Environment:
   - WEBHOOK_API_KEY = <your_key>

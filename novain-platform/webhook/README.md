@@ -7,7 +7,7 @@
    (Edit .env to set WEBHOOK_API_KEY)
 
 2. Install deps (if needed):
-   npm install
+   npm ci
 
 3. Start server:
 
@@ -30,7 +30,7 @@
    (Edit .env to set WEBHOOK_API_KEY)
 
 2. Install deps (if needed):
-   npm install
+   npm ci
 
 3. Start server (PowerShell example):
 
