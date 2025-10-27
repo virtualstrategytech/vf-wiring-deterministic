@@ -39,36 +39,63 @@ jobs:
           fi
           echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
 
-      - name: Quick health check (with retries)
+      - name: Quick readiness check (poll /ready then /health)
         id: health
         run: |
-          echo "Checking $WEBHOOK_BASE/health (retries)"
+          echo "Checking service readiness at $WEBHOOK_BASE/ready (fallback to /health)"
           attempts=0
-          max=12
+          max=18
           http_status=0
+          # First try /ready (fast false/200 semantics); if that never becomes 200, fall back to /health
           until [ $attempts -ge $max ]
           do
             attempts=$((attempts+1))
-            echo "Attempt $attempts/$max..."
-            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
-            echo "HTTP status: $http_status"
+            echo "Attempt $attempts/$max to /ready..."
+            http_status=$(curl --silent --show-error --max-time 8 -w '%{http_code}' -o /tmp/ready_body.txt "$WEBHOOK_BASE/ready" 2>/tmp/ready_err || true)
+            echo "ready HTTP status: $http_status"
             if [ "$http_status" = "200" ]; then
-              echo "Health OK"
-              cat /tmp/health_body.txt || true
+              echo "/ready OK"
+              cat /tmp/ready_body.txt || true
               break
             fi
-            echo "Body/Error:"
-            cat /tmp/health_body.txt || true
-            cat /tmp/health_err || true
-            sleep 5
+            # small delay and try again; allow more time before falling back
+            sleep 2
           done
           if [ "$http_status" != "200" ]; then
-            echo "Health check failed after $max attempts (status $http_status)" >&2
+            echo "/ready did not return 200 within retries, falling back to /health" >&2
+            attempts=0
+            max=12
+            http_status=0
+            until [ $attempts -ge $max ]
+            do
+              attempts=$((attempts+1))
+              echo "Attempt $attempts/$max to /health..."
+              http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+              echo "health HTTP status: $http_status"
+              if [ "$http_status" = "200" ]; then
+                echo "Health OK"
+                cat /tmp/health_body.txt || true
+                break
+              fi
+              echo "Body/Error (health):"
+              cat /tmp/health_body.txt || true
+              cat /tmp/health_err || true
+              sleep 5
+            done
+          fi
+          if [ "$http_status" != "200" ]; then
+            echo "Readiness/Health check failed after retries (status $http_status)" >&2
             exit 1
           fi
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (root + webhook)
+        run: |
+          echo "Installing repository root dependencies (for Jest and CI tools)"
+          # Run quick lockfile diagnostic to catch mismatches early
+          node scripts/check-locks.js || true
+          npm ci
+          echo "Installing webhook subpackage dependencies (novain-platform/webhook)"
+          cd novain-platform/webhook && npm ci
 
       - name: Compute fingerprint and export to outputs
         id: set-fingerprint
@@ -111,6 +138,7 @@ jobs:
             /tmp/ping_trace.txt
             /tmp/health_body.txt
             /tmp/health_err
+            scripts/check-locks.js
       - name: Confirm webhook envs (non-secret)
         run: |
           echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"

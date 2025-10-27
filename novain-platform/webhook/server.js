@@ -119,7 +119,17 @@ app.use((req, _res, next) => {
 });
 
 // ---- Health
+// Immediate lightweight health check used by external load balancers.
 app.get('/health', (_req, res) => res.status(200).send('ok'));
+
+// Readiness: returns 200 only once the HTTP server has actually bound and
+// startup logs have been emitted. This is useful for CI or scripts that want
+// to wait until the service is actually ready to serve heavier traffic.
+let __ready = false;
+app.get('/ready', (_req, res) => {
+  if (__ready) return res.status(200).json({ ok: true });
+  return res.status(503).json({ ok: false, reason: 'not_ready' });
+});
 
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;
@@ -557,8 +567,19 @@ app.use((err, _req, res, _next) => {
 
 // ---- Start when run directly
 if (require.main === module) {
+  // Log runtime info early for Render / cloud logs troubleshooting.
+  try {
+    console.log('Starting webhook server', { node: process.version, pid: process.pid });
+  } catch (e) {
+    // ignore logging failures
+  }
+
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    // Mark readiness once the server has actually bound the port.
+    __ready = true;
+    // In case other background initialization is added in future, it should
+    // set __ready = true only after completion (or call a helper that does).
   });
 }
 
