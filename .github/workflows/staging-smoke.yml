@@ -1,0 +1,82 @@
+name: Staging smoke
+
+on:
+  push:
+    branches: ['staging']
+  workflow_dispatch: {}
+
+jobs:
+  run-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write runtime secrets to environment
+        shell: bash
+        env:
+          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: |
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE=$WEBHOOK_BASE" >> $GITHUB_ENV; fi
+          if [ -n "$WEBHOOK_API_KEY" ]; then echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV; fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Collect quick curl traces
+        run: |
+          echo "Resolving target host for $WEBHOOK_BASE"
+          HOST=$(echo "$WEBHOOK_BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          echo "Host: $HOST"
+          nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
+          ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
+          # Retry /health a few times before running the smoke tests
+          echo "Checking $WEBHOOK_BASE/health (retries)"
+          attempts=0
+          max=12
+          http_status=0
+          until [ $attempts -ge $max ]
+          do
+            attempts=$((attempts+1))
+            echo "Attempt $attempts/$max..."
+            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+            echo "HTTP status: $http_status"
+            if [ "$http_status" = "200" ]; then
+              echo "Health OK"
+              cat /tmp/health_body.txt || true
+              break
+            fi
+            echo "Body/Error:"
+            cat /tmp/health_body.txt || true
+            cat /tmp/health_err || true
+            sleep 5
+          done
+          if [ "$http_status" != "200" ]; then
+            echo "Health check failed after $max attempts (status $http_status)" >&2
+          fi
+          echo "Collecting quick curl traces for $WEBHOOK_BASE"
+          curl --silent --show-error --max-time 30 -v "$WEBHOOK_BASE/health" > /tmp/health_trace.txt 2>&1 || true
+          printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
+          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$WEBHOOK_BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+
+      - name: Run staging smoke tests
+        run: |
+          export WEBHOOK_HEALTH_TIMEOUT=15000
+          export WEBHOOK_PING_TIMEOUT=20000
+          export WEBHOOK_GENERATE_TIMEOUT=120000
+          npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
+
+      - name: Upload smoke diagnostics (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-smoke-diagnostics
+          path: |
+            /tmp/health_trace.txt
+            /tmp/ping_trace.txt

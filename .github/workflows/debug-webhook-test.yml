@@ -1,0 +1,103 @@
+﻿name: Debug webhook test
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  debug-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
+      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+      DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs; set to 'true' if you want tests to run
+
+    steps:
+      - name: Exit early if DEBUG_WEBHOOK_ENABLED is not 'true'
+        run: |
+          if [ "$DEBUG_WEBHOOK_ENABLED" != 'true' ]; then
+            echo "DEBUG_WEBHOOK_ENABLED is not 'true', skipping tests."
+            exit 0
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "$WEBHOOK_API_KEY" ] || [ -z "$WEBHOOK_BASE" ]; then
+            echo "Required secrets WEBHOOK_API_KEY and WEBHOOK_BASE are not set. Failing."
+            exit 1
+          fi
+
+      - name: Run debug logging test
+        run: npx jest tests/debug_llm_logging.test.js --runInBand
+
+      - name: Run smoke tests
+        run: |
+          echo "Resolving target host for $WEBHOOK_BASE"
+          HOST=$(echo "$WEBHOOK_BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          echo "Host: $HOST"
+          nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
+          ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
+          echo "Checking $WEBHOOK_BASE/health (retries)"
+          attempts=0
+          max=12
+          http_status=0
+          until [ $attempts -ge $max ]
+          do
+            attempts=$((attempts+1))
+            echo "Attempt $attempts/$max..."
+            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+            echo "HTTP status: $http_status"
+            if [ "$http_status" = "200" ]; then
+              echo "Health OK"
+              cat /tmp/health_body.txt || true
+              break
+            fi
+            echo "Body/Error:"
+            cat /tmp/health_body.txt || true
+            cat /tmp/health_err || true
+            sleep 5
+          done
+          if [ "$http_status" != "200" ]; then
+            echo "Health check failed after $max attempts (status $http_status)" >&2
+          fi
+          curl --silent --show-error --max-time 30 -v "$WEBHOOK_BASE/health" > /tmp/health_trace.txt 2>&1 || true
+          printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
+          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$WEBHOOK_BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+          export WEBHOOK_HEALTH_TIMEOUT=15000
+          export WEBHOOK_PING_TIMEOUT=20000
+          export WEBHOOK_GENERATE_TIMEOUT=120000
+          npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
+        # inherit job-level env (WEBHOOK_API_KEY, WEBHOOK_BASE, DEBUG_WEBHOOK_ENABLED)
+
+      - name: Upload smoke diagnostics (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-smoke-diagnostics
+          path: |
+            /tmp/dns_trace.txt
+            /tmp/ping_check.txt
+            /tmp/health_trace.txt
+            /tmp/ping_trace.txt
+            /tmp/health_body.txt
+            /tmp/health_err
+            /tmp/ping_body.txt
+      - name: Confirm webhook envs (non-secret)
+        run: |
+          echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+          echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
+          echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"
+          echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+          echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
+          echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"

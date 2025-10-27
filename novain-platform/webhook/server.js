@@ -8,21 +8,8 @@ const cors = require('cors');
 const _crypto = require('crypto');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
-
-// Debug flag requested via env (string check)
-const _requestedDebug = process.env.DEBUG_WEBHOOK === 'true';
-// Soft guard: if running in production and DEBUG_WEBHOOK was requested, auto-disable it
-// and emit a single startup warning. This prevents accidental leakage of sensitive
-// debug output in production while still allowing staging/dev to enable verbose logs.
-let DEBUG_WEBHOOK = _requestedDebug;
-if (IS_PROD && _requestedDebug) {
-  // log a succinct warning; avoid printing secrets or payloads
-  // Use console.warn once at startup so it's visible in logs but not noisy
-  console.warn(
-    'WARNING: DEBUG_WEBHOOK was requested in production. For safety it has been disabled.'
-  );
-  DEBUG_WEBHOOK = false;
-}
+// Debug flag to enable verbose webhook logs in non-production or when explicitly set
+const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
 // ---- Config (env vars)
 const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
 const PORT = process.env.PORT || 3000;
@@ -132,27 +119,16 @@ app.use((req, _res, next) => {
 });
 
 // ---- Health
+// Immediate lightweight health check used by external load balancers.
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// ---- Internal: debug flags (non-production only)
-// Returns a small set of non-sensitive runtime flags to help with debugging.
-app.get('/internal/debug', (_req, res) => {
-  if (IS_PROD) return res.status(404).send('not_found');
-  try {
-    return res.status(200).json({
-      ok: true,
-      node_env: process.env.NODE_ENV || 'not_set',
-      debug_webhook_enabled: _requestedDebug === true,
-      api_key_present: !!API_KEY,
-      retrieval_url_present: !!RETRIEVAL_URL,
-      prompt_url_present: !!PROMPT_URL,
-      business_url_present: !!BUSINESS_URL,
-      port: PORT,
-    });
-  } catch (e) {
-    console.error('internal debug error', e && e.message);
-    return res.status(500).json({ ok: false });
-  }
+// Readiness: returns 200 only once the HTTP server has actually bound and
+// startup logs have been emitted. This is useful for CI or scripts that want
+// to wait until the service is actually ready to serve heavier traffic.
+let __ready = false;
+app.get('/ready', (_req, res) => {
+  if (__ready) return res.status(200).json({ ok: true });
+  return res.status(503).json({ ok: false, reason: 'not_ready' });
 });
 
 function makeMarkdownFromLesson(title, lesson) {
@@ -460,6 +436,10 @@ app.post('/webhook', async (req, res) => {
           }
 
           const payload = await r.json().catch(() => ({}));
+          // Mirror payload into both `raw` and `data.raw` so callers/tests that
+          // expect either shape will receive the same information.
+          const rawPayload = payload || {};
+
           // debug: log trimmed payload only when explicitly enabled (DEBUG_WEBHOOK)
           // and not in production. This prevents accidental leakage of LLM outputs.
           if (!IS_PROD && DEBUG_WEBHOOK) {
@@ -511,7 +491,8 @@ app.post('/webhook', async (req, res) => {
             summary,
             needs_clarify,
             followup_question,
-            raw: payload,
+            raw: rawPayload,
+            data: { raw: rawPayload },
           });
         }
 
@@ -519,12 +500,16 @@ app.post('/webhook', async (req, res) => {
         const summary = (question || '').toString().slice(0, 400);
         const needs_clarify = false;
         const followup_question = '';
+        // Return both top-level `raw` and a `data.raw` mirror so tests and
+        // external callers that expect either shape can work reliably.
+        const rawPayload = { source: 'stub' };
         return res.status(200).json({
           ok: true,
           summary,
           needs_clarify,
           followup_question,
-          raw: { source: 'stub' },
+          raw: rawPayload,
+          data: { raw: rawPayload },
         });
       } catch (_e) {
         console.error('llm_elicit handler error:', _e);
@@ -543,22 +528,26 @@ app.post('/webhook', async (req, res) => {
         const qLower = (question || '').toLowerCase();
         const needs_clarify = qLower.includes('clarify') || qLower.includes('?');
         const followup_question = needs_clarify ? 'Can you clarify what you mean by X?' : '';
+        const rawPayload = { component: comp, source: 'invoke_component_stub' };
         return res.status(200).json({
           ok: true,
           summary,
           needs_clarify,
           followup_question,
-          raw: { component: comp, source: 'invoke_component_stub' },
+          raw: rawPayload,
+          data: { raw: rawPayload },
         });
       }
 
       // default invoke_component stub
+      const rawPayload = { component: comp || 'unknown', source: 'invoke_component_default' };
       return res.status(200).json({
         ok: true,
         summary,
         needs_clarify: false,
         followup_question: '',
-        raw: { component: comp || 'unknown', source: 'invoke_component_default' },
+        raw: rawPayload,
+        data: { raw: rawPayload },
       });
     }
 
@@ -578,9 +567,34 @@ app.use((err, _req, res, _next) => {
 
 // ---- Start when run directly
 if (require.main === module) {
+  // Log runtime info early for Render / cloud logs troubleshooting.
+  try {
+    console.log('Starting webhook server', { node: process.version, pid: process.pid });
+  } catch (e) {
+    // ignore logging failures
+  }
+
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    // Mark readiness once the server has actually bound the port.
+    __ready = true;
+    // In case other background initialization is added in future, it should
+    // set __ready = true only after completion (or call a helper that does).
   });
+}
+
+// Attach a helper to create a raw http.Server for tests that need explicit
+// start/stop control. Keep the default export as the Express `app` for
+// backward compatibility with existing code that requires the app directly.
+try {
+  const _http = require('http');
+  Object.defineProperty(app, 'createServer', {
+    value: () => _http.createServer(app),
+    writable: false,
+    enumerable: false,
+  });
+} catch {
+  // ignore in constrained environments
 }
 
 // Export the app for in-process tests and programmatic use.

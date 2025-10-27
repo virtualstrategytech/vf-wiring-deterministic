@@ -70,6 +70,13 @@
   - When set to `true` and `NODE_ENV` is not `production`, the webhook will print additional debug output (fetch start/response snippets and LLM payload snippets).
   - Do NOT set `DEBUG_WEBHOOK` in production.
 
+### Enabling debug logs for tests
+
+- To assert or inspect debug logging from tests, set `NODE_ENV` to a non-production value and `DEBUG_WEBHOOK=true` before requiring the server in your test. The test suite includes `tests/debug_llm_logging.test.js` as an example.
+- Example (PowerShell):
+
+  $env:NODE_ENV = 'development'; $env:DEBUG_WEBHOOK = 'true'; node .\server.js
+
 ## Render configuration (recommended)
 
 - Set `NODE_ENV=production` for the webhook service.
@@ -90,6 +97,21 @@ node .\server.js
 ````
 
 ## Notes
+
+## Testing (in-process)
+
+- The Express `app` exported from `server.js` exposes a small helper for tests: `app.createServer()`.
+  - Requiring the module returns the Express `app` (for `supertest(app)` usage).
+  - Use `app.createServer()` when you need a raw Node `http.Server` to control start/stop explicitly.
+
+- A test helper is included at `tests/helpers/server-helper.js` exposing `startTestServer(app)`:
+  - Example:
+    const { startTestServer } = require('./tests/helpers/server-helper');
+    const srv = await startTestServer(app); // srv.base is the base URL
+    // ... run requests against srv.base ...
+    await srv.close();
+
+- Run tests with `npm test` (Jest uses `jest.config.cjs`). Ensure `WEBHOOK_API_KEY` is set for tests.
 
 - The webhook intentionally never logs full secret values. Presence checks (true/false) and debug output require explicit enabling.
 - For CI, provide `WEBHOOK_API_KEY` as a secret environment variable to the runner so tests can authenticate.

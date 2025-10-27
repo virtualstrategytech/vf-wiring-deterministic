@@ -78,13 +78,13 @@ if (Test-Path '.\novain-platform\prompts\server.js') {
   $promptsCmd = "Set-Location -LiteralPath 'novain-platform/prompts'; `$env:PORT='$PromptsPort'; node server.js"
   Start-Process -FilePath pwsh -ArgumentList '-NoExit','-Command',$promptsCmd -WorkingDirectory (Get-Location).Path
   Start-Sleep -Seconds 1
-} else { Write-Output 'prompts server not present — skipping start' }
+} else { Write-Output 'prompts server not present - skipping start' }
 
 if (Test-Path '.\novain-platform\webhook\mock_business_server.js') {
   $mockCmd = "Set-Location -LiteralPath 'novain-platform/webhook'; `$env:PORT='$MockBizPort'; node mock_business_server.js"
   Start-Process -FilePath pwsh -ArgumentList '-NoExit','-Command',$mockCmd -WorkingDirectory (Get-Location).Path
   Start-Sleep -Seconds 1
-} else { Write-Output 'mock_business_server.js not present — skip mock start' }
+} else { Write-Output 'mock_business_server.js not present - skip mock start' }
 
 Start-Sleep -Seconds 2
 
@@ -124,5 +124,5 @@ try {
   Write-Output "export_lesson_file failed: $_"
 }
 
-Write-Output 'Logs saved to .\logs\*.json — review responses.'
+Write-Output 'Logs saved to .\logs\*.json - review responses.'
 Write-Output ("Next: set Voiceflow globals 'WEBHOOK_URL' -> (use ngrok or public URL) and 'WEBHOOK_API_KEY' -> {0} (see wiring/globals.map.md and variables.md)" -f $ApiKey)

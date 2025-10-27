@@ -61,6 +61,6 @@ try {
   Write-Output "Secret written to $secretFile (local only)."
 } catch {
   Write-Warning "Failed to write secret file: $_"
-  # Exit success to avoid blocking tests — globalSetup will generate a key if necessary.
+  # Exit success to avoid blocking tests - globalSetup will generate a key if necessary.
   exit 0
 }

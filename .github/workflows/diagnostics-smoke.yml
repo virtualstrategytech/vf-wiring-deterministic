@@ -1,0 +1,58 @@
+name: diagnostics-smoke (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      WEBHOOK_BASE:
+        description: 'Base URL to run smoke tests against (e.g. https://api.example)'
+        required: false
+        type: string
+      SKIP_SMOKE:
+        description: 'Set to true to skip smoke test execution'
+        required: false
+        type: boolean
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print environment
+        run: |
+          echo "Runner: $(uname -a)"
+          node -v
+          npm -v
+
+      - name: Install deps
+        run: |
+          npm ci
+
+      - name: Run network diagnostics (non-secret-safe)
+        if: ${{ github.event.inputs.WEBHOOK_BASE != '' }}
+        run: |
+          echo "Masked base: ${{ github.event.inputs.WEBHOOK_BASE }}" | sed -E 's#(https?://)([^/]+).*#\1\2#g'
+          echo '--- nslookup ---'
+          nslookup "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+          echo '--- curl -Iv ---'
+          curl -Iv --max-time 15 "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+          echo '--- traceroute ---'
+          traceroute -m 8 "${{ github.event.inputs.WEBHOOK_BASE }}" || true
+
+      - name: Run smoke test (jest)
+        env:
+          WEBHOOK_BASE: ${{ github.event.inputs.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: |
+          # Run only the smoke test to keep runs fast and focused
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose || true
+
+      - name: Upload logs/artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-logs
+          path: |
+            ./npm-debug.log
+            ./jest* | true

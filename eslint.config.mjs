@@ -1,5 +1,5 @@
-// ...existing code...
-import { defineConfig } from 'eslint/config';
+// Flat ESLint config. We avoid importing `eslint/config` to prevent runtime
+// errors when the installed ESLint package doesn't export that subpath.
 import globals from 'globals';
 
 // plugin modules / parser
@@ -9,7 +9,7 @@ import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
 
-export default defineConfig([
+export default [
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
@@ -67,5 +67,5 @@ export default defineConfig([
       // add React-specific rule overrides here
     },
   },
-]);
+];
 // ...existing code...

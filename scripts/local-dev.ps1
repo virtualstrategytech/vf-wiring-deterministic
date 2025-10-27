@@ -21,8 +21,8 @@ if (Test-Path $envFile) {
 }
 if (-not (Test-Path $envFile)) {
   if (Test-Path $envExample) {
-    Copy-Item -Path $envExample -Destination $envFile -Force
-    Write-Output ".env created from .env.example — edit $envFile with real values before pushing"
+  Copy-Item -Path $envExample -Destination $envFile -Force
+  Write-Output ".env created from .env.example - edit $envFile with real values before pushing"
   } else {
     Write-Output "No .env.example present; create .env manually if needed."
   }
