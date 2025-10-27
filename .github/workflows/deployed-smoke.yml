@@ -39,10 +39,21 @@ jobs:
           fi
           echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
 
+      - name: Normalize WEBHOOK_BASE
+        run: |
+          # Remove any trailing slash(es) from WEBHOOK_BASE so joining paths
+          # like "$WEBHOOK_BASE/health" won't produce double-slashes ("//health").
+          # Persist normalized value to subsequent steps using $GITHUB_ENV.
+          NORMALIZED=${WEBHOOK_BASE%/}
+          echo "WEBHOOK_BASE=${NORMALIZED}" >> $GITHUB_ENV
+          echo "Normalized WEBHOOK_BASE=${NORMALIZED}"
+
       - name: Quick readiness check (poll /ready then /health)
         id: health
         run: |
-          echo "Checking service readiness at $WEBHOOK_BASE/ready (fallback to /health)"
+          # Normalize base here to avoid accidental double-slashes when joining paths
+          BASE=${WEBHOOK_BASE%/}
+          echo "Checking service readiness at $BASE/ready (fallback to /health)"
           attempts=0
           max=18
           http_status=0
@@ -51,7 +62,7 @@ jobs:
           do
             attempts=$((attempts+1))
             echo "Attempt $attempts/$max to /ready..."
-            http_status=$(curl --silent --show-error --max-time 8 -w '%{http_code}' -o /tmp/ready_body.txt "$WEBHOOK_BASE/ready" 2>/tmp/ready_err || true)
+            http_status=$(curl --silent --show-error --max-time 8 -w '%{http_code}' -o /tmp/ready_body.txt "$BASE/ready" 2>/tmp/ready_err || true)
             echo "ready HTTP status: $http_status"
             if [ "$http_status" = "200" ]; then
               echo "/ready OK"
@@ -70,7 +81,7 @@ jobs:
             do
               attempts=$((attempts+1))
               echo "Attempt $attempts/$max to /health..."
-              http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+              http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$BASE/health" 2>/tmp/health_err || true)
               echo "health HTTP status: $http_status"
               if [ "$http_status" = "200" ]; then
                 echo "Health OK"
@@ -108,18 +119,20 @@ jobs:
         env:
           SKIP_SYNC_SECRET: 'true'
         run: |
-          echo "Running smoke tests against $WEBHOOK_BASE"
+          # use a normalized base here as well
+          BASE=${WEBHOOK_BASE%/}
+          echo "Running smoke tests against $BASE"
           # Run a short, verbose curl trace to capture immediate network issues before Jest
           # Save traces to files so we can upload them on failure for debugging
-          echo "Resolving target host for $WEBHOOK_BASE"
-          HOST=$(echo "$WEBHOOK_BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          echo "Resolving target host for $BASE"
+          HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
           echo "Host: $HOST"
           nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
           ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
           echo "Collecting quick curl traces..."
-          curl --silent --show-error --max-time 30 -v "$WEBHOOK_BASE/health" > /tmp/health_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v "$BASE/health" > /tmp/health_trace.txt 2>&1 || true
           printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
-          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$WEBHOOK_BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
 
           # Export per-request timeouts for the smoke test runner (millis)
           export WEBHOOK_HEALTH_TIMEOUT=15000

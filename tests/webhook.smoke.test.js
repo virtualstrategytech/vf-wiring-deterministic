@@ -219,6 +219,11 @@ function postJson(url, body, headers = {}, timeout = 5000) {
             } catch {
               json = text;
             }
+            // Ensure client socket is destroyed after response processing to avoid
+            // lingering TLS/sockets left open that make Jest report open handles.
+            try {
+              if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
             resolve({ status: res.statusCode, data: json });
           } catch (e) {
             reject(e);
@@ -322,6 +327,11 @@ function getText(url, timeout = 3000) {
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           try {
+            // Ensure client socket is destroyed after response processing to avoid
+            // lingering TLS/sockets left open that make Jest report open handles.
+            try {
+              if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
             resolve(Buffer.concat(chunks).toString());
           } catch (e) {
             reject(e);
