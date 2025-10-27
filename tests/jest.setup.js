@@ -40,6 +40,27 @@ afterAll(async () => {
     try {
       if (typeof process._getActiveHandles === 'function') {
         const handles = process._getActiveHandles();
+        if (process.env.DEBUG_TESTS) {
+          try {
+            console.warn('DEBUG_TESTS: raw active handles dump:');
+            handles.forEach((h, i) => {
+              try {
+                const name = h && h.constructor && h.constructor.name;
+                console.warn(`  [${i}] type=${String(name)}`);
+                if (h && typeof h._createdStack === 'string') {
+                  console.warn('    created at:');
+                  (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
+                    console.warn(`      ${String(ln).trim()}`)
+                  );
+                } else if (String(name) === 'Function') {
+                  try {
+                    console.warn(`    fn: ${String(h).slice(0, 400)}`);
+                  } catch {}
+                }
+              } catch {}
+            });
+          } catch {}
+        }
         if (handles && handles.length) {
           // Filter out benign handles (stdout/stderr WriteStreams and some
           // bound anonymous functions) to reduce diagnostic noise in CI.
