@@ -43,12 +43,14 @@ jobs:
 
       - name: Run smoke tests
         run: |
-          echo "Resolving target host for $WEBHOOK_BASE"
-          HOST=$(echo "$WEBHOOK_BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          # normalize base to avoid accidental double-slash when joining paths
+          BASE=${WEBHOOK_BASE%/}
+          echo "Resolving target host for $BASE"
+          HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
           echo "Host: $HOST"
           nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
           ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
-          echo "Checking $WEBHOOK_BASE/health (retries)"
+          echo "Checking $BASE/health (retries)"
           attempts=0
           max=12
           http_status=0
@@ -56,7 +58,7 @@ jobs:
           do
             attempts=$((attempts+1))
             echo "Attempt $attempts/$max..."
-            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$WEBHOOK_BASE/health" 2>/tmp/health_err || true)
+            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$BASE/health" 2>/tmp/health_err || true)
             echo "HTTP status: $http_status"
             if [ "$http_status" = "200" ]; then
               echo "Health OK"
@@ -71,9 +73,9 @@ jobs:
           if [ "$http_status" != "200" ]; then
             echo "Health check failed after $max attempts (status $http_status)" >&2
           fi
-          curl --silent --show-error --max-time 30 -v "$WEBHOOK_BASE/health" > /tmp/health_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v "$BASE/health" > /tmp/health_trace.txt 2>&1 || true
           printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
-          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$WEBHOOK_BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
           export WEBHOOK_HEALTH_TIMEOUT=15000
           export WEBHOOK_PING_TIMEOUT=20000
           export WEBHOOK_GENERATE_TIMEOUT=120000
