@@ -206,6 +206,20 @@ function postJson(url, body, headers = {}, timeout = 5000) {
 
       const transport = u.protocol === 'https:' ? https : http;
       let sockRef = null;
+      try {
+        const stackPreview = (new Error().stack || '')
+          .toString()
+          .split('\n')
+          .slice(1, 6)
+          .map((l) => l.trim())
+          .join(' | ');
+        try {
+          console.warn(
+            `DEBUG request-start: POST ${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname} STACK:${stackPreview}`
+          );
+        } catch {}
+      } catch {}
+
       const req = transport.request(options, (res) => {
         clearTimeout(timer);
         let chunks = [];
@@ -222,7 +236,14 @@ function postJson(url, body, headers = {}, timeout = 5000) {
             // Ensure client socket is destroyed after response processing to avoid
             // lingering TLS/sockets left open that make Jest report open handles.
             try {
-              if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+              if (sockRef) {
+                try {
+                  if (typeof sockRef.end === 'function') sockRef.end();
+                } catch {}
+                try {
+                  if (typeof sockRef.destroy === 'function') sockRef.destroy();
+                } catch {}
+              }
             } catch {}
             resolve({ status: res.statusCode, data: json });
           } catch (e) {
@@ -230,6 +251,11 @@ function postJson(url, body, headers = {}, timeout = 5000) {
           }
         });
       });
+
+      try {
+        // attach a creation stack to the request object for later diagnostics
+        req._createdStack = new Error().stack;
+      } catch {}
 
       req.on('error', (err) => {
         try {
@@ -239,7 +265,14 @@ function postJson(url, body, headers = {}, timeout = 5000) {
           req.destroy();
         } catch {}
         try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+          if (sockRef) {
+            try {
+              if (typeof sockRef.end === 'function') sockRef.end();
+            } catch {}
+            try {
+              if (typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
+          }
         } catch {}
         reject(err);
       });
@@ -248,7 +281,23 @@ function postJson(url, body, headers = {}, timeout = 5000) {
       req.on('socket', (sock) => {
         sockRef = sock;
         try {
-          sock._createdStack = new Error().stack;
+          // prefer the request's creation stack if available so we can trace the code path
+          sock._createdStack = req._createdStack || new Error().stack;
+        } catch {}
+        try {
+          // emit a short diagnostic so CI logs capture where sockets are born
+          const info = {
+            url: `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`,
+            sockType: sock && sock.constructor ? sock.constructor.name : 'unknown',
+            createdStackPreview: String((sock._createdStack || '').toString())
+              .split('\n')
+              .slice(1, 4)
+              .map((l) => l.trim())
+              .join(' | '),
+          };
+          try {
+            console.warn(`DEBUG socket-created: ${JSON.stringify(info)}`);
+          } catch {}
         } catch {}
         try {
           if (typeof sock.setNoDelay === 'function') sock.setNoDelay(true);
@@ -269,7 +318,14 @@ function postJson(url, body, headers = {}, timeout = 5000) {
           req.destroy();
         } catch {}
         try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+          if (sockRef) {
+            try {
+              if (typeof sockRef.end === 'function') sockRef.end();
+            } catch {}
+            try {
+              if (typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
+          }
         } catch {}
         reject(new Error('timeout'));
       }, timeout);
@@ -285,7 +341,14 @@ function postJson(url, body, headers = {}, timeout = 5000) {
           req.destroy();
         } catch {}
         try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+          if (sockRef) {
+            try {
+              if (typeof sockRef.end === 'function') sockRef.end();
+            } catch {}
+            try {
+              if (typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
+          }
         } catch {}
         reject(e);
       }
@@ -319,6 +382,20 @@ function getText(url, timeout = 3000) {
 
       const transport = u.protocol === 'https:' ? https : http;
       let sockRef = null;
+      try {
+        const stackPreview = (new Error().stack || '')
+          .toString()
+          .split('\n')
+          .slice(1, 6)
+          .map((l) => l.trim())
+          .join(' | ');
+        try {
+          console.warn(
+            `DEBUG request-start: GET ${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname} STACK:${stackPreview}`
+          );
+        } catch {}
+      } catch {}
+
       const req = transport.request(options, (res) => {
         try {
           clearTimeout(timer);
@@ -330,7 +407,14 @@ function getText(url, timeout = 3000) {
             // Ensure client socket is destroyed after response processing to avoid
             // lingering TLS/sockets left open that make Jest report open handles.
             try {
-              if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+              if (sockRef) {
+                try {
+                  if (typeof sockRef.end === 'function') sockRef.end();
+                } catch {}
+                try {
+                  if (typeof sockRef.destroy === 'function') sockRef.destroy();
+                } catch {}
+              }
             } catch {}
             resolve(Buffer.concat(chunks).toString());
           } catch (e) {
@@ -338,6 +422,10 @@ function getText(url, timeout = 3000) {
           }
         });
       });
+
+      try {
+        req._createdStack = new Error().stack;
+      } catch {}
 
       req.on('error', (err) => {
         try {
@@ -347,13 +435,37 @@ function getText(url, timeout = 3000) {
           req.destroy();
         } catch {}
         try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+          if (sockRef) {
+            try {
+              if (typeof sockRef.end === 'function') sockRef.end();
+            } catch {}
+            try {
+              if (typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
+          }
         } catch {}
         reject(err);
       });
 
       req.on('socket', (sock) => {
         sockRef = sock;
+        try {
+          sock._createdStack = req._createdStack || new Error().stack;
+        } catch {}
+        try {
+          const info = {
+            url: `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`,
+            sockType: sock && sock.constructor ? sock.constructor.name : 'unknown',
+            createdStackPreview: String((sock._createdStack || '').toString())
+              .split('\n')
+              .slice(1, 4)
+              .map((l) => l.trim())
+              .join(' | '),
+          };
+          try {
+            console.warn(`DEBUG socket-created: ${JSON.stringify(info)}`);
+          } catch {}
+        } catch {}
         try {
           if (typeof sock.setNoDelay === 'function') sock.setNoDelay(true);
         } catch {}
@@ -372,7 +484,14 @@ function getText(url, timeout = 3000) {
           req.destroy();
         } catch {}
         try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
+          if (sockRef) {
+            try {
+              if (typeof sockRef.end === 'function') sockRef.end();
+            } catch {}
+            try {
+              if (typeof sockRef.destroy === 'function') sockRef.destroy();
+            } catch {}
+          }
         } catch {}
         reject(new Error('timeout'));
       }, timeout);
