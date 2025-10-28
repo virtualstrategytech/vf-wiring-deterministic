@@ -2,6 +2,64 @@
 // Called after each test file via setupFilesAfterEnv.
 const http = require('http');
 const https = require('https');
+const net = require('net');
+
+// Defensive: ensure global agents don't keep sockets alive across tests.
+// Some Node versions may still reuse sockets in the global agent; disabling
+// keepAlive reduces the chance of lingering TLSSocket handles that Jest
+// reports as open handles in CI.
+try {
+  if (http && http.globalAgent) {
+    try {
+      http.globalAgent.keepAlive = false;
+    } catch {}
+  }
+  if (https && https.globalAgent) {
+    try {
+      https.globalAgent.keepAlive = false;
+    } catch {}
+  }
+} catch {}
+
+// Instrument agent socket creation to capture a creation stack on sockets
+// so CI diagnostics can map lingering sockets back to source code.
+try {
+  const instrument = (agent) => {
+    if (!agent) return;
+    try {
+      const orig = agent.createConnection;
+      if (typeof orig === 'function') {
+        agent.createConnection = function createConnectionWithStack(options, callback) {
+          const sock = orig.call(this, options, callback);
+          try {
+            sock._createdStack = new Error('agent-socket-created').stack;
+          } catch {}
+          return sock;
+        };
+      }
+    } catch {}
+  };
+  try {
+    instrument(http && http.globalAgent);
+  } catch {}
+  try {
+    instrument(https && https.globalAgent);
+  } catch {}
+
+  // Also instrument net.createConnection as a last-resort catch-all for sockets
+  try {
+    const origNetCreate = net.createConnection;
+    if (typeof origNetCreate === 'function') {
+      net.createConnection = function createConnectionWithStack(...args) {
+        const sock = origNetCreate.apply(net, args);
+        try {
+          sock._createdStack = new Error('net-createConnection-created').stack;
+        } catch {}
+        return sock;
+      };
+    }
+  } catch {}
+} catch {}
 
 // Attempt to destroy global agents and give Node a chance to clear handles.
 afterAll(async () => {

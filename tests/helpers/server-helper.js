@@ -251,7 +251,18 @@ function startTestServer(app) {
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
-    server.listen(0, '127.0.0.1', onListen);
+    // Start listening without passing the callback directly to avoid
+    // potential internal bound anonymous functions Node may create when
+    // a callback is provided. Attach the named `onListen` listener instead.
+    server.listen(0, '127.0.0.1');
+    try {
+      server.once('listening', onListen);
+    } catch {
+      // fallback: if once/listening attach fails for any reason, call onListen
+      try {
+        onListen();
+      } catch {}
+    }
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
