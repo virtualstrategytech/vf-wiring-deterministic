@@ -30,7 +30,7 @@ jobs:
           WEBHOOK_BASE: ${{ github.event.inputs.webhook_base || secrets.WEBHOOK_BASE }}
           WEBHOOK_API_KEY: ${{ github.event.inputs.webhook_api_key || secrets.WEBHOOK_API_KEY }}
           NODE_DEBUG: net,tls
-          NODE_OPTIONS: '--enable-source-maps --trace-warnings --async-stack-traces'
+          NODE_OPTIONS: '--enable-source-maps --trace-warnings'
         run: |
           set -euo pipefail
           mkdir -p /tmp
