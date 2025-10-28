@@ -176,6 +176,22 @@ afterAll(async () => {
 
           // give the runtime a short moment to settle after forced cleanup
           await new Promise((r) => setTimeout(r, 20));
+
+          // Extra safety: explicitly destroy any remaining global agent sockets again
+          try {
+            if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+              try {
+                http.globalAgent.destroy();
+              } catch {}
+            }
+          } catch {}
+          try {
+            if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+              try {
+                https.globalAgent.destroy();
+              } catch {}
+            }
+          } catch {}
         }
       }
     } catch (err) {
@@ -184,6 +200,41 @@ afterAll(async () => {
         console.warn('handle-dump error', err && err.stack ? err.stack : String(err));
       } catch {}
     }
+
+    // Final aggressive sweep: re-check active handles and forcibly close/destroy sockets if any remain.
+    try {
+      if (typeof process._getActiveHandles === 'function') {
+        const remaining = process._getActiveHandles() || [];
+        if (remaining.length) {
+          for (const h of remaining) {
+            try {
+              const name = h && h.constructor && h.constructor.name;
+              if (String(name) === 'Socket' || String(name) === 'TLSSocket') {
+                try {
+                  if (typeof h.end === 'function') {
+                    try {
+                      h.end();
+                    } catch {}
+                  }
+                  if (typeof h.destroy === 'function') {
+                    try {
+                      h.destroy();
+                    } catch {}
+                  }
+                  if (h && h._handle && typeof h._handle.close === 'function') {
+                    try {
+                      h._handle.close();
+                    } catch {}
+                  }
+                } catch {}
+              }
+            } catch {}
+          }
+          // allow native resources a moment to be released
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      }
+    } catch {}
   } catch {
     // swallow errors to avoid masking test failures
   }

@@ -1,5 +1,7 @@
 const serverHelper = require('./server-helper');
 const fetch = require('node-fetch');
+const http = require('http');
+const https = require('https');
 
 async function requestApp(
   app,
@@ -7,7 +9,11 @@ async function requestApp(
 ) {
   // If app is a string base URL, use node-fetch directly.
   if (typeof app === 'string') {
-    const url = `${app}${path}`;
+    // Defensive: normalize base by stripping any trailing slashes so callers
+    // that accidentally include a trailing '/' (or environment values) don't
+    // produce URLs with '//' which can lead to 404s like `//health`.
+    const base = (app || '').replace(/\/+$/, '');
+    const url = `${base}${path}`;
     // provide a clearer error when an invalid/empty base is supplied
     try {
       new URL(url);
@@ -16,6 +22,11 @@ async function requestApp(
     }
     const controller = new AbortController();
     const to = setTimeout(() => controller.abort(), timeout || 5000);
+    // use a per-request agent (no keepAlive) so node-fetch does not reuse sockets
+    const agent =
+      u.protocol === 'https:'
+        ? new https.Agent({ keepAlive: false })
+        : new http.Agent({ keepAlive: false });
     try {
       const resp = await fetch(url, {
         method: method.toUpperCase(),
@@ -26,6 +37,7 @@ async function requestApp(
         ),
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
+        agent,
       });
       const text = await resp.text();
       let parsed;
@@ -34,9 +46,24 @@ async function requestApp(
       } catch {
         parsed = text;
       }
+      // ensure any response body streams are destroyed to avoid lingering sockets
+      try {
+        if (resp && resp.body && typeof resp.body.destroy === 'function') {
+          try {
+            resp.body.destroy();
+          } catch {}
+        }
+      } catch {}
       return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
     } finally {
       clearTimeout(to);
+      try {
+        // ensure controller is aborted to free any associated request resources
+        controller.abort && typeof controller.abort === 'function' && controller.abort();
+      } catch {}
+      try {
+        if (agent && typeof agent.destroy === 'function') agent.destroy();
+      } catch {}
     }
   }
 
@@ -46,11 +73,16 @@ async function requestApp(
   // bound anonymous handles detected by Jest.
   if (app && typeof app.listen === 'function') {
     const started = await serverHelper.startTestServer(app);
-    const base = started.base;
+    // Normalize any trailing slash on the ephemeral server base as well.
+    const base = (started.base || '').replace(/\/+$/, '');
     const close = started.close;
     const url = `${base}${path}`;
     const controller = new AbortController();
     const to = setTimeout(() => controller.abort(), timeout || 5000);
+    // per-request agent for ephemeral server requests as well
+    const agent = base.startsWith('https://')
+      ? new https.Agent({ keepAlive: false })
+      : new http.Agent({ keepAlive: false });
     try {
       const resp = await fetch(url, {
         method: method.toUpperCase(),
@@ -61,6 +93,7 @@ async function requestApp(
         ),
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
+        agent,
       });
       const text = await resp.text();
       let parsed;
@@ -69,11 +102,26 @@ async function requestApp(
       } catch {
         parsed = text;
       }
+      // ensure any response body streams are destroyed to avoid lingering sockets
+      try {
+        if (resp && resp.body && typeof resp.body.destroy === 'function') {
+          try {
+            resp.body.destroy();
+          } catch {}
+        }
+      } catch {}
       return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
     } finally {
       clearTimeout(to);
       try {
         await close();
+      } catch {}
+      try {
+        // ensure the fetch controller is aborted to free any associated request resources
+        controller.abort && typeof controller.abort === 'function' && controller.abort();
+      } catch {}
+      try {
+        if (agent && typeof agent.destroy === 'function') agent.destroy();
       } catch {}
       try {
         if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {

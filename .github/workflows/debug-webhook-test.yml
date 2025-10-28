@@ -11,6 +11,7 @@ jobs:
       WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
       WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs; set to 'true' if you want tests to run
+      DEBUG_TESTS: 'true' # enable extra handle-dump diagnostics in jest.setup.js
 
     steps:
       - name: Exit early if DEBUG_WEBHOOK_ENABLED is not 'true'
@@ -43,8 +44,15 @@ jobs:
 
       - name: Run smoke tests
         run: |
+          # Initialize persistent socket debug log so it's present even if tests time out early
+          # Record masked host and a timestamp (do not print secrets)
+          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
+
           # normalize base to avoid accidental double-slash when joining paths
           BASE=${WEBHOOK_BASE%/}
+          # Persist normalized value to subsequent steps so Node/Jest sees the trimmed WEBHOOK_BASE
+          echo "WEBHOOK_BASE=${BASE}" >> $GITHUB_ENV
           echo "Resolving target host for $BASE"
           HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
           echo "Host: $HOST"
@@ -95,6 +103,7 @@ jobs:
             /tmp/health_body.txt
             /tmp/health_err
             /tmp/ping_body.txt
+            /tmp/socket_debug.log
       - name: Confirm webhook envs (non-secret)
         run: |
           echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"

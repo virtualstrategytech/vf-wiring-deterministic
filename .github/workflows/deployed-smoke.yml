@@ -119,6 +119,10 @@ jobs:
         env:
           SKIP_SYNC_SECRET: 'true'
         run: |
+          # Initialize persistent socket debug log so artifact is created even if tests time out early
+          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
+
           # use a normalized base here as well
           BASE=${WEBHOOK_BASE%/}
           echo "Running smoke tests against $BASE"
@@ -151,6 +155,7 @@ jobs:
             /tmp/ping_trace.txt
             /tmp/health_body.txt
             /tmp/health_err
+            /tmp/socket_debug.log
             scripts/check-locks.js
       - name: Confirm webhook envs (non-secret)
         run: |

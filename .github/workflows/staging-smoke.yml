@@ -33,6 +33,8 @@ jobs:
         run: |
           # normalize base to avoid accidental double-slash when joining paths
           BASE=${WEBHOOK_BASE%/}
+          # Persist normalized value to subsequent steps so Node/Jest sees the trimmed WEBHOOK_BASE
+          echo "WEBHOOK_BASE=${BASE}" >> $GITHUB_ENV
           echo "Resolving target host for $BASE"
           HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
           echo "Host: $HOST"
@@ -67,6 +69,12 @@ jobs:
           printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
           curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
 
+      - name: Initialize socket debug log
+        run: |
+          # create a small header for the socket debug log so artifact exists even if tests don't run
+          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
+          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
+
       - name: Run staging smoke tests
         run: |
           export WEBHOOK_HEALTH_TIMEOUT=15000
@@ -82,3 +90,4 @@ jobs:
           path: |
             /tmp/health_trace.txt
             /tmp/ping_trace.txt
+            /tmp/socket_debug.log
