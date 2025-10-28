@@ -9,8 +9,29 @@ const key =
   (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
 
 const rawBase = (process.env.WEBHOOK_BASE || '').trim();
+// Defensive normalization: strip trailing slashes so joining paths like
+// `${base}/health` cannot produce `//health` if the env contained a
+// trailing slash. This makes tests robust to CI step ordering.
+function _normalizeBase(b) {
+  if (!b) return b;
+  try {
+    // trim whitespace and trailing slashes
+    return String(b).trim().replace(/\/+$/u, '');
+  } catch {
+    return b;
+  }
+}
 // Default to local server when no base provided
-const base = rawBase || 'http://127.0.0.1:3000';
+const base = _normalizeBase(rawBase) || 'http://127.0.0.1:3000';
+
+// Emit a short, always-on debug header so CI logs clearly indicate which
+// version of the test file executed. This is intentionally lightweight and
+// non-secret (no env values printed).
+try {
+  console.warn(
+    `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
+  );
+} catch {}
 
 // If the user supplied a remote base but didn't provide an API key, fail fast
 // with a clear message so CI logs are actionable (instead of hitting "Invalid URL").
@@ -49,6 +70,17 @@ try {
 const HEALTH_TIMEOUT = Number(process.env.WEBHOOK_HEALTH_TIMEOUT) || 5000;
 const PING_TIMEOUT = Number(process.env.WEBHOOK_PING_TIMEOUT) || 7000;
 const GENERATE_TIMEOUT = Number(process.env.WEBHOOK_GENERATE_TIMEOUT) || 45000;
+
+// Helper: write short debug lines to stderr and a file so CI captures them reliably
+function writeDebugLog(line) {
+  try {
+    console.error(line);
+  } catch {}
+  try {
+    // best-effort: write to a temp file so CI artifact upload can collect it
+    fs.appendFileSync('/tmp/socket_debug.log', `${new Date().toISOString()} ${line}\n`);
+  } catch {}
+}
 
 describe('webhook smoke', () => {
   if (process.env.SKIP_SMOKE === 'true') {
@@ -172,346 +204,37 @@ describe('webhook smoke', () => {
   });
 });
 
-// Helper: POST JSON and return { status, data }
-function postJson(url, body, headers = {}, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    try {
-      let u;
-      try {
-        u = new URL(url);
-      } catch {
-        // Provide a helpful, non-secret diagnostic for CI
-        const masked = _maskBaseForLogs(url);
-        return reject(
-          new Error(`Invalid URL in smoke test (postJson). constructed from base: ${masked}`)
-        );
-      }
-      const data = JSON.stringify(body);
-      const options = {
-        method: 'POST',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        // prevent socket pooling / keep-alive so Jest can exit cleanly
-        agent: false,
-        headers: Object.assign(
-          {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            Connection: 'close',
-          },
-          headers
-        ),
-      };
+// Delegate to the shared request helper which uses node-fetch and has
+// its own defensive cleanup. This reduces low-level socket handling and
+// avoids reimplementing HTTP bookkeeping here.
+const { requestApp } = require('./helpers/request-helper');
 
-      const transport = u.protocol === 'https:' ? https : http;
-      let sockRef = null;
-      try {
-        const stackPreview = (new Error().stack || '')
-          .toString()
-          .split('\n')
-          .slice(1, 6)
-          .map((l) => l.trim())
-          .join(' | ');
-        try {
-          console.warn(
-            `DEBUG request-start: POST ${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname} STACK:${stackPreview}`
-          );
-        } catch {}
-      } catch {}
-
-      const req = transport.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            const text = Buffer.concat(chunks).toString();
-            let json;
-            try {
-              json = JSON.parse(text);
-            } catch {
-              json = text;
-            }
-            // Ensure client socket is destroyed after response processing to avoid
-            // lingering TLS/sockets left open that make Jest report open handles.
-            try {
-              if (sockRef) {
-                try {
-                  if (typeof sockRef.end === 'function') sockRef.end();
-                } catch {}
-                try {
-                  if (typeof sockRef.destroy === 'function') sockRef.destroy();
-                } catch {}
-              }
-            } catch {}
-            resolve({ status: res.statusCode, data: json });
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      try {
-        // attach a creation stack to the request object for later diagnostics
-        req._createdStack = new Error().stack;
-      } catch {}
-
-      req.on('error', (err) => {
-        try {
-          clearTimeout(timer);
-        } catch {}
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef) {
-            try {
-              if (typeof sockRef.end === 'function') sockRef.end();
-            } catch {}
-            try {
-              if (typeof sockRef.destroy === 'function') sockRef.destroy();
-            } catch {}
-          }
-        } catch {}
-        reject(err);
-      });
-
-      // Instrument the client socket for diagnostics and try to reduce lingering
-      req.on('socket', (sock) => {
-        sockRef = sock;
-        try {
-          // prefer the request's creation stack if available so we can trace the code path
-          sock._createdStack = req._createdStack || new Error().stack;
-        } catch {}
-        try {
-          // emit a short diagnostic so CI logs capture where sockets are born
-          const info = {
-            url: `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`,
-            sockType: sock && sock.constructor ? sock.constructor.name : 'unknown',
-            createdStackPreview: String((sock._createdStack || '').toString())
-              .split('\n')
-              .slice(1, 4)
-              .map((l) => l.trim())
-              .join(' | '),
-          };
-          try {
-            console.warn(`DEBUG socket-created: ${JSON.stringify(info)}`);
-          } catch {}
-        } catch {}
-        try {
-          if (typeof sock.setNoDelay === 'function') sock.setNoDelay(true);
-        } catch {}
-        try {
-          if (typeof sock.unref === 'function') sock.unref();
-        } catch {}
-        // ensure we destroy the socket when it closes
-        sock.on('close', () => {
-          try {
-            if (sockRef === sock) sockRef = null;
-          } catch {}
-        });
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef) {
-            try {
-              if (typeof sockRef.end === 'function') sockRef.end();
-            } catch {}
-            try {
-              if (typeof sockRef.destroy === 'function') sockRef.destroy();
-            } catch {}
-          }
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      try {
-        req.write(data);
-        req.end();
-      } catch (e) {
-        try {
-          clearTimeout(timer);
-        } catch {}
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef) {
-            try {
-              if (typeof sockRef.end === 'function') sockRef.end();
-            } catch {}
-            try {
-              if (typeof sockRef.destroy === 'function') sockRef.destroy();
-            } catch {}
-          }
-        } catch {}
-        reject(e);
-      }
-    } catch (e) {
-      reject(e);
-    }
+async function postJson(url, body, headers = {}, timeout = 5000) {
+  const u = new URL(url);
+  const base = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  const path = u.pathname + u.search;
+  const result = await requestApp(base, {
+    method: 'post',
+    path,
+    body,
+    headers,
+    timeout,
   });
+  // normalize shape to { status, data }
+  return {
+    status:
+      result && result.status ? result.status : result && result.statusCode ? result.statusCode : 0,
+    data: result && (result.body || result.data),
+  };
 }
 
-// Helper: simple GET returning plain text
-function getText(url, timeout = 3000) {
-  return new Promise((resolve, reject) => {
-    try {
-      let u;
-      try {
-        u = new URL(url);
-      } catch {
-        const masked = _maskBaseForLogs(url);
-        return reject(
-          new Error(`Invalid URL in smoke test (getText). constructed from base: ${masked}`)
-        );
-      }
-      const options = {
-        method: 'GET',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        agent: false,
-        headers: { Connection: 'close' },
-      };
-
-      const transport = u.protocol === 'https:' ? https : http;
-      let sockRef = null;
-      try {
-        const stackPreview = (new Error().stack || '')
-          .toString()
-          .split('\n')
-          .slice(1, 6)
-          .map((l) => l.trim())
-          .join(' | ');
-        try {
-          console.warn(
-            `DEBUG request-start: GET ${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname} STACK:${stackPreview}`
-          );
-        } catch {}
-      } catch {}
-
-      const req = transport.request(options, (res) => {
-        try {
-          clearTimeout(timer);
-        } catch {}
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            // Ensure client socket is destroyed after response processing to avoid
-            // lingering TLS/sockets left open that make Jest report open handles.
-            try {
-              if (sockRef) {
-                try {
-                  if (typeof sockRef.end === 'function') sockRef.end();
-                } catch {}
-                try {
-                  if (typeof sockRef.destroy === 'function') sockRef.destroy();
-                } catch {}
-              }
-            } catch {}
-            resolve(Buffer.concat(chunks).toString());
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      try {
-        req._createdStack = new Error().stack;
-      } catch {}
-
-      req.on('error', (err) => {
-        try {
-          clearTimeout(timer);
-        } catch {}
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef) {
-            try {
-              if (typeof sockRef.end === 'function') sockRef.end();
-            } catch {}
-            try {
-              if (typeof sockRef.destroy === 'function') sockRef.destroy();
-            } catch {}
-          }
-        } catch {}
-        reject(err);
-      });
-
-      req.on('socket', (sock) => {
-        sockRef = sock;
-        try {
-          sock._createdStack = req._createdStack || new Error().stack;
-        } catch {}
-        try {
-          const info = {
-            url: `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`,
-            sockType: sock && sock.constructor ? sock.constructor.name : 'unknown',
-            createdStackPreview: String((sock._createdStack || '').toString())
-              .split('\n')
-              .slice(1, 4)
-              .map((l) => l.trim())
-              .join(' | '),
-          };
-          try {
-            console.warn(`DEBUG socket-created: ${JSON.stringify(info)}`);
-          } catch {}
-        } catch {}
-        try {
-          if (typeof sock.setNoDelay === 'function') sock.setNoDelay(true);
-        } catch {}
-        try {
-          if (typeof sock.unref === 'function') sock.unref();
-        } catch {}
-        sock.on('close', () => {
-          try {
-            if (sockRef === sock) sockRef = null;
-          } catch {}
-        });
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef) {
-            try {
-              if (typeof sockRef.end === 'function') sockRef.end();
-            } catch {}
-            try {
-              if (typeof sockRef.destroy === 'function') sockRef.destroy();
-            } catch {}
-          }
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      try {
-        req.end();
-      } catch (e) {
-        try {
-          clearTimeout(timer);
-        } catch {}
-        try {
-          req.destroy();
-        } catch {}
-        try {
-          if (sockRef && typeof sockRef.destroy === 'function') sockRef.destroy();
-        } catch {}
-        reject(e);
-      }
-    } catch (e) {
-      reject(e);
-    }
-  });
+// Delegate GET requests to the shared request helper which already applies
+// Connection: close, AbortController timeouts and response-body destruction.
+async function getText(url, timeout = 3000) {
+  const u = new URL(url);
+  const base = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  const path = u.pathname + u.search;
+  const result = await requestApp(base, { method: 'get', path, timeout });
+  // requestApp returns { status, headers, body }
+  return typeof result.body === 'string' ? result.body : JSON.stringify(result.body);
 }
