@@ -12,6 +12,14 @@ function _attachSocketTracking(server, sockets) {
       const stack = new Error('socket-created-at').stack;
       s._createdStack = stack;
     } catch {}
+    try {
+      if (process.env.DEBUG_TESTS) {
+        try {
+          // Print the creation stack immediately for reliable CI capture
+          console.warn(new Error('socket-created-at').stack);
+        } catch {}
+      }
+    } catch {}
     sockets.add(s);
     _sockets.add(s);
     try {
@@ -243,22 +251,24 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    // Start listening and pass the named `onListen` callback directly to
-    // `server.listen(...)`. Some Node versions create an internal bound
-    // anonymous function when `listen` is called without a callback; by
-    // supplying the named callback we avoid that and reduce Jest's false
-    // positive "bound-anonymous-fn" open handle reports.
+    // Start listening and pass the named `onListen` callback to
+    // `server.listen(...)`. Passing the named callback directly avoids
+    // creating an internal anonymous bound function in most Node versions
+    // while ensuring `onListen` fires when the server is ready.
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
-    // Start listening without passing the callback directly to avoid
-    // potential internal bound anonymous functions Node may create when
-    // a callback is provided. Attach the named `onListen` listener instead.
-    server.listen(0, '127.0.0.1');
     try {
-      server.once('listening', onListen);
-    } catch {
-      // fallback: if once/listening attach fails for any reason, call onListen
+      // Use options object form for listen to avoid subtle internal binding
+      // behaviors in some Node/platform combos that produce bound anonymous
+      // functions linked to the call site.
+      server.listen({ port: 0, host: '127.0.0.1' }, onListen);
+    } catch (e) {
+      // fallback: if listen with callback fails for any reason, attach
+      // the listener via once and call onListen manually as a final fallback.
+      try {
+        server.once('listening', onListen);
+      } catch {}
       try {
         onListen();
       } catch {}

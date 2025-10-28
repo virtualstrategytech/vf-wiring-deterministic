@@ -27,6 +27,7 @@
     "husky": "^8.0.3",
     "jest": "^27.5.1",
     "lint-staged": "^13.3.0",
+    "nock": "^13.3.0",
     "supertest": "7.1.4",
     "typescript": "5.9.3"
   },
