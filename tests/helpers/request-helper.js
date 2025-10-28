@@ -15,8 +15,12 @@ async function requestApp(
     const base = (app || '').replace(/\/+$/, '');
     const url = `${base}${path}`;
     // provide a clearer error when an invalid/empty base is supplied
+    // parse the URL once and reuse the parsed object below (was previously
+    // calling `new URL(url)` without storing it, then referencing `u` which
+    // caused a ReferenceError).
+    let u;
     try {
-      new URL(url);
+      u = new URL(url);
     } catch {
       throw new Error(`requestApp: invalid URL constructed from base: ${String(app)}`);
     }
