@@ -1,0 +1,47 @@
+name: CI — tests (child-process server)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/wiring-agent]
+
+jobs:
+  test-child-server:
+    name: Run tests with child-process server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests (child-process server) and capture debug logs
+        env:
+          USE_CHILD_PROCESS_SERVER: '1'
+          DEBUG_TESTS: '1'
+          NODE_DEBUG: 'net,tls'
+        run: |
+          echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
+          # capture both stdout+stderr (node debug traces go to stderr)
+          npm test -- --runInBand 2>&1 | tee /tmp/test-results.log
+
+      - name: Collect additional socket debug (proc/net/tcp)
+        if: always()
+        run: |
+          echo "--- /proc/net/tcp ---" > /tmp/socket_debug.log || true
+          if [ -f /proc/net/tcp ]; then cat /proc/net/tcp >> /tmp/socket_debug.log || true; fi
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: socket-debug-artifacts
+          path: |
+            /tmp/test-results.log
+            /tmp/socket_debug.log

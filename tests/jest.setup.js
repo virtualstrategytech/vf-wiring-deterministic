@@ -3,6 +3,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const tls = require('tls');
 
 // Defensive: ensure global agents don't keep sockets alive across tests.
 // Some Node versions may still reuse sockets in the global agent; disabling
@@ -46,6 +47,33 @@ try {
     instrument(https && https.globalAgent);
   } catch {}
 
+  // Also instrument Agent.prototype so per-request agents (new http.Agent(...))
+  // are also tagged with creation stacks. This ensures our per-request agents
+  // used in tests/helpers/request-helper.js get their sockets annotated.
+  try {
+    const wrapAgentProto = (Agent) => {
+      if (!Agent || !Agent.prototype) return;
+      try {
+        const orig = Agent.prototype.createConnection;
+        if (typeof orig === 'function') {
+          Agent.prototype.createConnection = function createConnectionProtoWithStack(...args) {
+            const sock = orig.apply(this, args);
+            try {
+              sock._createdStack = new Error('agent-proto-socket-created').stack;
+            } catch {}
+            return sock;
+          };
+        }
+      } catch {}
+    };
+    try {
+      wrapAgentProto(http && http.Agent);
+    } catch {}
+    try {
+      wrapAgentProto(https && https.Agent);
+    } catch {}
+  } catch {}
+
   // Also instrument net.createConnection as a last-resort catch-all for sockets
   try {
     const origNetCreate = net.createConnection;
@@ -59,6 +87,39 @@ try {
       };
     }
   } catch {}
+} catch {}
+
+// Instrument net.Socket.prototype.connect so sockets created via lower-level
+// calls (or by libraries that call socket.connect directly) get a creation
+// stack attached.
+try {
+  if (net && net.Socket && net.Socket.prototype) {
+    const origProtoConnect = net.Socket.prototype.connect;
+    if (typeof origProtoConnect === 'function') {
+      net.Socket.prototype.connect = function connectProtoWithStack(...args) {
+        try {
+          this._createdStack = new Error('net-socket-proto-connect').stack;
+        } catch {}
+        return origProtoConnect.apply(this, args);
+      };
+    }
+  }
+} catch {}
+
+// Instrument tls.connect to tag TLSSocket instances created by libraries
+// (eg: undici, native tls usage) so we can map them back to source.
+try {
+  if (tls && typeof tls.connect === 'function') {
+    const origTlsConnect = tls.connect;
+    tls.connect = function tlsConnectWithStack(...args) {
+      const sock = origTlsConnect.apply(tls, args);
+      try {
+        if (sock && typeof sock === 'object')
+          sock._createdStack = new Error('tls-connect-created').stack;
+      } catch {}
+      return sock;
+    };
+  }
 } catch {}
 
 // Attempt to destroy global agents and give Node a chance to clear handles.

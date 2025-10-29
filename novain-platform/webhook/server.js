@@ -29,6 +29,16 @@ if (!fetchFn) {
   }
 }
 
+// Debug: when running tests with DEBUG_TESTS, print what fetch implementation
+// was captured at module init so we can diagnose mocking issues.
+try {
+  if (process.env.DEBUG_TESTS) {
+    try {
+      console.info('DEBUG_TESTS: fetchFn present at module init?', typeof fetchFn === 'function');
+    } catch {}
+  }
+} catch {}
+
 // add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
@@ -37,7 +47,12 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     opts.signal = controller.signal;
     if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
-    const r = await fetch(url, opts);
+    // Use the resolved fetch implementation captured during module init
+    // (`fetchFn`) where possible so tests that override `globalThis.fetch`
+    // before requiring this module reliably get invoked. Fall back to
+    // globalThis.fetch if needed.
+    const _fetch = typeof fetchFn === 'function' ? fetchFn : globalThis.fetch;
+    const r = await _fetch(url, opts);
     const elapsed = Date.now() - start;
     let bodyText = '';
     try {
@@ -424,18 +439,68 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: PROMPT_URL present:', !!PROMPT_URL);
+              console.info('DEBUG_TESTS: llm_elicit: fetchFn type:', typeof fetchFn);
+              try {
+                // best-effort show whether globalThis.fetch === fetchFn
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: fetch equality:',
+                  globalThis.fetch === fetchFn
+                );
+              } catch {}
+            } catch {}
+          }
+
           const r = await fetchWithTimeout(PROMPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),
           });
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: fetched status:', r && r.status);
+              try {
+                const ct =
+                  r.headers &&
+                  (r.headers.get ? r.headers.get('content-type') : r.headers['content-type']);
+                console.info('DEBUG_TESTS: llm_elicit: content-type:', ct);
+              } catch {}
+            } catch {}
+          }
+
           if (!r.ok) {
             const text = await r.text().catch(() => '');
             console.error('prompt service error:', r.status, text);
             return res.status(502).json({ ok: false, reply: 'prompt_service_failed' });
           }
 
-          const payload = await r.json().catch(() => ({}));
+          // Prefer explicit try/catch for JSON parsing so we can log parse failures
+          let payload = {};
+          try {
+            payload = await r.json();
+          } catch (pj) {
+            if (process.env.DEBUG_TESTS) {
+              try {
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: JSON parse failed:',
+                  pj && pj.message ? pj.message : pj
+                );
+                const txt = await r
+                  .clone()
+                  .text()
+                  .catch(() => '');
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: response body (on parse fail):',
+                  String(txt).slice(0, 4000)
+                );
+              } catch {}
+            }
+            payload = {};
+          }
+
           // Mirror payload into both `raw` and `data.raw` so callers/tests that
           // expect either shape will receive the same information.
           const rawPayload = payload || {};
@@ -445,6 +510,15 @@ app.post('/webhook', async (req, res) => {
           if (!IS_PROD && DEBUG_WEBHOOK) {
             try {
               console.info('llm payload snippet:', JSON.stringify(payload).slice(0, 2000));
+            } catch {}
+          }
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info(
+                'DEBUG_TESTS: llm_elicit: payload snippet:',
+                JSON.stringify(payload).slice(0, 2000)
+              );
             } catch {}
           }
 
