@@ -10,8 +10,12 @@ jobs:
   diagnostic:
     runs-on: ubuntu-latest
     env:
+      # Run tests in child-process server mode so native handles are isolated
       USE_CHILD_PROCESS_SERVER: '1'
+      # Enable our test diagnostics; keep default verbosity low (DEBUG_TESTS_LEVEL=1)
       DEBUG_TESTS: '1'
+      DEBUG_TESTS_LEVEL: '1'
+      # NODE_DEBUG is noisy (net,tls) — keep enabled for this diagnostic workflow
       NODE_DEBUG: 'net,tls'
     steps:
       - name: Checkout repository
@@ -36,6 +40,8 @@ jobs:
         run: |
           # Capture test output to a file so we can upload it. Keep exit code so we can still upload artifacts.
           set -o pipefail
+          # Use DEBUG_TESTS_LEVEL=1 by default to reduce noisy per-socket stacks.
+          # If deeper diagnostics are needed, re-run with DEBUG_TESTS_LEVEL=2.
           npm test -- --runInBand 2>&1 | tee test-logs/jest-output.txt
         shell: bash
 
@@ -43,4 +49,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: test-logs/**
+          path: |
+            test-logs/**
+            tests/globalSetup.log
