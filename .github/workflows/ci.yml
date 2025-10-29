@@ -64,6 +64,13 @@ jobs:
           PROMPT_URL: ''
           RETRIEVAL_URL: ''
           BUSINESS_URL: ''
+          # Run tests with the child-process server runner to isolate native
+          # sockets from the Jest process and avoid false open-handle
+          # diagnostics. Enable debug traces as well to collect net/tls
+          # information in a diagnostic CI run.
+          USE_CHILD_PROCESS_SERVER: '1'
+          DEBUG_TESTS: '1'
+          NODE_DEBUG: 'net,tls'
         run: npm test --silent -- --runInBand
 
       - name: Upload logs on failure
