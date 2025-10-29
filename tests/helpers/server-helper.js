@@ -259,10 +259,10 @@ function startTestServer(app) {
       if (typeof server.unref === 'function') server.unref();
     } catch {}
     try {
-      // Use options object form for listen to avoid subtle internal binding
+      // Use positional args for listen to avoid subtle internal binding
       // behaviors in some Node/platform combos that produce bound anonymous
-      // functions linked to the call site.
-      server.listen({ port: 0, host: '127.0.0.1' }, onListen);
+      // functions linked to the call site when using the options-object form.
+      server.listen(0, '127.0.0.1', onListen);
     } catch (e) {
       // fallback: if listen with callback fails for any reason, attach
       // the listener via once and call onListen manually as a final fallback.

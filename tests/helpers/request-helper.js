@@ -33,9 +33,10 @@ async function requestApp(
         : new http.Agent({ keepAlive: false });
     // Tag sockets created by this per-request agent with a creation stack so
     // diagnostics can map them back to the call site.
+    let _origCreate;
     try {
       if (agent && typeof agent.createConnection === 'function') {
-        const _origCreate = agent.createConnection.bind(agent);
+        _origCreate = agent.createConnection.bind(agent);
         agent.createConnection = function createPerRequestAgentConnection(options, callback) {
           const sock = _origCreate(options, callback);
           try {
@@ -98,7 +99,23 @@ async function requestApp(
         controller.abort && typeof controller.abort === 'function' && controller.abort();
       } catch {}
       try {
+        // restore original createConnection implementation if we monkeypatched it
+        try {
+          if (
+            typeof _origCreate !== 'undefined' &&
+            agent &&
+            typeof agent.createConnection === 'function'
+          ) {
+            agent.createConnection = _origCreate;
+          }
+        } catch {}
+      } catch {}
+      try {
         if (agent && typeof agent.destroy === 'function') agent.destroy();
+      } catch {}
+      try {
+        // yield to the event loop to allow agent/socket destruction to propagate
+        await new Promise((r) => setImmediate(r));
       } catch {}
     }
   }
@@ -228,6 +245,10 @@ async function requestApp(
           if (agent && typeof agent.destroy === 'function') agent.destroy();
         } catch {}
         try {
+          // yield to the event loop to allow agent/socket destruction to propagate
+          await new Promise((r) => setImmediate(r));
+        } catch {}
+        try {
           await close();
         } catch {}
       }
@@ -243,9 +264,10 @@ async function requestApp(
     const agent = base.startsWith('https://')
       ? new https.Agent({ keepAlive: false })
       : new http.Agent({ keepAlive: false });
+    let _origCreate2;
     try {
       if (agent && typeof agent.createConnection === 'function') {
-        const _origCreate2 = agent.createConnection.bind(agent);
+        _origCreate2 = agent.createConnection.bind(agent);
         agent.createConnection = function createPerRequestAgentConnection2(options, callback) {
           const sock = _origCreate2(options, callback);
           try {
@@ -304,10 +326,26 @@ async function requestApp(
     } finally {
       clearTimeout(to);
       try {
+        // restore original createConnection implementation if we monkeypatched it
+        try {
+          if (
+            typeof _origCreate2 !== 'undefined' &&
+            agent &&
+            typeof agent.createConnection === 'function'
+          ) {
+            agent.createConnection = _origCreate2;
+          }
+        } catch {}
+      } catch {}
+      try {
         // destroy per-request agent first to prevent connection reuse/pooling
         // from keeping sockets alive while we close the server.
         try {
           if (agent && typeof agent.destroy === 'function') agent.destroy();
+        } catch {}
+        try {
+          // yield to the event loop to allow agent/socket destruction to propagate
+          await new Promise((r) => setImmediate(r));
         } catch {}
       } catch {}
       try {
