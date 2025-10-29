@@ -4,22 +4,21 @@ process.env.NODE_ENV = 'development';
 process.env.DEBUG_WEBHOOK = 'true';
 process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
 
-// Mock global fetch so the server's fetchWithTimeout receives a predictable payload
-globalThis.fetch = async () => {
-  const payload = {
-    summary: 'Test summary',
-    needs_clarify: false,
-    followup_question: '',
-    debug_meta: 'sensitive-llm-output',
-  };
-  return {
-    ok: true,
-    status: 200,
-    clone: () => ({ text: async () => JSON.stringify(payload) }),
-    text: async () => JSON.stringify(payload),
-    json: async () => payload,
-  };
+// Use nock to stub the external PROMPT_URL so tests don't rely on global
+// fetch mocking; this will make tests robust and compatible with eventual
+// child-process server mode in CI.
+const nock = require('nock');
+const promptUrl = new URL(process.env.PROMPT_URL);
+const promptOrigin = `${promptUrl.protocol}//${promptUrl.host}`;
+const promptPath = promptUrl.pathname + (promptUrl.search || '');
+const payload = {
+  summary: 'Test summary',
+  needs_clarify: false,
+  followup_question: '',
+  debug_meta: 'sensitive-llm-output',
 };
+// Intercept POST requests to the prompt service and return a deterministic payload
+nock(promptOrigin).post(promptPath).reply(200, payload).persist();
 
 const app = require('../novain-platform/webhook/server');
 // Note: tests use `requestApp` helper which internally uses supertest(app).
