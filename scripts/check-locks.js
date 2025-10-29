@@ -45,7 +45,7 @@ function walk(start) {
     let entries;
     try {
       entries = fs.readdirSync(cur, { withFileTypes: true });
-    } catch (e) {
+    } catch {
       continue;
     }
     const isPkg = entries.some((d) => d.name === 'package.json');

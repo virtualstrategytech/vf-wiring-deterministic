@@ -18,13 +18,13 @@ try {
     // long hangs or real network egress in CI.
     nock('http://169.254.169.254').persist().get(/.*/).reply(200, '');
     nock('http://168.63.129.16').persist().get(/.*/).reply(200, '');
-  } catch (e) {
+  } catch {
     // if nock internals throw here, ignore — the primary protection is
     // nock.disableNetConnect() which is already in place.
   }
   // helpful debug hint when tests attempt to reach external hosts
   process.on('unhandledRejection', () => {});
-} catch (e) {
+} catch {
   // If nock is not installed, fail loudly so CI/devs add the dependency.
   // But in case of a tooling quirk, log a warning and continue.
   try {

@@ -17,7 +17,7 @@ try {
         // print a machine-parseable line to stdout
         console.log(`TEST_SERVER_PORT:${addr.port}`);
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   });
@@ -26,7 +26,7 @@ try {
     if (m === 'shutdown') {
       try {
         server.close(() => process.exit(0));
-      } catch (e) {
+      } catch {
         try {
           process.exit(0);
         } catch {}

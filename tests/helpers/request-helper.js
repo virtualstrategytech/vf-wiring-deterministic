@@ -155,7 +155,7 @@ async function requestApp(
               clearGuard();
               resolve(m.port);
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         };
@@ -182,7 +182,7 @@ async function requestApp(
         timeoutId = setTimeout(() => {
           try {
             reject(new Error('child server start timeout'));
-          } catch (e) {}
+          } catch {}
         }, 5000);
       });
 

@@ -32,6 +32,14 @@ try {
     `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
   );
 } catch {}
+try {
+  // also write the same short debug line to the CI artifact log helper (best-effort)
+  writeDebugLog &&
+    typeof writeDebugLog === 'function' &&
+    writeDebugLog(
+      `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
+    );
+} catch {}
 
 // If the user supplied a remote base but didn't provide an API key, fail fast
 // with a clear message so CI logs are actionable (instead of hitting "Invalid URL").

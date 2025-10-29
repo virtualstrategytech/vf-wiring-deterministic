@@ -263,7 +263,7 @@ function startTestServer(app) {
       // behaviors in some Node/platform combos that produce bound anonymous
       // functions linked to the call site when using the options-object form.
       server.listen(0, '127.0.0.1', onListen);
-    } catch (e) {
+    } catch {
       // fallback: if listen with callback fails for any reason, attach
       // the listener via once and call onListen manually as a final fallback.
       try {

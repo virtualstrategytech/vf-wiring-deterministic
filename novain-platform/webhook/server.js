@@ -644,7 +644,7 @@ if (require.main === module) {
   // Log runtime info early for Render / cloud logs troubleshooting.
   try {
     console.log('Starting webhook server', { node: process.version, pid: process.pid });
-  } catch (e) {
+  } catch {
     // ignore logging failures
   }
 
