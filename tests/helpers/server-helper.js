@@ -55,15 +55,15 @@ function startTestServer(app) {
   if (typeof server.keepAliveTimeout === 'number') {
     try {
       server.keepAliveTimeout = 1000; // 1s
-    } catch {}
+    } catch (e) {}
   }
   // Reduce other timeouts that may keep handles alive
   try {
     if (typeof server.headersTimeout === 'number') server.headersTimeout = 2000;
-  } catch {}
+  } catch (e) {}
   try {
     if (typeof server.timeout === 'number') server.timeout = 1000;
-  } catch {}
+  } catch (e) {}
 
   return new Promise((resolve, reject) => {
     function onListen() {
@@ -71,10 +71,10 @@ function startTestServer(app) {
       const base = `http://127.0.0.1:${addr.port}`;
       try {
         if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
-      } catch {}
+      } catch (e) {}
       try {
         if (typeof server.unref === 'function') server.unref();
-      } catch {}
+      } catch (e) {}
 
       const close = async () => {
         try {
@@ -83,7 +83,7 @@ function startTestServer(app) {
               console.warn(
                 `test-server close requested ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
               );
-        } catch {}
+        } catch (e) {}
 
         // Remove connection listener first to avoid new sockets being tracked
         server.removeAllListeners('connection');
@@ -93,18 +93,19 @@ function startTestServer(app) {
         // reports when the server is closed.
         try {
           server.removeAllListeners('listening');
-        } catch {}
+        } catch (e) {}
 
         // Also remove any other listeners that might keep references
-        server.removeAllListeners('listening');
-        server.removeAllListeners('error');
-        server.removeAllListeners('request');
+        try {
+          server.removeAllListeners('error');
+          server.removeAllListeners('request');
+        } catch (e) {}
 
         // Destroy sockets synchronously
         for (const s of Array.from(sockets)) {
           try {
             s.destroy();
-          } catch {}
+          } catch (e) {}
           sockets.delete(s);
           _sockets.delete(s);
         }
@@ -117,7 +118,7 @@ function startTestServer(app) {
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch {}
+                } catch (e) {}
               }
               called = true;
               res();
@@ -129,7 +130,7 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch {}
+              } catch (e) {}
               // allow a tick for listeners to detach
               setImmediate(() => res());
             }
@@ -140,12 +141,12 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch {}
+              } catch (e) {}
               // ensure sockets destroyed
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch {}
+                } catch (e) {}
               }
               setImmediate(() => res());
             }
@@ -159,20 +160,20 @@ function startTestServer(app) {
               if (err) {
                 try {
                   onErrorClose();
-                } catch {}
+                } catch (e) {}
               }
             }
             server.close(_serverCloseCallback);
-          } catch {
+          } catch (e) {
             // If close throws (rare), destroy sockets and resolve immediately
             for (const s of Array.from(sockets)) {
               try {
                 s.destroy();
-              } catch {}
+              } catch (e) {}
             }
             try {
               clearTimeout(timeout);
-            } catch {}
+            } catch (e) {}
             res();
           }
         });
@@ -183,16 +184,16 @@ function startTestServer(app) {
             try {
               console.warn &&
                 console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
-            } catch {}
+            } catch (e) {}
           }
-        } catch {}
+        } catch (e) {}
 
         // After close completes, give Node a short moment to release native handles
         await new Promise((r) => setImmediate(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
-        } catch {}
+        } catch (e) {}
 
         try {
           if (process.env.DEBUG_TESTS)
@@ -200,7 +201,7 @@ function startTestServer(app) {
               console.warn(
                 `test-server close completed ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
               );
-        } catch {}
+        } catch (e) {}
 
         // Remove from module-level registry
         _servers.delete(server);
@@ -210,7 +211,7 @@ function startTestServer(app) {
           for (const s of Array.from(_sockets)) {
             try {
               s.destroy();
-            } catch {}
+            } catch (e) {}
           }
           for (const serv of Array.from(_servers)) {
             try {
@@ -219,10 +220,10 @@ function startTestServer(app) {
               // call close without anonymous callback to avoid bound handles
               try {
                 serv.close();
-              } catch {}
-            } catch {}
+              } catch (e) {}
+            } catch (e) {}
           }
-        } catch {}
+        } catch (e) {}
       };
 
       // remove error listener when server is successfully listening
@@ -239,10 +240,10 @@ function startTestServer(app) {
           if (l !== onListen) {
             try {
               server.removeListener('listening', l);
-            } catch {}
+            } catch (e) {}
           }
         }
-      } catch {}
+      } catch (e) {}
       resolve({ base, close });
     }
 
@@ -251,28 +252,25 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
-    // Start listening and pass the named `onListen` callback to
-    // `server.listen(...)`. Passing the named callback directly avoids
-    // creating an internal anonymous bound function in most Node versions
-    // while ensuring `onListen` fires when the server is ready.
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch {}
+    } catch (e) {}
+
+    // Start listening WITHOUT passing the callback directly. Use once('listening')
+    // to avoid creating an internal bound anonymous function at the call site.
     try {
-      // Use positional args for listen to avoid subtle internal binding
-      // behaviors in some Node/platform combos that produce bound anonymous
-      // functions linked to the call site when using the options-object form.
-      server.listen(0, '127.0.0.1', onListen);
-    } catch {
-      // fallback: if listen with callback fails for any reason, attach
-      // the listener via once and call onListen manually as a final fallback.
+      server.listen(0, '127.0.0.1');
+      server.once('listening', onListen);
+    } catch (e) {
+      // As a last resort, ensure onListen is attached and invoke it
       try {
         server.once('listening', onListen);
-      } catch {}
+      } catch (e2) {}
       try {
         onListen();
-      } catch {}
+      } catch (e2) {}
     }
+
     // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
@@ -282,15 +280,15 @@ function startTestServer(app) {
               console.warn(
                 `test-server received close event for ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
               );
-          } catch {}
+          } catch (e) {}
         });
       }
-    } catch {}
-    // Note: we already called `server.listen(..., onListen)` above. Ensure
-    // the server is unref'd so it doesn't keep the Node process alive.
+    } catch (e) {}
+
+    // Ensure the server doesn't keep the process alive if unref is available
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch {}
+    } catch (e) {}
   });
 }
 
