@@ -235,4 +235,35 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
   }
+  // tests/globalTeardown.js  (or at the end of tests/jest.setup.js)
+  function forceDestroyRemainingSockets() {
+    if (!process.env.DEBUG_TESTS) return; // only for diagnostic runs
+    try {
+      const handles = process._getActiveHandles ? process._getActiveHandles() : [];
+      handles.forEach((h, i) => {
+        try {
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'Socket') {
+            // Avoid destroying stdio WriteStreams
+            if (h.destroyed) return;
+            try {
+              // Log remote info if available (helps triage)
+              const meta = {};
+              if (h.remoteAddress) meta.remoteAddress = h.remoteAddress;
+              if (h.remotePort) meta.remotePort = h.remotePort;
+              console.warn(`DEBUG_TESTS: force-destroying stray socket[${i}]`, meta);
+              h.destroy();
+            } catch (err) {
+              // swallowing is OK here; we just want to force-clear handles
+            }
+          }
+        } catch (err) {}
+      });
+    } catch (err) {}
+  }
+
+  module.exports = async function globalTeardown() {
+    // existing teardown tasks...
+    forceDestroyRemainingSockets();
+  };
 };
