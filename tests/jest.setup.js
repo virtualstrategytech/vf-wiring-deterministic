@@ -159,27 +159,44 @@ afterAll(async () => {
     try {
       if (typeof process._getActiveHandles === 'function') {
         const handles = process._getActiveHandles();
-        if (process.env.DEBUG_TESTS) {
-          try {
-            console.warn('DEBUG_TESTS: raw active handles dump:');
+        // Basic debug summary when DEBUG_TESTS is enabled. For noisy details
+        // (per-socket creation stacks), require DEBUG_TESTS_LEVEL >= 2 so
+        // routine debug runs aren't overwhelmed.
+        try {
+          if (process.env.DEBUG_TESTS) {
+            console.warn('DEBUG_TESTS: raw active handles dump (summary):');
             handles.forEach((h, i) => {
               try {
                 const name = h && h.constructor && h.constructor.name;
                 console.warn(`  [${i}] type=${String(name)}`);
-                if (h && typeof h._createdStack === 'string') {
-                  console.warn('    created at:');
-                  (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
-                    console.warn(`      ${String(ln).trim()}`)
-                  );
-                } else if (String(name) === 'Function') {
-                  try {
-                    console.warn(`    fn: ${String(h).slice(0, 400)}`);
-                  } catch {}
-                }
               } catch {}
             });
-          } catch {}
-        }
+          }
+        } catch {}
+        try {
+          const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
+          if (process.env.DEBUG_TESTS && verbose) {
+            try {
+              console.warn('DEBUG_TESTS: raw active handles dump (detailed):');
+              handles.forEach((h, i) => {
+                try {
+                  const name = h && h.constructor && h.constructor.name;
+                  console.warn(`  [${i}] type=${String(name)}`);
+                  if (h && typeof h._createdStack === 'string') {
+                    console.warn('    created at:');
+                    (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
+                      console.warn(`      ${String(ln).trim()}`)
+                    );
+                  } else if (String(name) === 'Function') {
+                    try {
+                      console.warn(`    fn: ${String(h).slice(0, 400)}`);
+                    } catch {}
+                  }
+                } catch {}
+              });
+            } catch {}
+          }
+        } catch {}
         if (handles && handles.length) {
           // Filter out benign handles (stdout/stderr WriteStreams and some
           // bound anonymous functions) to reduce diagnostic noise in CI.

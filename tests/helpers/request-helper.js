@@ -43,7 +43,10 @@ async function requestApp(
             sock._createdStack = new Error('per-request-agent-created').stack;
           } catch {}
           try {
-            if (process.env.DEBUG_TESTS) {
+            // Per-request agent socket creation can be noisy. Print only when
+            // DEBUG_TESTS is enabled and the verbosity level is >=2.
+            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
+            if (process.env.DEBUG_TESTS && verbose) {
               try {
                 const preview =
                   (sock && sock._createdStack && sock._createdStack.split('\n').slice(0, 6)) || [];
@@ -53,7 +56,8 @@ async function requestApp(
             }
           } catch {}
           try {
-            if (process.env.DEBUG_TESTS) {
+            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
+            if (process.env.DEBUG_TESTS && verbose) {
               try {
                 // Print the creation stack immediately for reliable CI capture
                 console.warn(new Error('per-request-agent-created').stack);
