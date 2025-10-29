@@ -142,6 +142,26 @@ async function requestApp(
         env: Object.assign({}, process.env),
       });
 
+      // Forward child stdout/stderr to the parent process console so tests
+      // that capture console output (captureConsoleAsync) also see logs
+      // emitted by the child server (e.g., llm payload diagnostics).
+      try {
+        if (child.stdout && typeof child.stdout.on === 'function') {
+          child.stdout.on('data', (b) => {
+            try {
+              console.log(String(b || '').trim());
+            } catch {}
+          });
+        }
+        if (child.stderr && typeof child.stderr.on === 'function') {
+          child.stderr.on('data', (b) => {
+            try {
+              console.error(String(b || '').trim());
+            } catch {}
+          });
+        }
+      } catch {}
+
       const portPromise = new Promise((resolve, reject) => {
         let timeoutId;
         const clearGuard = () => {

@@ -17,8 +17,31 @@ const payload = {
   followup_question: '',
   debug_meta: 'sensitive-llm-output',
 };
-// Intercept POST requests to the prompt service and return a deterministic payload
-nock(promptOrigin).post(promptPath).reply(200, payload).persist();
+// Intercept POST requests to the prompt service and return a deterministic payload.
+// Use a broad path matcher so the stub still matches when child-process
+// server mode or per-request agent instrumentation changes the request URL
+// shape slightly.
+nock(promptOrigin).post(/.*/).reply(200, payload).persist();
+
+// Ensure tests use a node-style fetch implementation (node-fetch) so nock can
+// intercept outgoing HTTP requests that the server makes. Node 18+ exposes
+// a global fetch backed by undici which nock cannot intercept reliably.
+try {
+  // Use require so this runs in CommonJS tests.
+  // If node-fetch is not installed, this will throw and we fall back to the
+  // environment's global fetch (might not be interceptable by nock).
+  globalThis.fetch = require('node-fetch');
+} catch (e) {}
+
+// If tests are running the server in a child process, parent-installed nock
+// interceptors won't affect the child. Propagate a small env-driven stub so
+// the child-runner can install the same stub automatically.
+if (process.env.USE_CHILD_PROCESS_SERVER === '1') {
+  try {
+    process.env.TEST_PROMPT_STUB = '1';
+    process.env.TEST_PROMPT_PAYLOAD_JSON = JSON.stringify(payload);
+  } catch (e) {}
+}
 
 const app = require('../novain-platform/webhook/server');
 // Note: tests use `requestApp` helper which internally uses supertest(app).
