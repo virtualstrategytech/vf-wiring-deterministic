@@ -159,7 +159,7 @@ try {
   const handleMap = new Map();
   global.__async_handle_map = handleMap;
   const hook = async_hooks.createHook({
-    init(id, type, triggerId, resource) {
+    init(id, type, _triggerId, _resource) {
       try {
         // If DEBUG_TESTS is enabled capture all handle types (best-effort)
         // to help root-cause the lingering handle. Otherwise, capture a

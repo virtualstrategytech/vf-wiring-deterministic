@@ -9,20 +9,20 @@ const async_hooks = require('async_hooks');
 const outDir = path.resolve(__dirname, '..', 'artifacts');
 try {
   fs.mkdirSync(outDir, { recursive: true });
-} catch (e) {}
+} catch {}
 
 const handleMap = new Map();
 const hooks = async_hooks.createHook({
-  init(asyncId, type, triggerAsyncId, resource) {
+  init(asyncId, type, _triggerAsyncId, _resource) {
     try {
       const info = { type, stack: new Error('handle-init').stack };
       handleMap.set(asyncId, info);
-    } catch (e) {}
+    } catch {}
   },
   destroy(asyncId) {
     try {
       handleMap.delete(asyncId);
-    } catch (e) {}
+    } catch {}
   },
 });
 hooks.enable();
@@ -34,12 +34,12 @@ function getActiveHandlesSummary() {
     let ctor = 'unknown';
     try {
       ctor = (h && h.constructor && h.constructor.name) || ctor;
-    } catch (e) {}
+    } catch {}
     // attempt to capture any attached _createdStack
     let created = null;
     try {
       if (h && h._createdStack) created = String(h._createdStack);
-    } catch (e) {}
+    } catch {}
     // best-effort socket info
     const socketInfo = {};
     try {
@@ -51,7 +51,7 @@ function getActiveHandlesSummary() {
         socketInfo.destroyed = h.destroyed;
         socketInfo.pending = h.pending;
       }
-    } catch (e) {}
+    } catch {}
     return { ctor, created, socketInfo, repr: String(h).slice(0, 400) };
   });
 }
@@ -86,7 +86,7 @@ async function run() {
           const s = typeof body === 'string' ? body : JSON.stringify(body);
           try {
             req.headers['content-length'] = Buffer.byteLength(s).toString();
-          } catch (e) {}
+          } catch {}
           req.push(s);
         }
         req.push(null);

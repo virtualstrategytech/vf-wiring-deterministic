@@ -8,7 +8,7 @@ const v8 = require('v8');
 const outDir = path.resolve(__dirname, '..', 'artifacts');
 try {
   fs.mkdirSync(outDir, { recursive: true });
-} catch (e) {}
+} catch {}
 
 async function dispatchAndSnapshot() {
   process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
@@ -34,7 +34,7 @@ async function dispatchAndSnapshot() {
           const s = typeof body === 'string' ? body : JSON.stringify(body);
           try {
             req.headers['content-length'] = Buffer.byteLength(s).toString();
-          } catch (e) {}
+          } catch {}
           req.push(s);
         }
         req.push(null);
