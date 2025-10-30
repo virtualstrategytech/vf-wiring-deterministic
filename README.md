@@ -114,6 +114,18 @@ Notes:
 - Keep `DEBUG_WEBHOOK` unset in production. Enable it only on a staging service if you need verbose logs.
 - If you prefer automated smoke runs on a staging branch, we can add a restricted workflow that triggers only on `push` to `staging`.
 
+## Developer scripts (artifact downloads & token checks)
+
+- `scripts/download_artifacts.ps1` — robust helper to download a GitHub Actions artifact for a run. It prefers the `gh` CLI when available and authenticated, and falls back to the GitHub REST API using an environment `GITHUB_TOKEN` or the `-Token` parameter. Typical usage:
+  - Interactive (preferred): authenticate `gh` in the same terminal and run the script without passing a token.
+  - Headless/CI: set `GITHUB_TOKEN` (recommended fine-grained token with Actions read scope) or pass `-Token <PAT>`.
+
+- `verify-github-token.ps1` — interactively verifies common token scopes and SSO behavior (positive/negative repo checks, optional artifact listing). Use it to confirm a PAT has the required permissions before running artifact downloads in CI.
+
+Notes:
+
+- The artifact downloader fails-fast on common misconfigurations (missing token, placeholder token values like `<your-token>`, or tokens that are obviously too short). If you see a 401 from the GitHub API, re-check `gh auth status` in your shell or provide a valid PAT with the required scopes.
+
 ## Testing (notes)
 
 - For in-process tests we expose a helper at `tests/helpers/server-helper.js`:

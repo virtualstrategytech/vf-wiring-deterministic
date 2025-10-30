@@ -5,6 +5,10 @@ on:
   push:
     branches: [feat/wiring-agent]
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   test-child-server:
     name: Run tests with child-process server
@@ -26,6 +30,7 @@ jobs:
           USE_CHILD_PROCESS_SERVER: '1'
           DEBUG_TESTS: '1'
           NODE_DEBUG: 'net,tls'
+          SKIP_BODY_PARSER: '1'
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
           # capture both stdout+stderr (node debug traces go to stderr)

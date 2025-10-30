@@ -6,6 +6,10 @@ on:
     branches:
       - pr/wiring-agent-fixes
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   diagnostic:
     runs-on: ubuntu-latest

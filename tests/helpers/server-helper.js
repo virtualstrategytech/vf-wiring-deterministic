@@ -1,116 +1,135 @@
+// Lightweight server helper for tests: start an Express app on an ephemeral
+// port while tracking sockets so we can aggressively destroy them in tests.
 const http = require('http');
 
-// Module-level tracking of servers and sockets so we can force-close them
-// from tests or global setup if needed.
+// Module-level registries
 const _servers = new Set();
 const _sockets = new Set();
 
 function _attachSocketTracking(server, sockets) {
-  function _onConnection(s) {
-    // attach a creation stack trace to the socket for CI diagnostics
+  function _onConnection(sock) {
     try {
-      const stack = new Error('socket-created-at').stack;
-      s._createdStack = stack;
-    } catch {}
+      sock._createdStack = new Error('socket-created-at').stack;
+    } catch (e) {
+      void e;
+    }
+
     try {
       if (process.env.DEBUG_TESTS) {
         try {
-          // Print the creation stack immediately for reliable CI capture
           console.warn(new Error('socket-created-at').stack);
-        } catch {}
+        } catch (e) {
+          void e;
+        }
       }
-    } catch {}
-    sockets.add(s);
-    _sockets.add(s);
-    try {
-      if (typeof s.setKeepAlive === 'function') s.setKeepAlive(false);
-      if (typeof s.setTimeout === 'function') s.setTimeout(1000);
-      if (typeof s.unref === 'function') s.unref();
-    } catch {}
-
-    function _onSocketClose() {
-      sockets.delete(s);
-      _sockets.delete(s);
-      try {
-        s.removeListener && s.removeListener('close', _onSocketClose);
-      } catch {}
+    } catch (e) {
+      void e;
     }
 
-    s.on('close', _onSocketClose);
+    sockets.add(sock);
+    _sockets.add(sock);
+
+    try {
+      if (typeof sock.setKeepAlive === 'function') sock.setKeepAlive(false);
+      if (typeof sock.setTimeout === 'function') sock.setTimeout(1000);
+      if (typeof sock.unref === 'function') sock.unref();
+    } catch (e) {
+      void e;
+    }
+
+    function _onSocketClose() {
+      sockets.delete(sock);
+      _sockets.delete(sock);
+      try {
+        sock.removeListener && sock.removeListener('close', _onSocketClose);
+      } catch (e) {
+        void e;
+      }
+    }
+
+    sock.on('close', _onSocketClose);
   }
 
   server.on('connection', _onConnection);
 }
 
-// Start an Express `app` on an ephemeral port and return a small helper for
-// making requests and closing the server safely. This centralizes socket
-// tracking and cleanup to avoid Jest open-handle warnings.
 function startTestServer(app) {
   const server = http.createServer(app);
   const sockets = new Set();
   _attachSocketTracking(server, sockets);
   _servers.add(server);
 
-  // Reduce keep-alive time to avoid sockets lingering after server.close
-  if (typeof server.keepAliveTimeout === 'number') {
-    try {
-      server.keepAliveTimeout = 1000; // 1s
-    } catch (e) {}
+  try {
+    if (typeof server.keepAliveTimeout === 'number') server.keepAliveTimeout = 1000;
+  } catch (e) {
+    void e;
   }
-  // Reduce other timeouts that may keep handles alive
+
   try {
     if (typeof server.headersTimeout === 'number') server.headersTimeout = 2000;
-  } catch (e) {}
+  } catch (e) {
+    void e;
+  }
+
   try {
     if (typeof server.timeout === 'number') server.timeout = 1000;
-  } catch (e) {}
+  } catch (e) {
+    void e;
+  }
 
   return new Promise((resolve, reject) => {
     function onListen() {
       const addr = server.address();
       const base = `http://127.0.0.1:${addr.port}`;
+
       try {
         if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
-      } catch (e) {}
+      } catch (e) {
+        void e;
+      }
+
       try {
         if (typeof server.unref === 'function') server.unref();
-      } catch (e) {}
+      } catch (e) {
+        void e;
+      }
 
       const close = async () => {
         try {
           if (process.env.DEBUG_TESTS)
             console.warn &&
               console.warn(
-                `test-server close requested ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+                `test-server close requested ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
-        // Remove connection listener first to avoid new sockets being tracked
         server.removeAllListeners('connection');
-        // Also remove any 'listening' listeners that may have been attached
-        // (some Node internals can leave bound anonymous functions). Removing
-        // them proactively reduces Jest's "bound-anonymous-fn" open-handle
-        // reports when the server is closed.
+
         try {
           server.removeAllListeners('listening');
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
-        // Also remove any other listeners that might keep references
         try {
           server.removeAllListeners('error');
           server.removeAllListeners('request');
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
-        // Destroy sockets synchronously
         for (const s of Array.from(sockets)) {
           try {
             s.destroy();
-          } catch (e) {}
+          } catch (e) {
+            void e;
+          }
           sockets.delete(s);
           _sockets.delete(s);
         }
 
-        // Wait for server.close to fire; if it doesn't within timeout, forcefully remove sockets
         await new Promise((res) => {
           let called = false;
           const timeout = setTimeout(() => {
@@ -118,7 +137,9 @@ function startTestServer(app) {
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (e) {}
+                } catch (e) {
+                  void e;
+                }
               }
               called = true;
               res();
@@ -130,8 +151,9 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (e) {}
-              // allow a tick for listeners to detach
+              } catch (e) {
+                void e;
+              }
               setImmediate(() => res());
             }
           }
@@ -141,12 +163,15 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (e) {}
-              // ensure sockets destroyed
+              } catch (e) {
+                void e;
+              }
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (e) {}
+                } catch (e) {
+                  void e;
+                }
               }
               setImmediate(() => res());
             }
@@ -155,25 +180,29 @@ function startTestServer(app) {
           try {
             server.once('close', onClose);
             server.once('error', onErrorClose);
-            // use a named callback to avoid creating anonymous bound functions
             function _serverCloseCallback(err) {
               if (err) {
                 try {
                   onErrorClose();
-                } catch (e) {}
+                } catch (e) {
+                  void e;
+                }
               }
             }
             server.close(_serverCloseCallback);
-          } catch (e) {
-            // If close throws (rare), destroy sockets and resolve immediately
+          } catch {
             for (const s of Array.from(sockets)) {
               try {
                 s.destroy();
-              } catch (e) {}
+              } catch (e) {
+                void e;
+              }
             }
             try {
               clearTimeout(timeout);
-            } catch (e) {}
+            } catch (e) {
+              void e;
+            }
             res();
           }
         });
@@ -184,53 +213,62 @@ function startTestServer(app) {
             try {
               console.warn &&
                 console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
-            } catch (e) {}
+            } catch (e) {
+              void e;
+            }
           }
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
-        // After close completes, give Node a short moment to release native handles
         await new Promise((r) => setImmediate(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
         try {
           if (process.env.DEBUG_TESTS)
             console.warn &&
               console.warn(
-                `test-server close completed ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+                `test-server close completed ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
 
-        // Remove from module-level registry
         _servers.delete(server);
 
-        // Final aggressive sweep: ensure no leftover sockets/servers remain
         try {
           for (const s of Array.from(_sockets)) {
             try {
               s.destroy();
-            } catch (e) {}
+            } catch (e) {
+              void e;
+            }
           }
           for (const serv of Array.from(_servers)) {
             try {
               serv.removeAllListeners('connection');
               serv.removeAllListeners('listening');
-              // call close without anonymous callback to avoid bound handles
               try {
                 serv.close();
-              } catch (e) {}
-            } catch (e) {}
+              } catch (e) {
+                void e;
+              }
+            } catch (e) {
+              void e;
+            }
           }
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
       };
 
-      // remove error listener when server is successfully listening
       server.removeListener('error', onError);
-      // prune any other 'listening' listeners that are not the named onListen
-      // This helps avoid internal bound/anonymous listeners remaining attached
-      // which can show up as Jest 'bound-anonymous-fn' open-handle reports.
+
       try {
         const ls =
           server.listeners && typeof server.listeners === 'function'
@@ -240,10 +278,15 @@ function startTestServer(app) {
           if (l !== onListen) {
             try {
               server.removeListener('listening', l);
-            } catch (e) {}
+            } catch (e) {
+              void e;
+            }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        void e;
+      }
+
       resolve({ base, close });
     }
 
@@ -254,61 +297,70 @@ function startTestServer(app) {
     server.once('error', onError);
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch (e) {}
+    } catch (e) {
+      void e;
+    }
 
-    // Start listening WITHOUT passing the callback directly. Use once('listening')
-    // to avoid creating an internal bound anonymous function at the call site.
     try {
       server.listen(0, '127.0.0.1');
       server.once('listening', onListen);
-    } catch (e) {
-      // As a last resort, ensure onListen is attached and invoke it
+    } catch {
       try {
         server.once('listening', onListen);
-      } catch (e2) {}
+      } catch (e) {
+        void e;
+      }
       try {
         onListen();
-      } catch (e2) {}
+      } catch (e) {
+        void e;
+      }
     }
 
-    // attach a close event logger when debugging
     try {
       if (process.env.DEBUG_TESTS) {
         server.once('close', () => {
           try {
             console.warn &&
               console.warn(
-                `test-server received close event for ${server.address && server.address() ? JSON.stringify(server.address()) : 'addr-unknown'}`
+                `test-server received close event for ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-          } catch (e) {}
+          } catch (e) {
+            void e;
+          }
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      void e;
+    }
 
-    // Ensure the server doesn't keep the process alive if unref is available
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch (e) {}
+    } catch (e) {
+      void e;
+    }
   });
 }
 
-// Force-close all sockets and servers tracked by this helper. Used by global
-// teardown or jest.setup to aggressively clear handles.
 function _forceCloseAllSockets() {
   for (const s of Array.from(_sockets)) {
     try {
       s.destroy();
-    } catch {}
+    } catch (e) {
+      void e;
+    }
   }
   for (const serv of Array.from(_servers)) {
     try {
       serv.removeAllListeners('connection');
-      // use a named callback instead of an anonymous function so Node doesn't
-      // create a bound-anonymous-fn that Jest may report as an open handle.
       try {
         serv.close(function _forceCloseCallback() {});
-      } catch {}
-    } catch {}
+      } catch (e) {
+        void e;
+      }
+    } catch (e) {
+      void e;
+    }
   }
   _sockets.clear();
   _servers.clear();

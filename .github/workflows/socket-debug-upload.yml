@@ -9,6 +9,9 @@ on:
       webhook_api_key:
         description: 'Optional override for WEBHOOK_API_KEY (falls back to repo secret)'
         required: false
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   socket-debug:

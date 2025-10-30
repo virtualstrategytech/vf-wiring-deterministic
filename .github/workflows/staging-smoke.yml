@@ -5,6 +5,10 @@ on:
     branches: ['staging']
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   run-smoke:
     runs-on: ubuntu-latest

@@ -34,10 +34,10 @@ try {
           // eslint-disable-next-line global-require
           globalThis.fetch = require('node-fetch');
           console.info('server-runner: installed node-fetch for child process nock compatibility');
-        } catch (e) {}
-      } catch (e) {}
+        } catch {}
+      } catch {}
     }
-  } catch (e) {}
+  } catch {}
 
   const app = require('../novain-platform/webhook/server');
   const server = http.createServer(app);

@@ -3,15 +3,20 @@
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   debug-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
-      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs; set to 'true' if you want tests to run
       DEBUG_TESTS: 'true' # enable extra handle-dump diagnostics in jest.setup.js
+      SKIP_BODY_PARSER: '1'
 
     steps:
       - name: Exit early if DEBUG_WEBHOOK_ENABLED is not 'true'

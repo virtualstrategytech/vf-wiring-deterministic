@@ -2,7 +2,7 @@ const serverHelper = require('./server-helper');
 const fetch = require('node-fetch');
 const http = require('http');
 const https = require('https');
-
+// top-level agent removed; use per-request agents inside requestApp to avoid socket reuse
 async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}

@@ -1,4 +1,7 @@
 ﻿name: CI
+permissions:
+  contents: read
+  actions: read
 
 on: [push, pull_request]
 
@@ -60,6 +63,7 @@ jobs:
       - name: Run tests
         env:
           CI: 'true'
+          SKIP_BODY_PARSER: '1'
           SKIP_SMOKE: 'true'
           PROMPT_URL: ''
           RETRIEVAL_URL: ''

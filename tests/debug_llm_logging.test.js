@@ -10,7 +10,6 @@ process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt'
 const nock = require('nock');
 const promptUrl = new URL(process.env.PROMPT_URL);
 const promptOrigin = `${promptUrl.protocol}//${promptUrl.host}`;
-const promptPath = promptUrl.pathname + (promptUrl.search || '');
 const payload = {
   summary: 'Test summary',
   needs_clarify: false,
@@ -31,7 +30,7 @@ try {
   // If node-fetch is not installed, this will throw and we fall back to the
   // environment's global fetch (might not be interceptable by nock).
   globalThis.fetch = require('node-fetch');
-} catch (e) {}
+} catch {}
 
 // If tests are running the server in a child process, parent-installed nock
 // interceptors won't affect the child. Propagate a small env-driven stub so
@@ -40,7 +39,7 @@ if (process.env.USE_CHILD_PROCESS_SERVER === '1') {
   try {
     process.env.TEST_PROMPT_STUB = '1';
     process.env.TEST_PROMPT_PAYLOAD_JSON = JSON.stringify(payload);
-  } catch (e) {}
+  } catch {}
 }
 
 const app = require('../novain-platform/webhook/server');

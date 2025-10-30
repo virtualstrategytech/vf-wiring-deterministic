@@ -93,14 +93,22 @@ if (!IS_PROD && DEBUG_WEBHOOK) {
 app.use(cors());
 
 // ---- Middleware (body parser + JSON error handler)
-app.use(
-  express.json({
-    limit: '1mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
+// Allow tests to disable the body parser to avoid loading raw-body/body-parser
+// which can create closures detected as "bound-anonymous-fn" by Jest detectOpenHandles.
+const SKIP_BODY_PARSER =
+  process.env.SKIP_BODY_PARSER === '1' || process.env.SKIP_BODY_PARSER === 'true';
+if (SKIP_BODY_PARSER) {
+  console.info('SKIP_BODY_PARSER set — skipping express.json body parser (test mode)');
+} else {
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
+}
 
 // Insert request-id propagation middleware (after body parser or before routes)
 app.use((req, res, next) => {

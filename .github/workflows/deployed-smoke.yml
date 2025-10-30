@@ -7,13 +7,18 @@ on:
         description: 'Target environment name (informational)'
         required: false
 
+# Explicit permissions reduce editor/schema warnings and limit token scope for the workflow
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
-      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
     outputs:
       webhook_key_fingerprint: ${{ steps.set-fingerprint.outputs.fingerprint }}

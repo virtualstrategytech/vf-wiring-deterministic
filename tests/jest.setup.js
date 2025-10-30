@@ -89,6 +89,37 @@ try {
   } catch {}
 } catch {}
 
+// Instrument EventEmitter.on/once to attach a creation stack to listeners so
+// persistent anonymous listeners can be traced back to their origin during tests.
+try {
+  const events = require('events');
+  const origOn = events.EventEmitter.prototype.on;
+  const origOnce = events.EventEmitter.prototype.once;
+  if (!events.EventEmitter.prototype.__listenerStackPatched) {
+    events.EventEmitter.prototype.on = function (event, listener) {
+      try {
+        if (typeof listener === 'function' && !listener._creationStack) {
+          try {
+            listener._creationStack = new Error('listener-created').stack;
+          } catch {}
+        }
+      } catch {}
+      return origOn.call(this, event, listener);
+    };
+    events.EventEmitter.prototype.once = function (event, listener) {
+      try {
+        if (typeof listener === 'function' && !listener._creationStack) {
+          try {
+            listener._creationStack = new Error('listener-created').stack;
+          } catch {}
+        }
+      } catch {}
+      return origOnce.call(this, event, listener);
+    };
+    events.EventEmitter.prototype.__listenerStackPatched = true;
+  }
+} catch {}
+
 // Instrument net.Socket.prototype.connect so sockets created via lower-level
 // calls (or by libraries that call socket.connect directly) get a creation
 // stack attached.
@@ -122,6 +153,49 @@ try {
   }
 } catch {}
 
+// Async-hooks tracer: capture creation stacks for native handles (best-effort)
+try {
+  const async_hooks = require('async_hooks');
+  const handleMap = new Map();
+  global.__async_handle_map = handleMap;
+  const hook = async_hooks.createHook({
+    init(id, type, triggerId, resource) {
+      try {
+        // If DEBUG_TESTS is enabled capture all handle types (best-effort)
+        // to help root-cause the lingering handle. Otherwise, capture a
+        // conservative set to reduce noise.
+        const verbose = !!process.env.DEBUG_TESTS;
+        if (type && (verbose || type)) {
+          try {
+            // Optionally filter very noisy types when not debugging
+            if (!verbose) {
+              const t = String(type).toLowerCase();
+              if (
+                !(
+                  t.includes('tcp') ||
+                  t.includes('tcpwrap') ||
+                  t === 'timeout' ||
+                  t.includes('pipe') ||
+                  t.includes('timer')
+                )
+              ) {
+                return;
+              }
+            }
+            handleMap.set(id, { type, stack: new Error('handle-init').stack });
+          } catch {}
+        }
+      } catch {}
+    },
+    destroy(id) {
+      try {
+        handleMap.delete(id);
+      } catch {}
+    },
+  });
+  hook.enable();
+} catch {}
+
 // Attempt to destroy global agents and give Node a chance to clear handles.
 afterAll(async () => {
   try {
@@ -152,8 +226,10 @@ afterAll(async () => {
     // yield to the event loop to allow handles to close
     await new Promise((r) => setImmediate(r));
 
-    // tiny additional delay to allow native handles to fully close on CI/Windows
-    await new Promise((r) => setTimeout(r, 20));
+    // Slightly longer delay to allow native handles and pending callbacks to
+    // fully settle on CI/Windows. Increasing this reduces false-positive
+    // detectOpenHandles reports for short-lived bound callbacks.
+    await new Promise((r) => setTimeout(r, 200));
 
     // CI diagnostic: if Jest still sees open handles, try to list them and aggressively close
     try {
@@ -194,6 +270,31 @@ afterAll(async () => {
                   }
                 } catch {}
               });
+            } catch {}
+          }
+        } catch {}
+        // If async_hooks traced native handles, print a compact summary to help map
+        // lingering handles back to creation stacks. This is best-effort and gated
+        // behind DEBUG_TESTS to avoid noisy logs during normal runs.
+        try {
+          if (
+            process.env.DEBUG_TESTS &&
+            global.__async_handle_map &&
+            global.__async_handle_map.size
+          ) {
+            try {
+              console.warn('DEBUG_TESTS: async_handle_map entries:');
+              for (const [id, info] of global.__async_handle_map.entries()) {
+                try {
+                  const type = info && info.type ? info.type : '<unknown>';
+                  console.warn(`  asyncId=${id} type=${type}`);
+                  if (info && info.stack) {
+                    (String(info.stack).split('\n').slice(0, 6) || []).forEach((ln) =>
+                      console.warn(`    ${String(ln).trim()}`)
+                    );
+                  }
+                } catch {}
+              }
             } catch {}
           }
         } catch {}
@@ -311,7 +412,7 @@ afterAll(async () => {
           } catch {}
 
           // give the runtime a short moment to settle after forced cleanup
-          await new Promise((r) => setTimeout(r, 20));
+          await new Promise((r) => setTimeout(r, 200));
 
           // Extra safety: explicitly destroy any remaining global agent sockets again
           try {
@@ -367,7 +468,7 @@ afterAll(async () => {
             } catch {}
           }
           // allow native resources a moment to be released
-          await new Promise((r) => setTimeout(r, 20));
+          await new Promise((r) => setTimeout(r, 200));
         }
       }
     } catch {}
