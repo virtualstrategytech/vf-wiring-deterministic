@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  secrets: read
 
 jobs:
   run-smoke:
