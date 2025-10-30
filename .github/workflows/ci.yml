@@ -63,6 +63,7 @@ jobs:
       - name: Run tests
         env:
           CI: 'true'
+          SKIP_SYNC_SECRET: 'true'
           SKIP_BODY_PARSER: '1'
           SKIP_SMOKE: 'true'
           PROMPT_URL: ''
