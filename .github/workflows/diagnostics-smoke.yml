@@ -3,7 +3,6 @@ name: diagnostics-smoke (manual)
 permissions:
   contents: read
   actions: read
-  secrets: read
 
 on:
   workflow_dispatch:
