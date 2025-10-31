@@ -98,7 +98,48 @@ app.use(cors());
 const SKIP_BODY_PARSER =
   process.env.SKIP_BODY_PARSER === '1' || process.env.SKIP_BODY_PARSER === 'true';
 if (SKIP_BODY_PARSER) {
-  console.info('SKIP_BODY_PARSER set — skipping express.json body parser (test mode)');
+  console.info('SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)');
+  // Lightweight per-request JSON parser used only in test-mode when the
+  // full express.json/body-parser is disabled. This avoids pulling in the
+  // heavy raw-body closure that can be reported as an open handle by Jest
+  // while still allowing tests that send JSON (supertest) to be parsed.
+  app.use((req, res, next) => {
+    try {
+      const ct =
+        (req.headers && (req.headers['content-type'] || req.headers['Content-Type'])) || '';
+      if (!String(ct).toLowerCase().includes('application/json')) return next();
+
+      let raw = '';
+      if (typeof req.setEncoding === 'function') {
+        try {
+          req.setEncoding('utf8');
+        } catch {}
+      }
+      req.on('data', (chunk) => {
+        try {
+          raw += chunk;
+        } catch {}
+      });
+      req.on('end', () => {
+        try {
+          // emulate express.json verify behavior by saving a Buffer
+          req.rawBody = Buffer.from(raw || '', 'utf8');
+          try {
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch {
+            req.body = {};
+          }
+        } catch {}
+        next();
+      });
+      req.on('error', () => next());
+    } catch (e) {
+      // best-effort: fall through to next middleware on error
+      try {
+        next();
+      } catch {}
+    }
+  });
 } else {
   app.use(
     express.json({

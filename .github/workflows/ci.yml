@@ -75,11 +75,19 @@ jobs:
           # in-test HTTP stubs (nock) instead of mocking globalThis.fetch.
           USE_CHILD_PROCESS_SERVER: '0'
         # Run Jest directly (not `npm test`) so we can omit --detectOpenHandles
-        run: npx jest --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js --runInBand --silent
+        run: |
+          mkdir -p tests
+          # Ensure pipeline failures propagate as non-zero exit codes
+          set -o pipefail
+          # Run jest without --silent and capture stdout+stderr to a file so
+          # CI artifacts contain the full test output for diagnosis.
+          npx jest --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js --runInBand 2>&1 | tee tests/jest-output.txt
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: tests/globalSetup.log
+          path: |
+            tests/globalSetup.log
+            tests/jest-output.txt
