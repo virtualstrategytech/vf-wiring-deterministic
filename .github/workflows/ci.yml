@@ -60,7 +60,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Run tests
+      - name: Run tests (captured)
         env:
           CI: 'true'
           SKIP_SYNC_SECRET: 'true'
@@ -74,14 +74,10 @@ jobs:
           # the child-process server mode after tests are updated to use
           # in-test HTTP stubs (nock) instead of mocking globalThis.fetch.
           USE_CHILD_PROCESS_SERVER: '0'
-        # Run Jest directly (not `npm test`) so we can omit --detectOpenHandles
+        # Run the CI wrapper which records env + runs jest in verbose mode
         run: |
-          mkdir -p tests
-          # Ensure pipeline failures propagate as non-zero exit codes
-          set -o pipefail
-          # Run jest without --silent and capture stdout+stderr to a file so
-          # CI artifacts contain the full test output for diagnosis.
-          npx jest --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js --runInBand 2>&1 | tee tests/jest-output.txt
+          chmod +x ./scripts/ci_run_jest.sh || true
+          ./scripts/ci_run_jest.sh
 
       - name: Upload logs on failure
         if: failure()
