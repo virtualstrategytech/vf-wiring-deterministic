@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // Lightweight server helper for tests: start an Express app on an ephemeral
 // port while tracking sockets so we can aggressively destroy them in tests.
 const http = require('http');
@@ -10,20 +11,20 @@ function _attachSocketTracking(server, sockets) {
   function _onConnection(sock) {
     try {
       sock._createdStack = new Error('socket-created-at').stack;
-    } catch (e) {
-      void e;
+    } catch {
+      void 0;
     }
 
     try {
       if (process.env.DEBUG_TESTS) {
         try {
           console.warn(new Error('socket-created-at').stack);
-        } catch (e) {
-          void e;
+        } catch {
+          void 0;
         }
       }
-    } catch (e) {
-      void e;
+    } catch {
+      void 0;
     }
 
     sockets.add(sock);
@@ -33,8 +34,8 @@ function _attachSocketTracking(server, sockets) {
       if (typeof sock.setKeepAlive === 'function') sock.setKeepAlive(false);
       if (typeof sock.setTimeout === 'function') sock.setTimeout(1000);
       if (typeof sock.unref === 'function') sock.unref();
-    } catch (e) {
-      void e;
+    } catch {
+      void 0;
     }
 
     function _onSocketClose() {
@@ -42,8 +43,8 @@ function _attachSocketTracking(server, sockets) {
       _sockets.delete(sock);
       try {
         sock.removeListener && sock.removeListener('close', _onSocketClose);
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
     }
 
@@ -61,20 +62,20 @@ function startTestServer(app) {
 
   try {
     if (typeof server.keepAliveTimeout === 'number') server.keepAliveTimeout = 1000;
-  } catch (e) {
-    void e;
+  } catch (_e) {
+    void _e;
   }
 
   try {
     if (typeof server.headersTimeout === 'number') server.headersTimeout = 2000;
-  } catch (e) {
-    void e;
+  } catch (_e) {
+    void _e;
   }
 
   try {
     if (typeof server.timeout === 'number') server.timeout = 1000;
-  } catch (e) {
-    void e;
+  } catch (_e) {
+    void _e;
   }
 
   return new Promise((resolve, reject) => {
@@ -84,14 +85,14 @@ function startTestServer(app) {
 
       try {
         if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
 
       try {
         if (typeof server.unref === 'function') server.unref();
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
 
       const close = async () => {
@@ -101,30 +102,30 @@ function startTestServer(app) {
               console.warn(
                 `test-server close requested ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         server.removeAllListeners('connection');
 
         try {
           server.removeAllListeners('listening');
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         try {
           server.removeAllListeners('error');
           server.removeAllListeners('request');
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         for (const s of Array.from(sockets)) {
           try {
             s.destroy();
-          } catch (e) {
-            void e;
+          } catch (_e) {
+            void _e;
           }
           sockets.delete(s);
           _sockets.delete(s);
@@ -137,8 +138,8 @@ function startTestServer(app) {
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (e) {
-                  void e;
+                } catch (_e) {
+                  void _e;
                 }
               }
               called = true;
@@ -151,8 +152,8 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (e) {
-                void e;
+              } catch (_e) {
+                void _e;
               }
               setImmediate(() => res());
             }
@@ -163,14 +164,14 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (e) {
-                void e;
+              } catch (_e) {
+                void _e;
               }
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (e) {
-                  void e;
+                } catch (_e) {
+                  void _e;
                 }
               }
               setImmediate(() => res());
@@ -184,24 +185,24 @@ function startTestServer(app) {
               if (err) {
                 try {
                   onErrorClose();
-                } catch (e) {
-                  void e;
+                } catch (_e) {
+                  void _e;
                 }
               }
             }
             server.close(_serverCloseCallback);
-          } catch {
+          } catch (_e) {
             for (const s of Array.from(sockets)) {
               try {
                 s.destroy();
-              } catch (e) {
-                void e;
+              } catch (_e) {
+                void _e;
               }
             }
             try {
               clearTimeout(timeout);
-            } catch (e) {
-              void e;
+            } catch (_e) {
+              void _e;
             }
             res();
           }
@@ -213,20 +214,20 @@ function startTestServer(app) {
             try {
               console.warn &&
                 console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
-            } catch (e) {
-              void e;
+            } catch (_e) {
+              void _e;
             }
           }
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         await new Promise((r) => setImmediate(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         try {
@@ -235,8 +236,8 @@ function startTestServer(app) {
               console.warn(
                 `test-server close completed ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
 
         _servers.delete(server);
@@ -245,8 +246,8 @@ function startTestServer(app) {
           for (const s of Array.from(_sockets)) {
             try {
               s.destroy();
-            } catch (e) {
-              void e;
+            } catch (_e) {
+              void _e;
             }
           }
           for (const serv of Array.from(_servers)) {
@@ -255,15 +256,15 @@ function startTestServer(app) {
               serv.removeAllListeners('listening');
               try {
                 serv.close();
-              } catch (e) {
-                void e;
+              } catch (_e) {
+                void _e;
               }
-            } catch (e) {
-              void e;
+            } catch (_e) {
+              void _e;
             }
           }
-        } catch (e) {
-          void e;
+        } catch (_e) {
+          void _e;
         }
       };
 
@@ -278,13 +279,13 @@ function startTestServer(app) {
           if (l !== onListen) {
             try {
               server.removeListener('listening', l);
-            } catch (e) {
-              void e;
+            } catch (_e) {
+              void _e;
             }
           }
         }
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
 
       resolve({ base, close });
@@ -297,23 +298,23 @@ function startTestServer(app) {
     server.once('error', onError);
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch (e) {
-      void e;
+    } catch {
+      void 0;
     }
 
     try {
       server.listen(0, '127.0.0.1');
       server.once('listening', onListen);
-    } catch {
+    } catch (_e) {
       try {
         server.once('listening', onListen);
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
       try {
         onListen();
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
     }
 
@@ -325,19 +326,19 @@ function startTestServer(app) {
               console.warn(
                 `test-server received close event for ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-          } catch (e) {
-            void e;
+          } catch (_e) {
+            void _e;
           }
         });
       }
-    } catch (e) {
-      void e;
+    } catch (_e) {
+      void _e;
     }
 
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch (e) {
-      void e;
+    } catch (_e) {
+      void _e;
     }
   });
 }
@@ -347,8 +348,8 @@ function _forceCloseAllSockets() {
   for (const s of Array.from(_sockets)) {
     try {
       s.destroy();
-    } catch (e) {
-      void e;
+    } catch (_e) {
+      void _e;
     }
   }
 
@@ -362,7 +363,7 @@ function _forceCloseAllSockets() {
         const p = new Promise((resolve) => {
           try {
             serv.close(() => resolve());
-          } catch (e) {
+          } catch (_e) {
             resolve();
           }
           // ensure we don't block indefinitely
@@ -370,11 +371,11 @@ function _forceCloseAllSockets() {
         });
         // don't await here synchronously; let the promise run and continue
         p.catch(() => {});
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
-    } catch (e) {
-      void e;
+    } catch (_e) {
+      void _e;
     }
   }
 
@@ -392,21 +393,21 @@ function _forceCloseAllSockets() {
             if (h.destroyed) continue;
             // best-effort: avoid touching stdio
             if (h.fd === 1 || h.fd === 2) continue;
-          } catch (e) {
+          } catch (_e) {
             // if fd isn't available, still attempt to destroy but guarded
           }
           try {
             h.destroy();
-          } catch (e) {
-            void e;
+          } catch (_e) {
+            void _e;
           }
         }
-      } catch (e) {
-        void e;
+      } catch (_e) {
+        void _e;
       }
     }
-  } catch (e) {
-    void e;
+  } catch (_e) {
+    void _e;
   }
 
   // finally clear our registries

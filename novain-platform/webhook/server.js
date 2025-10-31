@@ -80,7 +80,9 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
 };
 
 // Minimal runtime safety notice (no secret printed)
-if (!API_KEY && !IS_PROD) {
+// Use getApiKey() here so the value is resolved at runtime rather than
+// referencing a possibly undefined module-scope variable.
+if (!getApiKey() && !IS_PROD) {
   console.warn(
     'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
   );
@@ -92,7 +94,7 @@ if (!IS_PROD && DEBUG_WEBHOOK) {
   console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
   console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
   // log presence only (true/false) — never print the actual key value
-  console.info('WEBHOOK_API_KEY present:', !!API_KEY);
+  console.info('WEBHOOK_API_KEY present:', !!getApiKey());
 }
 
 // CORS (optional; enable if browser/iframe clients will call the webhook)
@@ -139,7 +141,7 @@ if (SKIP_BODY_PARSER) {
         next();
       });
       req.on('error', () => next());
-    } catch (e) {
+    } catch {
       // best-effort: fall through to next middleware on error
       try {
         next();
