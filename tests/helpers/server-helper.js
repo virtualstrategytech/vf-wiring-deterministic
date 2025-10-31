@@ -343,6 +343,7 @@ function startTestServer(app) {
 }
 
 function _forceCloseAllSockets() {
+  // First, destroy any sockets we have tracked explicitly
   for (const s of Array.from(_sockets)) {
     try {
       s.destroy();
@@ -350,11 +351,25 @@ function _forceCloseAllSockets() {
       void e;
     }
   }
+
+  // Then attempt to close any tracked servers cleanly (with a short timeout)
   for (const serv of Array.from(_servers)) {
     try {
       serv.removeAllListeners('connection');
+      // try to close with a callback and wait a short time so underlying
+      // native handles are freed before we proceed to the global sweep
       try {
-        serv.close(function _forceCloseCallback() {});
+        const p = new Promise((resolve) => {
+          try {
+            serv.close(() => resolve());
+          } catch (e) {
+            resolve();
+          }
+          // ensure we don't block indefinitely
+          setTimeout(() => resolve(), 1500);
+        });
+        // don't await here synchronously; let the promise run and continue
+        p.catch(() => {});
       } catch (e) {
         void e;
       }
@@ -362,6 +377,39 @@ function _forceCloseAllSockets() {
       void e;
     }
   }
+
+  // Aggressive sweep: inspect Node's active handles and destroy any Socket
+  // handles that may not have been tracked (avoid destroying stdio streams).
+  try {
+    const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+    for (let i = 0; i < handles.length; i++) {
+      const h = handles[i];
+      try {
+        const name = h && h.constructor && h.constructor.name;
+        if (String(name) === 'Socket') {
+          // skip stdio write streams (common fd 1/2) but destroy others
+          try {
+            if (h.destroyed) continue;
+            // best-effort: avoid touching stdio
+            if (h.fd === 1 || h.fd === 2) continue;
+          } catch (e) {
+            // if fd isn't available, still attempt to destroy but guarded
+          }
+          try {
+            h.destroy();
+          } catch (e) {
+            void e;
+          }
+        }
+      } catch (e) {
+        void e;
+      }
+    }
+  } catch (e) {
+    void e;
+  }
+
+  // finally clear our registries
   _sockets.clear();
   _servers.clear();
 }
