@@ -1,3 +1,41 @@
+name: CI - child-process server tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  child-server-tests:
+    name: Run tests with USE_CHILD_PROCESS_SERVER=1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests (child-process server)
+        env:
+          CI: 'true'
+          SKIP_SYNC_SECRET: 'true'
+          SKIP_BODY_PARSER: '1'
+          SKIP_SMOKE: 'true'
+          USE_CHILD_PROCESS_SERVER: '1'
+        run: |
+          bash ./scripts/ci_run_jest.sh
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-child
+          path: tests/jest-output.txt
 name: CI — tests (child-process server)
 
 on:
