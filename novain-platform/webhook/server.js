@@ -11,7 +11,13 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
 const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
 // ---- Config (env vars)
-const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+// Note: some tests set `process.env.WEBHOOK_API_KEY` after this module is loaded.
+// To ensure tests and CI can update the API key at runtime (without requiring
+// the server module to be reloaded), read the API key per-request instead of
+// capturing it once at module init.
+function getApiKey() {
+  return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+}
 const PORT = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
@@ -245,9 +251,11 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
-  // authenticate request
+  // authenticate request (read expected key at request time so tests can set
+  // process.env.WEBHOOK_API_KEY dynamically before making requests)
   const key = (req.get('x-api-key') || '').toString();
-  if (key !== API_KEY) {
+  const expected = getApiKey();
+  if (key !== expected) {
     console.warn('unauthorized: key mismatch');
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
