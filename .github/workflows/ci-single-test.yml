@@ -1,0 +1,51 @@
+name: CI - single in_process test
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Set to true to enable DEBUG_WEBHOOK env in the job'
+        required: false
+        default: 'false'
+
+jobs:
+  single-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run single in_process test and save output
+        env:
+          DEBUG_WEBHOOK: ${{ inputs.debug }}
+        run: |
+          echo "Running in-process test..."
+          # Run the single test and capture stdout/stderr to a file. Allow failure but capture exit code.
+          npx jest tests/in_process.test.js -t "should handle webhook requests properly" --runInBand --detectOpenHandles 2>&1 | tee jest-output.txt || true
+          echo "exit_code=$?" > jest-exit.txt || true
+
+      - name: Upload logs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-output
+          path: |
+            jest-output.txt
+            jest-exit.txt
+
+      - name: Fail if tests failed
+        run: |
+          if [ -f jest-exit.txt ]; then
+            code=$(cat jest-exit.txt | sed -n 's/exit_code=//p')
+            if [ "$code" != "0" ]; then
+              echo "Jest exited with code $code"
+              exit $code
+            fi
+          fi
