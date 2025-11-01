@@ -3,6 +3,12 @@ name: CI - child-process server tests
 on:
   pull_request:
   workflow_dispatch:
+  push:
+    branches: [feat/wiring-agent]
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   child-server-tests:
@@ -36,18 +42,7 @@ jobs:
         with:
           name: test-logs-child
           path: tests/jest-output.txt
-name: CI — tests (child-process server)
 
-on:
-  workflow_dispatch: {}
-  push:
-    branches: [feat/wiring-agent]
-
-permissions:
-  contents: read
-  actions: read
-
-jobs:
   test-child-server:
     name: Run tests with child-process server
     runs-on: ubuntu-latest
