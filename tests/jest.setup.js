@@ -11,7 +11,11 @@ const tls = require('tls');
 // so test helpers that start servers pick up child-mode early.
 try {
   if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
-    process.env.USE_CHILD_PROCESS_SERVER = process.env.USE_CHILD_PROCESS_SERVER || '1';
+    // Force child-process server mode in CI runs: some workflows set
+    // USE_CHILD_PROCESS_SERVER=0 which prevents test helpers from using
+    // the child-process isolation. Overriding here ensures CI runs use the
+    // isolated server mode to avoid native handle flakiness.
+    process.env.USE_CHILD_PROCESS_SERVER = '1';
   }
 } catch {}
 
