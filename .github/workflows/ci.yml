@@ -79,7 +79,9 @@ jobs:
           # requiring the instrumentation module via NODE_OPTIONS. This
           # helps capture creation stacks for sockets that may be created
           # during module init.
-          NODE_OPTIONS: '--require ./tests/jest.instrumentation.js'
+          # Use an absolute path so child processes spawned by tests can
+          # also preload the instrumentation regardless of their CWD.
+          NODE_OPTIONS: '--require $GITHUB_WORKSPACE/tests/jest.instrumentation.js'
         # Run the CI wrapper which records env + runs jest in verbose mode
         run: |
           chmod +x ./scripts/ci_run_jest.sh || true
