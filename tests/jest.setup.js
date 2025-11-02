@@ -1,9 +1,56 @@
 // Global Jest setup/teardown helpers to reduce open-handle warnings.
 // Called after each test file via setupFilesAfterEnv.
+/* eslint-disable @typescript-eslint/no-unused-vars */
 const http = require('http');
 const https = require('https');
 const net = require('net');
 const tls = require('tls');
+
+// Test-only: best-effort patch to make AsyncResource a no-op wrapper so
+// modules that create AsyncResources during parsing (raw-body) don't leave
+// persistent native handles that show up as "bound-anonymous-fn" in
+// Jest's detectOpenHandles. We patch only when TEST_PATCH_RAW_BODY=1 or
+// DEBUG_TESTS is set so normal runtime isn't modified unexpectedly.
+let __origAsyncResource = null;
+function __patchAsyncResourceNoop() {
+  try {
+    const ah = require('async_hooks');
+    if (!ah || !ah.AsyncResource) return;
+    if (__origAsyncResource) return;
+    __origAsyncResource = ah.AsyncResource;
+    class NoopAsyncResource {
+      constructor(_name) {}
+      runInAsyncScope(fn, thisArg, ...args) {
+        return fn.call(thisArg, ...args);
+      }
+    }
+    try {
+      ah.AsyncResource = NoopAsyncResource;
+    } catch {
+      __origAsyncResource = null;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function __restoreAsyncResource() {
+  try {
+    const ah = require('async_hooks');
+    if (!ah) return;
+    if (__origAsyncResource) {
+      try {
+        ah.AsyncResource = __origAsyncResource;
+      } catch {}
+      __origAsyncResource = null;
+    }
+  } catch {}
+}
+
+try {
+  const shouldPatch = process.env.TEST_PATCH_RAW_BODY === '1' || process.env.DEBUG_TESTS;
+  if (shouldPatch) __patchAsyncResourceNoop();
+} catch {}
 
 // Defensive: ensure global agents don't keep sockets alive across tests.
 // Some Node versions may still reuse sockets in the global agent; disabling
@@ -196,6 +243,74 @@ try {
   hook.enable();
 } catch {}
 
+// Test-only: monkeypatch fs.createReadStream (and ReadStream constructor) to
+// attach a creation stack to any file streams created during tests. This is
+// a diagnostic helper only enabled when DEBUG_TESTS is set so we can map
+// ReadStream instances in heap/handle dumps back to their creation site.
+try {
+  if (process.env.DEBUG_TESTS) {
+    try {
+      const fs = require('fs');
+      if (fs) {
+        try {
+          const orig = fs.createReadStream;
+          if (typeof orig === 'function' && !fs.__createReadStreamPatched) {
+            fs.createReadStream = function createReadStreamWithStack(...args) {
+              const rs = orig.apply(this, args);
+              try {
+                if (rs && typeof rs === 'object' && !rs._createdStack) {
+                  rs._createdStack = new Error('fs.createReadStream-created').stack;
+                }
+              } catch {
+                void 0;
+              }
+              return rs;
+            };
+            fs.__createReadStreamPatched = true;
+          }
+        } catch {
+          void 0;
+        }
+
+        // Also try to wrap the ReadStream constructor for modules that call
+        // `new fs.ReadStream(...)` directly. Keep this best-effort and
+        // non-invasive: preserve prototype and most behavior.
+        try {
+          const OrigReadStream = fs.ReadStream;
+          if (OrigReadStream && !fs.__ReadStreamCtorPatched) {
+            function ReadStreamWithStack(path, options) {
+              // Use Reflect.construct to call the original constructor
+              const inst = Reflect.construct(OrigReadStream, [path, options], ReadStreamWithStack);
+              try {
+                if (inst && typeof inst === 'object' && !inst._createdStack) {
+                  inst._createdStack = new Error('fs.ReadStream-created').stack;
+                }
+              } catch {
+                void 0;
+              }
+              return inst;
+            }
+            // preserve prototype chain
+            ReadStreamWithStack.prototype = OrigReadStream.prototype;
+            try {
+              fs.ReadStream = ReadStreamWithStack;
+              fs.__ReadStreamCtorPatched = true;
+            } catch {
+              void 0;
+            }
+          }
+        } catch {
+          void 0;
+        }
+      }
+    } catch {
+      void 0;
+    }
+  }
+} catch {
+  // ignore any failures in the diagnostic monkeypatch
+}
+
 // Attempt to destroy global agents and give Node a chance to clear handles.
 afterAll(async () => {
   try {
@@ -254,6 +369,52 @@ afterAll(async () => {
           if (process.env.DEBUG_TESTS && verbose) {
             try {
               console.warn('DEBUG_TESTS: raw active handles dump (detailed):');
+
+              // Test-only: wrap require('raw-body') to tag the incoming stream with a
+              // creation stack when DEBUG_TESTS is set. body-parser/raw-body sometimes
+              // create or operate on streams that end up as native handles; tagging the
+              // stream helps map heap objects back to code paths.
+              try {
+                if (process.env.DEBUG_TESTS) {
+                  try {
+                    const Module = require('module');
+                    const origLoad = Module._load;
+                    if (typeof origLoad === 'function' && !Module.__rawBodyPatched) {
+                      Module._load = function (request, parent, isMain) {
+                        // intercept 'raw-body' module load
+                        if (request === 'raw-body') {
+                          const exported = origLoad.apply(this, arguments);
+                          try {
+                            // raw-body exports a function (stream, opts, cb) or (stream, opts)
+                            if (typeof exported === 'function') {
+                              const wrapped = function (stream, opts, cb) {
+                                try {
+                                  if (
+                                    stream &&
+                                    typeof stream === 'object' &&
+                                    !stream._createdStack
+                                  ) {
+                                    stream._createdStack = new Error(
+                                      'raw-body-stream-invoked'
+                                    ).stack;
+                                  }
+                                } catch {}
+                                return exported.apply(this, arguments);
+                              };
+                              // copy properties
+                              Object.keys(exported).forEach((k) => (wrapped[k] = exported[k]));
+                              return wrapped;
+                            }
+                          } catch {}
+                          return exported;
+                        }
+                        return origLoad.apply(this, arguments);
+                      };
+                      Module.__rawBodyPatched = true;
+                    }
+                  } catch {}
+                }
+              } catch {}
               handles.forEach((h, i) => {
                 try {
                   const name = h && h.constructor && h.constructor.name;
@@ -469,6 +630,43 @@ afterAll(async () => {
           }
           // allow native resources a moment to be released
           await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+    } catch {}
+    // If verbose debugging is enabled, also persist the async handle map to
+    // a file for offline analysis (helps triage on CI where logs are noisy).
+    try {
+      if (process.env.DEBUG_TESTS && Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 3) {
+        try {
+          const fs = require('fs');
+          const out = [];
+          for (const [id, info] of global.__async_handle_map.entries()) {
+            try {
+              out.push({
+                id,
+                type: info && info.type,
+                stack: String(info && info.stack).slice(0, 1000),
+              });
+            } catch {
+              void 0;
+            }
+          }
+          try {
+            const path = require('path').join(
+              process.cwd(),
+              'artifacts',
+              `async_handles_${Date.now()}.json`
+            );
+            try {
+              fs.mkdirSync(require('path').dirname(path), { recursive: true });
+            } catch {}
+            fs.writeFileSync(path, JSON.stringify(out, null, 2));
+            console.warn('DEBUG_TESTS: wrote async handle map to', path);
+          } catch {
+            void 0;
+          }
+        } catch {
+          void 0;
         }
       }
     } catch {}

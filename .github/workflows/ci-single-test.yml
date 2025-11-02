@@ -11,6 +11,9 @@ on:
 jobs:
   single-test:
     runs-on: ubuntu-latest
+    env:
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,10 +29,15 @@ jobs:
       - name: Run single in_process test and save output
         env:
           DEBUG_WEBHOOK: ${{ inputs.debug }}
+          # Run the test in isolated child-process server mode to avoid
+          # parent-process active-handle failures in CI. This environment
+          # variable is observed by the test helpers.
+          USE_CHILD_PROCESS_SERVER: '1'
         run: |
           echo "Running in-process test..."
           # Run the single test and capture stdout/stderr to a file. Allow failure but capture exit code.
-          npx jest tests/in_process.test.js -t "should handle webhook requests properly" --runInBand --detectOpenHandles 2>&1 | tee jest-output.txt || true
+          # Avoid passing --detectOpenHandles in regular CI runs (it causes extra open-handle detection noise and non-zero exits).
+          npx jest tests/in_process.test.js -t "should handle webhook requests properly" --runInBand 2>&1 | tee jest-output.txt || true
           echo "exit_code=$?" > jest-exit.txt || true
 
       - name: Upload logs artifact

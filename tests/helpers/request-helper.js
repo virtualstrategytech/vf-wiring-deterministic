@@ -275,8 +275,32 @@ async function requestApp(
         try {
           await close();
         } catch {}
+        // Aggressive sweep after child server close to ensure no lingering sockets
+        try {
+          if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+            // allow a tick for any final close callbacks
+            try {
+              await new Promise((r) => setImmediate(r));
+            } catch {}
+            try {
+              serverHelper._forceCloseAllSockets();
+            } catch {
+              void 0;
+            }
+          }
+        } catch {
+          // intentionally ignore errors during aggressive child cleanup
+        }
       }
     }
+    // Ensure test-time AsyncResource shim is enabled while starting the
+    // in-process test server so modules that rely on async_hooks (like
+    // raw-body/body-parser) don't create native handles that Jest reports
+    // as open. We restore the previous value in the finally block below.
+    const _prevTestPatch = process.env.TEST_PATCH_RAW_BODY;
+    try {
+      process.env.TEST_PATCH_RAW_BODY = '1';
+    } catch {}
     const started = await serverHelper.startTestServer(app);
     // Normalize any trailing slash on the ephemeral server base as well.
     const base = (started.base || '').replace(/\/+$/, '');
@@ -385,6 +409,12 @@ async function requestApp(
           await new Promise((r) => setImmediate(r));
           serverHelper._forceCloseAllSockets();
         }
+      } catch {}
+      // Restore TEST_PATCH_RAW_BODY to its previous state so other tests
+      // are unaffected by this temporary change.
+      try {
+        if (typeof _prevTestPatch === 'undefined') delete process.env.TEST_PATCH_RAW_BODY;
+        else process.env.TEST_PATCH_RAW_BODY = _prevTestPatch;
       } catch {}
     }
   }

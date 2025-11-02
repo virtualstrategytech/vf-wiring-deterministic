@@ -2,9 +2,6 @@ name: CI - Child-server diagnostic
 
 on:
   workflow_dispatch: {}
-  push:
-    branches:
-      - pr/wiring-agent-fixes
 
 permissions:
   contents: read

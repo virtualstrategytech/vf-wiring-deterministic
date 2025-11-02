@@ -1,7 +1,12 @@
 ﻿name: Debug webhook test
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: 'Set to true to enable DEBUG_WEBHOOK_ENABLED in the job'
+        required: false
+        default: 'false'
 
 permissions:
   contents: read
@@ -14,7 +19,7 @@ jobs:
     env:
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs; set to 'true' if you want tests to run
+      DEBUG_WEBHOOK_ENABLED: ${{ github.event.inputs.debug_enabled || 'false' }}
       DEBUG_TESTS: 'true' # enable extra handle-dump diagnostics in jest.setup.js
       SKIP_BODY_PARSER: '1'
 

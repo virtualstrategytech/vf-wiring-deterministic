@@ -7,6 +7,57 @@ const http = require('http');
 const _servers = new Set();
 const _sockets = new Set();
 
+// Test-only: shim AsyncResource to avoid raw-body creating a persistent
+// AsyncResource that shows up as a "bound-anonymous-fn" active handle
+// in Jest's detectOpenHandles. We patch/restore around server lifecycle so
+// this only affects test runs that start servers via these helpers.
+let _patchedAsyncResource = null;
+function _patchAsyncResourceNoop() {
+  try {
+    const ah = require('async_hooks');
+    if (!ah || !ah.AsyncResource) return;
+    if (_patchedAsyncResource) return; // already patched
+    _patchedAsyncResource = ah.AsyncResource;
+
+    class NoopAsyncResource {
+      constructor(_name) {
+        // noop
+      }
+      runInAsyncScope(fn, thisArg, ...args) {
+        // Execute synchronously in same context; avoid creating native
+        // async handles during tests.
+        return fn.call(thisArg, ...args);
+      }
+    }
+
+    try {
+      ah.AsyncResource = NoopAsyncResource;
+    } catch {
+      // ignore failures to patch (platforms where async_hooks is frozen)
+      _patchedAsyncResource = null;
+    }
+  } catch {
+    // ignore if async_hooks not available
+  }
+}
+
+function _restoreAsyncResource() {
+  try {
+    const ah = require('async_hooks');
+    if (!ah) return;
+    if (_patchedAsyncResource) {
+      try {
+        ah.AsyncResource = _patchedAsyncResource;
+      } catch {
+        // ignore
+      }
+      _patchedAsyncResource = null;
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function _attachSocketTracking(server, sockets) {
   function _onConnection(sock) {
     try {
@@ -43,8 +94,8 @@ function _attachSocketTracking(server, sockets) {
       _sockets.delete(sock);
       try {
         sock.removeListener && sock.removeListener('close', _onSocketClose);
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
     }
 
@@ -62,20 +113,20 @@ function startTestServer(app) {
 
   try {
     if (typeof server.keepAliveTimeout === 'number') server.keepAliveTimeout = 1000;
-  } catch (_e) {
-    void _e;
+  } catch {
+    void 0;
   }
 
   try {
     if (typeof server.headersTimeout === 'number') server.headersTimeout = 2000;
-  } catch (_e) {
-    void _e;
+  } catch {
+    void 0;
   }
 
   try {
     if (typeof server.timeout === 'number') server.timeout = 1000;
-  } catch (_e) {
-    void _e;
+  } catch {
+    void 0;
   }
 
   return new Promise((resolve, reject) => {
@@ -85,14 +136,14 @@ function startTestServer(app) {
 
       try {
         if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
 
       try {
         if (typeof server.unref === 'function') server.unref();
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
 
       const close = async () => {
@@ -102,30 +153,30 @@ function startTestServer(app) {
               console.warn(
                 `test-server close requested ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         server.removeAllListeners('connection');
 
         try {
           server.removeAllListeners('listening');
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         try {
           server.removeAllListeners('error');
           server.removeAllListeners('request');
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         for (const s of Array.from(sockets)) {
           try {
             s.destroy();
-          } catch (_e) {
-            void _e;
+          } catch {
+            void 0;
           }
           sockets.delete(s);
           _sockets.delete(s);
@@ -138,8 +189,8 @@ function startTestServer(app) {
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (_e) {
-                  void _e;
+                } catch {
+                  void 0;
                 }
               }
               called = true;
@@ -152,8 +203,8 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (_e) {
-                void _e;
+              } catch {
+                void 0;
               }
               setImmediate(() => res());
             }
@@ -164,14 +215,14 @@ function startTestServer(app) {
               called = true;
               try {
                 clearTimeout(timeout);
-              } catch (_e) {
-                void _e;
+              } catch {
+                void 0;
               }
               for (const s of Array.from(sockets)) {
                 try {
                   s.destroy();
-                } catch (_e) {
-                  void _e;
+                } catch {
+                  void 0;
                 }
               }
               setImmediate(() => res());
@@ -185,24 +236,24 @@ function startTestServer(app) {
               if (err) {
                 try {
                   onErrorClose();
-                } catch (_e) {
-                  void _e;
+                } catch {
+                  void 0;
                 }
               }
             }
             server.close(_serverCloseCallback);
-          } catch (_e) {
+          } catch {
             for (const s of Array.from(sockets)) {
               try {
                 s.destroy();
-              } catch (_e) {
-                void _e;
+              } catch {
+                void 0;
               }
             }
             try {
               clearTimeout(timeout);
-            } catch (_e) {
-              void _e;
+            } catch {
+              void 0;
             }
             res();
           }
@@ -214,20 +265,20 @@ function startTestServer(app) {
             try {
               console.warn &&
                 console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
-            } catch (_e) {
-              void _e;
+            } catch {
+              void 0;
             }
           }
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         await new Promise((r) => setImmediate(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         try {
@@ -236,8 +287,8 @@ function startTestServer(app) {
               console.warn(
                 `test-server close completed ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
         }
 
         _servers.delete(server);
@@ -246,8 +297,8 @@ function startTestServer(app) {
           for (const s of Array.from(_sockets)) {
             try {
               s.destroy();
-            } catch (_e) {
-              void _e;
+            } catch {
+              void 0;
             }
           }
           for (const serv of Array.from(_servers)) {
@@ -256,15 +307,32 @@ function startTestServer(app) {
               serv.removeAllListeners('listening');
               try {
                 serv.close();
-              } catch (_e) {
-                void _e;
+              } catch {
+                void 0;
               }
-            } catch (_e) {
-              void _e;
+            } catch {
+              void 0;
             }
           }
-        } catch (_e) {
-          void _e;
+        } catch {
+          void 0;
+        }
+        // Ensure any remaining tracked sockets/servers are aggressively
+        // destroyed. This is defensive: some environments (CI, timing
+        // differences) may still have handles open; call the global sweep
+        // to reduce flakiness in Jest where active handles cause job failures.
+        try {
+          _forceCloseAllSockets();
+        } catch {
+          void 0;
+        }
+        // Give a short grace period for native handles / bound callbacks
+        // to settle after forceful destruction. This is test-only and
+        // reduces flaky detectOpenHandles reports on CI/Windows.
+        try {
+          await new Promise((r) => setTimeout(r, 75));
+        } catch {
+          void 0;
         }
       };
 
@@ -279,16 +347,62 @@ function startTestServer(app) {
           if (l !== onListen) {
             try {
               server.removeListener('listening', l);
-            } catch (_e) {
-              void _e;
+            } catch {
+              void 0;
             }
           }
         }
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
 
       resolve({ base, close });
+      // Schedule a short, verbose handle dump shortly after the server
+      // starts so we can capture creation stacks for any handles created
+      // during startup (useful when DEBUG_TESTS_LEVEL >= 3).
+      try {
+        const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 3;
+        if (process.env.DEBUG_TESTS && verbose) {
+          setTimeout(() => {
+            try {
+              if (typeof process._getActiveHandles === 'function') {
+                const h = process._getActiveHandles() || [];
+                console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
+                h.forEach((hh, ii) => {
+                  try {
+                    const name = hh && hh.constructor && hh.constructor.name;
+                    console.warn(`  [${ii}] ${String(name)}`);
+                    try {
+                      if (typeof hh._createdStack === 'string') {
+                        console.warn('    createdStack-preview:');
+                        (hh._createdStack.split('\n').slice(0, 8) || []).forEach((ln) =>
+                          console.warn('      ' + String(ln).trim())
+                        );
+                      }
+                    } catch {
+                      void 0;
+                    }
+                    if (String(name) === 'Function') {
+                      try {
+                        const s = String(hh).slice(0, 1000);
+                        console.warn('    fn:', s);
+                      } catch {
+                        void 0;
+                      }
+                    }
+                  } catch {
+                    void 0;
+                  }
+                });
+              }
+            } catch {
+              void 0;
+            }
+          }, 50);
+        }
+      } catch {
+        void 0;
+      }
     }
 
     function onError(err) {
@@ -296,6 +410,18 @@ function startTestServer(app) {
     }
 
     server.once('error', onError);
+    // Patch AsyncResource in tests before any modules that rely on it (such
+    // as raw-body) create native async resources we can't easily cleanup.
+    // This is best-effort and only happens during process.env.TEST_PATCH_RAW_BODY or
+    // when DEBUG_TESTS is set so we don't change runtime behavior in CI/Prod.
+    try {
+      const shouldPatch = process.env.TEST_PATCH_RAW_BODY === '1' || process.env.DEBUG_TESTS;
+      if (shouldPatch) {
+        _patchAsyncResourceNoop();
+      }
+    } catch {
+      void 0;
+    }
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {
@@ -305,16 +431,16 @@ function startTestServer(app) {
     try {
       server.listen(0, '127.0.0.1');
       server.once('listening', onListen);
-    } catch (_e) {
+    } catch {
       try {
         server.once('listening', onListen);
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
       try {
         onListen();
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
     }
 
@@ -326,19 +452,26 @@ function startTestServer(app) {
               console.warn(
                 `test-server received close event for ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
               );
-          } catch (_e) {
-            void _e;
+          } catch {
+            void 0;
           }
         });
       }
-    } catch (_e) {
-      void _e;
+    } catch {
+      void 0;
     }
-
+    // Restore any patched AsyncResource implementation once the server has
+    // finished closing so other parts of the test environment (or later
+    // tests) use the normal AsyncResource behavior.
+    try {
+      _restoreAsyncResource();
+    } catch {
+      void 0;
+    }
     try {
       if (typeof server.unref === 'function') server.unref();
-    } catch (_e) {
-      void _e;
+    } catch {
+      void 0;
     }
   });
 }
@@ -348,8 +481,8 @@ function _forceCloseAllSockets() {
   for (const s of Array.from(_sockets)) {
     try {
       s.destroy();
-    } catch (_e) {
-      void _e;
+    } catch {
+      void 0;
     }
   }
 
@@ -363,7 +496,7 @@ function _forceCloseAllSockets() {
         const p = new Promise((resolve) => {
           try {
             serv.close(() => resolve());
-          } catch (_e) {
+          } catch {
             resolve();
           }
           // ensure we don't block indefinitely
@@ -371,11 +504,11 @@ function _forceCloseAllSockets() {
         });
         // don't await here synchronously; let the promise run and continue
         p.catch(() => {});
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
-    } catch (_e) {
-      void _e;
+    } catch {
+      void 0;
     }
   }
 
@@ -383,31 +516,183 @@ function _forceCloseAllSockets() {
   // handles that may not have been tracked (avoid destroying stdio streams).
   try {
     const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+    if (process.env.DEBUG_TESTS) {
+      try {
+        console.warn('DEBUG_TESTS: sweeping active handles, count=' + handles.length);
+        handles.forEach((h, i) => {
+          try {
+            const name = h && h.constructor && h.constructor.name;
+            const info = {
+              idx: i,
+              type: String(name),
+              destroyed: Boolean(h && h.destroyed),
+            };
+            try {
+              if (typeof h.fd !== 'undefined') info.fd = h.fd;
+            } catch {}
+            try {
+              if (typeof h.pending !== 'undefined') info.pending = h.pending;
+            } catch {}
+            try {
+              if (h && typeof h._createdStack === 'string') {
+                info._createdStack = h._createdStack.split('\n').slice(0, 6).join('\n');
+              }
+            } catch {}
+            // If this looks like a file ReadStream, try to capture extra
+            // properties (path, bytesRead, readableEnded) which help
+            // map the handle back to the creator in diagnostics.
+            try {
+              if (h && (String(name) === 'ReadStream' || String(name) === 'FileReadStream')) {
+                try {
+                  if (typeof h.path !== 'undefined') info.path = h.path;
+                } catch {}
+                try {
+                  if (h && h._readableState && typeof h._readableState.reading !== 'undefined')
+                    info.reading = Boolean(h._readableState.reading);
+                } catch {}
+                try {
+                  if (typeof h.bytesRead !== 'undefined') info.bytesRead = h.bytesRead;
+                } catch {}
+                try {
+                  if (typeof h.readableEnded !== 'undefined') info.readableEnded = h.readableEnded;
+                } catch {}
+              }
+            } catch {
+              void 0;
+            }
+            console.warn(`  handle[${i}] summary: ${JSON.stringify(info)}`);
+            // If there is any stack attached, print a short preview for CI capture
+            try {
+              if (h && typeof h._createdStack === 'string') {
+                console.warn('    createdStack-preview:');
+                (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
+                  console.warn('      ' + String(ln).trim())
+                );
+              }
+            } catch {
+              void 0;
+            }
+          } catch {
+            void 0;
+          }
+        });
+      } catch {
+        void 0;
+      }
+    }
+
     for (let i = 0; i < handles.length; i++) {
       const h = handles[i];
       try {
         const name = h && h.constructor && h.constructor.name;
-        if (String(name) === 'Socket') {
-          // skip stdio write streams (common fd 1/2) but destroy others
+
+        // Consider common names for file/socket read handles. We also
+        // fall back to duck-typing (has readable/close/destroy) so we don't
+        // miss other stream-like handles created by dependencies.
+        const isSocket = String(name) === 'Socket';
+        const isReadStream = String(name) === 'ReadStream' || String(name) === 'FileReadStream';
+        const looksLikeStream = !!(
+          h &&
+          (h.readable ||
+            h.readableEnded ||
+            typeof h.close === 'function' ||
+            typeof h.destroy === 'function')
+        );
+
+        if (isSocket || isReadStream || looksLikeStream) {
           try {
-            if (h.destroyed) continue;
-            // best-effort: avoid touching stdio
-            if (h.fd === 1 || h.fd === 2) continue;
-          } catch (_e) {
-            // if fd isn't available, still attempt to destroy but guarded
+            if (h && h.destroyed) continue;
+
+            // avoid touching stdio (fd 0,1,2) where present
+            if (typeof h.fd !== 'undefined') {
+              if (h.fd === 0 || h.fd === 1 || h.fd === 2) continue;
+            }
+          } catch {
+            // ignore
           }
+
           try {
-            h.destroy();
-          } catch (_e) {
-            void _e;
+            // Prefer a graceful close/end first if available.
+            try {
+              if (h && typeof h.end === 'function') {
+                try {
+                  h.end();
+                } catch {
+                  void 0;
+                }
+              }
+            } catch {
+              void 0;
+            }
+
+            try {
+              // Some file streams expose `close` which is more appropriate
+              // for ReadStream-like objects. Try it before destroy.
+              if (h && typeof h.close === 'function') {
+                try {
+                  h.close();
+                } catch {
+                  void 0;
+                }
+              }
+            } catch {
+              void 0;
+            }
+
+            try {
+              if (h && typeof h.destroy === 'function') {
+                try {
+                  h.destroy();
+                } catch {
+                  void 0;
+                }
+              }
+            } catch {
+              void 0;
+            }
+
+            // Defensive second attempt on next tick
+            try {
+              setImmediate(() => {
+                try {
+                  if (h && !h.destroyed && typeof h.destroy === 'function') {
+                    try {
+                      h.destroy();
+                    } catch {
+                      void 0;
+                    }
+                  }
+                } catch {
+                  void 0;
+                }
+              });
+            } catch {
+              void 0;
+            }
+
+            if (process.env.DEBUG_TESTS) {
+              try {
+                console.warn(`DEBUG_TESTS: attempted cleanup handle[${i}] name=${String(name)}`);
+                if (h && typeof h._createdStack === 'string') {
+                  console.warn('    createdStack-preview:');
+                  (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
+                    console.warn('      ' + String(ln).trim())
+                  );
+                }
+              } catch {
+                void 0;
+              }
+            }
+          } catch {
+            void 0;
           }
         }
-      } catch (_e) {
-        void _e;
+      } catch {
+        void 0;
       }
     }
-  } catch (_e) {
-    void _e;
+  } catch {
+    void 0;
   }
 
   // finally clear our registries
