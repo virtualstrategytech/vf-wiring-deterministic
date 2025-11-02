@@ -73,7 +73,13 @@ jobs:
           # because it can produce false-positive failures. We'll migrate to
           # the child-process server mode after tests are updated to use
           # in-test HTTP stubs (nock) instead of mocking globalThis.fetch.
-          USE_CHILD_PROCESS_SERVER: '0'
+          # Prefer child-process isolation in CI to isolate native handles.
+          USE_CHILD_PROCESS_SERVER: '1'
+          # Pre-load the test instrumentation as early as possible by
+          # requiring the instrumentation module via NODE_OPTIONS. This
+          # helps capture creation stacks for sockets that may be created
+          # during module init.
+          NODE_OPTIONS: '--require ./tests/jest.instrumentation.js'
         # Run the CI wrapper which records env + runs jest in verbose mode
         run: |
           chmod +x ./scripts/ci_run_jest.sh || true
