@@ -3,6 +3,8 @@ process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = 'development';
 process.env.DEBUG_WEBHOOK = 'true';
 process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
+// Leave body-parser enabled; test helpers will patch AsyncResource during
+// server lifecycle to avoid raw-body creating persistent async handles.
 
 // Use nock to stub the external PROMPT_URL so tests don't rely on global
 // fetch mocking; this will make tests robust and compatible with eventual
@@ -50,8 +52,13 @@ async function captureConsoleAsync(action) {
   const origLog = console.log;
   const origInfo = console.info;
   const origError = console.error;
+  const origWarn = console.warn;
+  // Also capture console.warn because DEBUG_TESTS and helper instrumentation
+  // emit diagnostic warnings that would otherwise escape capture and change
+  // the test runtime output when DEBUG_TESTS is enabled in CI.
   console.log = (...args) => logs.out.push(args.join(' '));
   console.info = (...args) => logs.out.push(args.join(' '));
+  console.warn = (...args) => logs.out.push(args.join(' '));
   console.error = (...args) => logs.err.push(args.join(' '));
   try {
     await action();
@@ -60,6 +67,7 @@ async function captureConsoleAsync(action) {
     console.log = origLog;
     console.info = origInfo;
     console.error = origError;
+    console.warn = origWarn;
   }
 }
 
