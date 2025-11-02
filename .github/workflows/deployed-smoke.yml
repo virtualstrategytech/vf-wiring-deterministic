@@ -206,6 +206,8 @@ jobs:
             /tmp/health_body.txt
             /tmp/health_err
             /tmp/socket_debug.log
+            # Also upload any socket_debug written into the repository artifacts folder
+            artifacts/socket_debug.log
             scripts/check-locks.js
       - name: Confirm webhook envs (non-secret)
         run: |

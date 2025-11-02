@@ -85,8 +85,12 @@ function writeDebugLog(line) {
     console.error(line);
   } catch {}
   try {
-    // best-effort: write to a temp file so CI artifact upload can collect it
-    fs.appendFileSync('/tmp/socket_debug.log', `${new Date().toISOString()} ${line}\n`);
+    // best-effort: write to a stable repo artifacts folder so CI/workers on Windows
+    // and Unix can find the trace reliably.
+    fs.appendFileSync(
+      path.join(process.cwd(), 'artifacts', 'socket_debug.log'),
+      `${new Date().toISOString()} ${line}\n`
+    );
   } catch {}
 }
 
