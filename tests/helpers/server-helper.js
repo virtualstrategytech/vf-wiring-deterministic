@@ -3,6 +3,23 @@
 // port while tracking sockets so we can aggressively destroy them in tests.
 const http = require('http');
 
+// Safe, test-gated debug logger. Use this instead of repeating
+// "if (process.env.DEBUG_TESTS) console.warn && console.warn(...)" so
+// tests and CI capture consistent output and we avoid accidental
+// short-circuiting or undefined-console issues.
+function _debugWarn(...args) {
+  try {
+    if (!process.env.DEBUG_TESTS) return;
+    // Use console.warn where available; swallow any errors so tests
+    // don't fail because of logging.
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+      console.warn(...args);
+    }
+  } catch {
+    void 0;
+  }
+}
+
 // Module-level registries
 const _servers = new Set();
 const _sockets = new Set();
@@ -67,13 +84,7 @@ function _attachSocketTracking(server, sockets) {
     }
 
     try {
-      if (process.env.DEBUG_TESTS) {
-        try {
-          console.warn(new Error('socket-created-at').stack);
-        } catch {
-          void 0;
-        }
-      }
+      _debugWarn(new Error('socket-created-at').stack);
     } catch {
       void 0;
     }
@@ -135,7 +146,7 @@ function startTestServer(app) {
       const base = `http://127.0.0.1:${addr.port}`;
 
       try {
-        if (process.env.DEBUG_TESTS) console.warn && console.warn(`test-server listening ${base}`);
+        _debugWarn(`test-server listening ${base}`);
       } catch {
         void 0;
       }
@@ -149,10 +160,11 @@ function startTestServer(app) {
       const close = async () => {
         try {
           if (process.env.DEBUG_TESTS)
-            console.warn &&
-              console.warn(
-                `test-server close requested ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
-              );
+            _debugWarn(
+              `test-server close requested ${JSON.stringify(
+                server.address && server.address ? server.address() : 'addr-unknown'
+              )}`
+            );
         } catch {
           void 0;
         }
@@ -262,12 +274,7 @@ function startTestServer(app) {
         try {
           if (process.env.DEBUG_TESTS) {
             const handles = process._getActiveHandles && process._getActiveHandles();
-            try {
-              console.warn &&
-                console.warn(`test-server post-close activeHandles=${handles && handles.length}`);
-            } catch {
-              void 0;
-            }
+            _debugWarn(`test-server post-close activeHandles=${handles && handles.length}`);
           }
         } catch {
           void 0;
@@ -318,10 +325,11 @@ function startTestServer(app) {
 
         try {
           if (process.env.DEBUG_TESTS)
-            console.warn &&
-              console.warn(
-                `test-server close completed ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
-              );
+            _debugWarn(
+              `test-server close completed ${JSON.stringify(
+                server.address && server.address ? server.address() : 'addr-unknown'
+              )}`
+            );
         } catch {
           void 0;
         }
@@ -502,10 +510,11 @@ function startTestServer(app) {
       if (process.env.DEBUG_TESTS) {
         server.once('close', () => {
           try {
-            console.warn &&
-              console.warn(
-                `test-server received close event for ${JSON.stringify(server.address && server.address ? server.address() : 'addr-unknown')}`
-              );
+            _debugWarn(
+              `test-server received close event for ${JSON.stringify(
+                server.address && server.address ? server.address() : 'addr-unknown'
+              )}`
+            );
           } catch {
             void 0;
           }
