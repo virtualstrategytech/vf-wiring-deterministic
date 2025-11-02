@@ -6,6 +6,15 @@ const https = require('https');
 const net = require('net');
 const tls = require('tls');
 
+// In CI prefer isolating ephemeral servers in a child process to avoid
+// native-handle flakes on GitHub Actions/Ubuntu runners. Force-enable here
+// so test helpers that start servers pick up child-mode early.
+try {
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
+    process.env.USE_CHILD_PROCESS_SERVER = process.env.USE_CHILD_PROCESS_SERVER || '1';
+  }
+} catch {}
+
 // Test-only: best-effort patch to make AsyncResource a no-op wrapper so
 // modules that create AsyncResources during parsing (raw-body) don't leave
 // persistent native handles that show up as "bound-anonymous-fn" in
