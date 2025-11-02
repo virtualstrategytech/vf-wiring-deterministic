@@ -3,6 +3,17 @@ const fetch = require('node-fetch');
 const http = require('http');
 const https = require('https');
 // top-level agent removed; use per-request agents inside requestApp to avoid socket reuse
+// When running in CI (GitHub Actions) prefer child-process server isolation
+// to avoid CI-specific detectOpenHandles flakes caused by native handles.
+try {
+  if (
+    typeof process !== 'undefined' &&
+    !process.env.USE_CHILD_PROCESS_SERVER &&
+    (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true')
+  ) {
+    process.env.USE_CHILD_PROCESS_SERVER = '1';
+  }
+} catch {}
 async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
