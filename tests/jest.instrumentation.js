@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const tls = require('tls');
+const http2 = require('http2');
 
 // Defensive: ensure global agents don't keep sockets alive across tests.
 try {
@@ -16,6 +17,48 @@ try {
   if (https && https.globalAgent) {
     try {
       https.globalAgent.keepAlive = false;
+    } catch {}
+  }
+} catch {}
+
+// Instrument http2 APIs so ClientHttp2Session and http2.connect get a
+// creation stack attached. Many libraries use http2 under the hood and
+// sessions can create native handles that show up as lingering sockets.
+try {
+  if (http2) {
+    try {
+      const origConnect = http2.connect;
+      if (typeof origConnect === 'function') {
+        http2.connect = function connectWithStack(...args) {
+          const session = origConnect.apply(this, args);
+          try {
+            if (session && typeof session === 'object' && !session._createdStack) {
+              session._createdStack = new Error('http2-connect-created').stack;
+            }
+          } catch {}
+          return session;
+        };
+      }
+    } catch {}
+
+    try {
+      const CH = http2.ClientHttp2Session;
+      if (CH && CH.prototype && !CH.prototype.__stackPatched) {
+        const origCtor = CH.prototype.connect || function () {};
+        // best-effort: attach stack on instances when possible
+        const origEmit = CH.prototype.emit;
+        CH.prototype.emit = function (ev, ...args) {
+          try {
+            if (!this._createdStack) {
+              try {
+                this._createdStack = new Error('http2-client-session-instance-created').stack;
+              } catch {}
+            }
+          } catch {}
+          return origEmit.call(this, ev, ...args);
+        };
+        CH.prototype.__stackPatched = true;
+      }
     } catch {}
   }
 } catch {}

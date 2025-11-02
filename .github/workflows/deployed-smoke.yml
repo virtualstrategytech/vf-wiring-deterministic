@@ -174,6 +174,22 @@ jobs:
           # Run jest with a slightly larger test timeout to accommodate external slowness
           npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000
 
+      - name: Dump debug handles (when DEBUG_TESTS enabled)
+        if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+        run: |
+          echo 'DEBUG_TESTS enabled — writing async handle map and active handles to /tmp for artifact upload'
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
+
+      - name: Upload debug artifacts (only when DEBUG_TESTS)
+        if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-debug-handles
+          path: |
+            /tmp/async_handle_map.json
+            /tmp/active_handles.json
+
       - name: Upload smoke diagnostics (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
