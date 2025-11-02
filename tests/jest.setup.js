@@ -491,6 +491,19 @@ afterAll(async () => {
               const name = h && h.constructor && h.constructor.name;
               // drop WriteStream (console/stdout/stderr)
               if (String(name) === 'WriteStream') return false;
+              // drop sockets that are actually stdio fds (fd 0/1/2) which
+              // sometimes appear as Socket wrappers but are benign.
+              try {
+                if (
+                  (String(name) === 'Socket' || String(name) === 'TLSSocket') &&
+                  h &&
+                  h._handle &&
+                  typeof h._handle.fd === 'number' &&
+                  [0, 1, 2].includes(h._handle.fd)
+                ) {
+                  return false;
+                }
+              } catch {}
               // drop plain Function handles that look like bound anonymous
               // functions (their string representation often contains "bound").
               if (String(name) === 'Function') {
