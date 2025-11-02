@@ -159,6 +159,18 @@ jobs:
           export WEBHOOK_HEALTH_TIMEOUT=15000
           export WEBHOOK_PING_TIMEOUT=20000
           export WEBHOOK_GENERATE_TIMEOUT=120000
+          # If DEBUG_TESTS is enabled, preload our instrumentation as early as possible
+          # by forcing Node to require the instrumentation file at process startup.
+          # This helps capture socket creation stacks that may be created before
+          # Jest's setupFiles run.
+          if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
+            echo "DEBUG_TESTS is enabled; preloading jest.instrumentation.js via NODE_OPTIONS"
+            # Prepend to NODE_OPTIONS so existing options are preserved
+            export NODE_OPTIONS="--require ${PWD}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            echo "NODE_OPTIONS=${NODE_OPTIONS}"
+          else
+            echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
+          fi
           # Run jest with a slightly larger test timeout to accommodate external slowness
           npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000
 
