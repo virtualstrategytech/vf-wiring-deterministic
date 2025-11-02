@@ -99,6 +99,88 @@ try {
   }
 } catch {}
 
+// As an additional catch-all, patch the Socket and TLSSocket constructors
+// themselves so sockets created via `new net.Socket()` or `new tls.TLSSocket()`
+// also receive a creation stack. This helps capture sockets created very
+// early by libraries that bypass Agent APIs.
+try {
+  try {
+    if (net && typeof net.Socket === 'function' && !net.__SocketCtorPatched) {
+      const OrigSocket = net.Socket;
+      function SocketWithStack(...args) {
+        // construct instance without losing prototype
+        // use Reflect.construct when available to preserve built-ins behavior
+        let inst;
+        try {
+          inst = Reflect.construct(OrigSocket, args, SocketWithStack);
+        } catch (e) {
+          // fallback for older Node versions
+          inst = Object.create(OrigSocket.prototype);
+          OrigSocket.apply(inst, args);
+        }
+        try {
+          if (inst && typeof inst === 'object' && !inst._createdStack) {
+            inst._createdStack = new Error('net-socket-ctor-created').stack;
+          }
+        } catch {}
+        return inst;
+      }
+      try {
+        SocketWithStack.prototype = OrigSocket.prototype;
+        // copy static props
+        Object.getOwnPropertyNames(OrigSocket).forEach((k) => {
+          try {
+            if (!(k in SocketWithStack))
+              Object.defineProperty(
+                SocketWithStack,
+                k,
+                Object.getOwnPropertyDescriptor(OrigSocket, k)
+              );
+          } catch {}
+        });
+        net.Socket = SocketWithStack;
+        net.__SocketCtorPatched = true;
+      } catch {}
+    }
+  } catch {}
+
+  try {
+    if (tls && typeof tls.TLSSocket === 'function' && !tls.__TLSSocketCtorPatched) {
+      const OrigTLSSocket = tls.TLSSocket;
+      function TLSSocketWithStack(...args) {
+        let inst;
+        try {
+          inst = Reflect.construct(OrigTLSSocket, args, TLSSocketWithStack);
+        } catch (e) {
+          inst = Object.create(OrigTLSSocket.prototype);
+          OrigTLSSocket.apply(inst, args);
+        }
+        try {
+          if (inst && typeof inst === 'object' && !inst._createdStack) {
+            inst._createdStack = new Error('tls-tlssocket-ctor-created').stack;
+          }
+        } catch {}
+        return inst;
+      }
+      try {
+        TLSSocketWithStack.prototype = OrigTLSSocket.prototype;
+        Object.getOwnPropertyNames(OrigTLSSocket).forEach((k) => {
+          try {
+            if (!(k in TLSSocketWithStack))
+              Object.defineProperty(
+                TLSSocketWithStack,
+                k,
+                Object.getOwnPropertyDescriptor(OrigTLSSocket, k)
+              );
+          } catch {}
+        });
+        tls.TLSSocket = TLSSocketWithStack;
+        tls.__TLSSocketCtorPatched = true;
+      } catch {}
+    }
+  } catch {}
+} catch {}
+
 // Instrument tls.connect
 try {
   if (tls && typeof tls.connect === 'function') {

@@ -6,6 +6,14 @@ on:
       target:
         description: 'Target environment name (informational)'
         required: false
+      debug_tests:
+        description: 'Set to "true" to enable DEBUG_TESTS=1 for verbose handle diagnostics (manual only)'
+        required: false
+        default: 'false'
+      debug_tests_level:
+        description: 'DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true'
+        required: false
+        default: '3'
 
 # Explicit permissions reduce editor/schema warnings and limit token scope for the workflow
 permissions:
@@ -20,6 +28,10 @@ jobs:
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+      # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
+      # dispatch can enable verbose diagnostics without changing other workflows.
+      DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
+      DEBUG_TESTS_LEVEL: ${{ github.event.inputs.debug_tests_level || '' }}
     outputs:
       webhook_key_fingerprint: ${{ steps.set-fingerprint.outputs.fingerprint }}
     steps:
