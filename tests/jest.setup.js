@@ -534,9 +534,18 @@ afterAll(async () => {
                       localPort: h.localPort,
                       remoteAddress: h.remoteAddress,
                       remotePort: h.remotePort,
+                      remoteFamily: h.remoteFamily,
+                      localFamily: h.localFamily,
+                      connecting: h.connecting,
                       destroyed: h.destroyed,
                       pending: h.pending,
                     };
+                    try {
+                      // internal handle info (fd) may help map sockets to servers
+                      if (h._handle && typeof h._handle === 'object') {
+                        info._handle = { fd: h._handle.fd };
+                      }
+                    } catch {}
                     console.warn(`    socket-info: ${JSON.stringify(info)}`);
                   }
                 } catch {}
