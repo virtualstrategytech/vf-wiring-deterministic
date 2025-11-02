@@ -61,6 +61,16 @@ try {
   if (shouldPatch) __patchAsyncResourceNoop();
 } catch {}
 
+// When running on CI, increase diagnostic verbosity so we capture creation
+// stacks for active handles (helps map lingering sockets back to their
+// creators). This is temporary and useful for triage; we'll remove or
+// gate it when the root causes are fixed.
+try {
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
+    process.env.DEBUG_TESTS_LEVEL = process.env.DEBUG_TESTS_LEVEL || '3';
+  }
+} catch {}
+
 // Defensive: ensure global agents don't keep sockets alive across tests.
 // Some Node versions may still reuse sockets in the global agent; disabling
 // keepAlive reduces the chance of lingering TLSSocket handles that Jest
