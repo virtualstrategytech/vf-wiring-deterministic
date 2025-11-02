@@ -266,69 +266,70 @@ try {
   hook.enable();
 } catch {}
 
-// Test-only: monkeypatch fs.createReadStream (and ReadStream constructor) to
-// attach a creation stack to any file streams created during tests. This is
-// a diagnostic helper only enabled when DEBUG_TESTS is set so we can map
-// ReadStream instances in heap/handle dumps back to their creation site.
+// Monkeypatch fs.createReadStream (and ReadStream constructor) to attach a
+// creation stack to any file streams created during tests. This is a
+// best-effort diagnostic helper: it tries to tag ReadStream instances so
+// the teardown diagnostics can print a short createdStack-preview and help
+// map lingering file handles back to their creator. Keep the implementation
+// defensive so it won't throw or change normal runtime behavior if fs or
+// constructors are frozen.
 try {
-  if (process.env.DEBUG_TESTS) {
-    try {
-      const fs = require('fs');
-      if (fs) {
-        try {
-          const orig = fs.createReadStream;
-          if (typeof orig === 'function' && !fs.__createReadStreamPatched) {
-            fs.createReadStream = function createReadStreamWithStack(...args) {
-              const rs = orig.apply(this, args);
-              try {
-                if (rs && typeof rs === 'object' && !rs._createdStack) {
-                  rs._createdStack = new Error('fs.createReadStream-created').stack;
-                }
-              } catch {
-                void 0;
-              }
-              return rs;
-            };
-            fs.__createReadStreamPatched = true;
-          }
-        } catch {
-          void 0;
-        }
-
-        // Also try to wrap the ReadStream constructor for modules that call
-        // `new fs.ReadStream(...)` directly. Keep this best-effort and
-        // non-invasive: preserve prototype and most behavior.
-        try {
-          const OrigReadStream = fs.ReadStream;
-          if (OrigReadStream && !fs.__ReadStreamCtorPatched) {
-            function ReadStreamWithStack(path, options) {
-              // Use Reflect.construct to call the original constructor
-              const inst = Reflect.construct(OrigReadStream, [path, options], ReadStreamWithStack);
-              try {
-                if (inst && typeof inst === 'object' && !inst._createdStack) {
-                  inst._createdStack = new Error('fs.ReadStream-created').stack;
-                }
-              } catch {
-                void 0;
-              }
-              return inst;
-            }
-            // preserve prototype chain
-            ReadStreamWithStack.prototype = OrigReadStream.prototype;
+  try {
+    const fs = require('fs');
+    if (fs) {
+      try {
+        const orig = fs.createReadStream;
+        if (typeof orig === 'function' && !fs.__createReadStreamPatched) {
+          fs.createReadStream = function createReadStreamWithStack(...args) {
+            const rs = orig.apply(this, args);
             try {
-              fs.ReadStream = ReadStreamWithStack;
-              fs.__ReadStreamCtorPatched = true;
+              if (rs && typeof rs === 'object' && !rs._createdStack) {
+                rs._createdStack = new Error('fs.createReadStream-created').stack;
+              }
             } catch {
               void 0;
             }
-          }
-        } catch {
-          void 0;
+            return rs;
+          };
+          fs.__createReadStreamPatched = true;
         }
+      } catch {
+        void 0;
       }
-    } catch {
-      void 0;
+
+      // Also try to wrap the ReadStream constructor for modules that call
+      // `new fs.ReadStream(...)` directly. Keep this best-effort and
+      // non-invasive: preserve prototype and most behavior.
+      try {
+        const OrigReadStream = fs.ReadStream;
+        if (OrigReadStream && !fs.__ReadStreamCtorPatched) {
+          function ReadStreamWithStack(path, options) {
+            // Use Reflect.construct to call the original constructor
+            const inst = Reflect.construct(OrigReadStream, [path, options], ReadStreamWithStack);
+            try {
+              if (inst && typeof inst === 'object' && !inst._createdStack) {
+                inst._createdStack = new Error('fs.ReadStream-created').stack;
+              }
+            } catch {
+              void 0;
+            }
+            return inst;
+          }
+          // preserve prototype chain
+          ReadStreamWithStack.prototype = OrigReadStream.prototype;
+          try {
+            fs.ReadStream = ReadStreamWithStack;
+            fs.__ReadStreamCtorPatched = true;
+          } catch {
+            void 0;
+          }
+        }
+      } catch {
+        void 0;
+      }
     }
+  } catch {
+    // ignore if require('fs') fails for some reason
   }
 } catch {
   // ignore any failures in the diagnostic monkeypatch
