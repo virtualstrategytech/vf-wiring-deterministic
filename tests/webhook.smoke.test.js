@@ -32,6 +32,14 @@ try {
     `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
   );
 } catch {}
+try {
+  // also write the same short debug line to the CI artifact log helper (best-effort)
+  writeDebugLog &&
+    typeof writeDebugLog === 'function' &&
+    writeDebugLog(
+      `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
+    );
+} catch {}
 
 // If the user supplied a remote base but didn't provide an API key, fail fast
 // with a clear message so CI logs are actionable (instead of hitting "Invalid URL").
@@ -77,8 +85,12 @@ function writeDebugLog(line) {
     console.error(line);
   } catch {}
   try {
-    // best-effort: write to a temp file so CI artifact upload can collect it
-    fs.appendFileSync('/tmp/socket_debug.log', `${new Date().toISOString()} ${line}\n`);
+    // best-effort: write to a stable repo artifacts folder so CI/workers on Windows
+    // and Unix can find the trace reliably.
+    fs.appendFileSync(
+      path.join(process.cwd(), 'artifacts', 'socket_debug.log'),
+      `${new Date().toISOString()} ${line}\n`
+    );
   } catch {}
 }
 
@@ -104,6 +116,82 @@ describe('webhook smoke', () => {
         https.globalAgent.destroy();
       }
       await new Promise((r) => setImmediate(r));
+    } catch {}
+    // If DEBUG_TESTS is enabled, persist any async handle map and active handles
+    // produced by the test process into /tmp and the repo artifacts folder so
+    // the workflow can upload them for offline analysis.
+    try {
+      if (process.env.DEBUG_TESTS) {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const out = [];
+          try {
+            const m = global.__async_handle_map || new Map();
+            for (const [id, info] of m.entries()) {
+              out.push({
+                id,
+                type: info && info.type,
+                stack: String(info && info.stack).slice(0, 1000),
+              });
+            }
+          } catch {}
+          try {
+            const repoPath = path.join(process.cwd(), 'artifacts');
+            fs.mkdirSync(repoPath, { recursive: true });
+            const repoFile = path.join(repoPath, `async_handles_smoke_${Date.now()}.json`);
+            fs.writeFileSync(repoFile, JSON.stringify(out, null, 2));
+            try {
+              console.warn('wrote', repoFile);
+            } catch {}
+          } catch {}
+          try {
+            fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2));
+          } catch {}
+          // active handles
+          try {
+            const ah = (process._getActiveHandles && process._getActiveHandles()) || [];
+            const act = ah.map((h, i) => {
+              try {
+                const name = h && h.constructor && h.constructor.name;
+                const info = { idx: i, type: String(name) };
+                try {
+                  if (h && typeof h._createdStack === 'string')
+                    info._createdStack = h._createdStack;
+                } catch {}
+                try {
+                  if (String(name) === 'Socket' || String(name) === 'TLSSocket') {
+                    info.socket = {
+                      localAddress: h.localAddress,
+                      localPort: h.localPort,
+                      remoteAddress: h.remoteAddress,
+                      remotePort: h.remotePort,
+                      destroyed: h.destroyed,
+                    };
+                  }
+                } catch {}
+                return info;
+              } catch {
+                return { idx: i, type: 'error' };
+              }
+            });
+            try {
+              const repoPath = require('path').join(process.cwd(), 'artifacts');
+              const repoFile = require('path').join(
+                repoPath,
+                `active_handles_smoke_${Date.now()}.json`
+              );
+              try {
+                require('fs').mkdirSync(require('path').dirname(repoFile), { recursive: true });
+              } catch {}
+              require('fs').writeFileSync(repoFile, JSON.stringify(act, null, 2));
+            } catch {}
+            try {
+              require('fs').writeFileSync('/tmp/active_handles.json', JSON.stringify(act, null, 2));
+            } catch {}
+          } catch {}
+        } catch {}
+      }
     } catch {}
   });
 

@@ -9,6 +9,15 @@ const key =
 // Ensure the in-process server reads the same API key at module-load time
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || key;
 
+// In CI environments prefer child-process server isolation to avoid native
+// handle flakiness observed on some runners. This is conservative and only
+// changes behavior when running in CI/GitHub Actions.
+try {
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
+    process.env.USE_CHILD_PROCESS_SERVER = process.env.USE_CHILD_PROCESS_SERVER || '1';
+  }
+} catch {}
+
 const app = require('../novain-platform/webhook/server');
 // This test uses `requestApp` helper (supertest) so no TCP server is required.
 

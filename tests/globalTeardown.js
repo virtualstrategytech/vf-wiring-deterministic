@@ -14,6 +14,37 @@ module.exports = async () => {
 
   appendLog('globalTeardown: starting');
 
+  // Helper: force-destroy stray sockets (diagnostic only)
+  function forceDestroyRemainingSockets() {
+    // Run only for diagnostic runs to avoid surprising behavior in normal CI
+    if (!process.env.DEBUG_TESTS && !process.env.DUMP_ACTIVE_HANDLES) return;
+    try {
+      const handles = process._getActiveHandles ? process._getActiveHandles() : [];
+      handles.forEach((h, i) => {
+        try {
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'Socket') {
+            // Avoid destroying stdio WriteStreams
+            if (h.destroyed) return;
+            try {
+              const meta = {};
+              if (h.remoteAddress) meta.remoteAddress = h.remoteAddress;
+              if (h.remotePort) meta.remotePort = h.remotePort;
+              console.warn(`DEBUG_TESTS: force-destroying stray socket[${i}]`, meta);
+              h.destroy();
+            } catch (err) {
+              void err;
+            }
+          }
+        } catch (err) {
+          void err;
+        }
+      });
+    } catch (err) {
+      void err;
+    }
+  }
+
   // Best-effort: ask any test server helper to close sockets before killing
   try {
     const serverHelper = require('./helpers/server-helper');
@@ -33,97 +64,98 @@ module.exports = async () => {
   try {
     if (!fs.existsSync(pidFile)) {
       appendLog('globalTeardown: pid file not found; nothing to kill');
-      return;
-    }
-
-    let pid;
-    try {
-      pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
-    } catch (_e) {
-      appendLog(`globalTeardown: failed reading pid file: ${_e.message}`);
-    }
-
-    if (!pid || Number.isNaN(pid)) {
-      appendLog('globalTeardown: invalid pid; removing pid file if present');
+      // continue to do final sweeps
+    } else {
+      let pid;
       try {
-        fs.unlinkSync(pidFile);
-        appendLog('globalTeardown: pid file removed');
-      } catch {}
-      return;
-    }
-
-    appendLog(`globalTeardown: attempting graceful kill for pid ${pid}`);
-
-    // Try a graceful kill first
-    try {
-      process.kill(pid, 'SIGTERM');
-      appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
-    } catch (_e) {
-      appendLog(`globalTeardown: process.kill(SIGTERM) failed: ${_e.message}`);
-    }
-
-    // Wait up to N ms for process to exit
-    const waitMs = 5000;
-    const start = Date.now();
-    let alive = true;
-    while (Date.now() - start < waitMs) {
-      try {
-        process.kill(pid, 0); // throws if not running
-        // still alive
-        await new Promise((r) => setTimeout(r, 200));
-      } catch {
-        alive = false;
-        break;
+        pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      } catch (_e) {
+        appendLog(`globalTeardown: failed reading pid file: ${_e.message}`);
       }
-    }
 
-    if (alive) {
-      appendLog(`globalTeardown: process ${pid} still alive after ${waitMs}ms; forcing kill`);
-      try {
-        if (process.platform === 'win32') {
-          spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']);
-          appendLog(`globalTeardown: taskkill invoked for ${pid}`);
-        } else {
+      if (!pid || Number.isNaN(pid)) {
+        appendLog('globalTeardown: invalid pid; removing pid file if present');
+        try {
+          fs.unlinkSync(pidFile);
+          appendLog('globalTeardown: pid file removed');
+        } catch (rmErr) {
+          appendLog(`globalTeardown: failed removing pid file: ${rmErr && rmErr.message}`);
+        }
+      } else {
+        appendLog(`globalTeardown: attempting graceful kill for pid ${pid}`);
+
+        // Try a graceful kill first
+        try {
+          process.kill(pid, 'SIGTERM');
+          appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
+        } catch (_e) {
+          appendLog(`globalTeardown: process.kill(SIGTERM) failed: ${_e && _e.message}`);
+        }
+
+        // Wait up to N ms for process to exit
+        const waitMs = 5000;
+        const start = Date.now();
+        let alive = true;
+        while (Date.now() - start < waitMs) {
           try {
-            process.kill(pid, 'SIGKILL');
-            appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
-          } catch (_e) {
-            appendLog(`globalTeardown: SIGKILL failed: ${_e.message}; attempting pkill -P`);
-            spawnSync('pkill', ['-TERM', '-P', String(pid)]);
-            appendLog('globalTeardown: pkill invoked for child processes');
+            process.kill(pid, 0); // throws if not running
+            // still alive
+            await new Promise((r) => setTimeout(r, 200));
+          } catch {
+            alive = false;
+            break;
           }
         }
-      } catch (_e) {
-        appendLog(`globalTeardown: force kill attempt failed: ${_e.message}`);
-      }
 
-      // Final short wait
-      await new Promise((r) => setTimeout(r, 300));
-      try {
-        process.kill(pid, 0);
-        appendLog(`globalTeardown: process ${pid} still exists after forced kill`);
-      } catch {
-        appendLog(`globalTeardown: process ${pid} no longer exists`);
-      }
-    } else {
-      appendLog(`globalTeardown: process ${pid} exited gracefully`);
-    }
+        if (alive) {
+          appendLog(`globalTeardown: process ${pid} still alive after ${waitMs}ms; forcing kill`);
+          try {
+            if (process.platform === 'win32') {
+              spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']);
+              appendLog(`globalTeardown: taskkill invoked for ${pid}`);
+            } else {
+              try {
+                process.kill(pid, 'SIGKILL');
+                appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
+              } catch (_e) {
+                appendLog(
+                  `globalTeardown: SIGKILL failed: ${_e && _e.message}; attempting pkill -P`
+                );
+                spawnSync('pkill', ['-TERM', '-P', String(pid)]);
+                appendLog('globalTeardown: pkill invoked for child processes');
+              }
+            }
+          } catch (_e) {
+            appendLog(`globalTeardown: force kill attempt failed: ${_e && _e.message}`);
+          }
 
-    // Cleanup pid file
-    try {
-      if (fs.existsSync(pidFile)) {
-        fs.unlinkSync(pidFile);
-        appendLog('globalTeardown: pid file removed');
+          // Final short wait
+          await new Promise((r) => setTimeout(r, 300));
+          try {
+            process.kill(pid, 0);
+            appendLog(`globalTeardown: process ${pid} still exists after forced kill`);
+          } catch {
+            appendLog(`globalTeardown: process ${pid} no longer exists`);
+          }
+        } else {
+          appendLog(`globalTeardown: process ${pid} exited gracefully`);
+        }
+
+        // Cleanup pid file
+        try {
+          if (fs.existsSync(pidFile)) {
+            fs.unlinkSync(pidFile);
+            appendLog('globalTeardown: pid file removed');
+          }
+        } catch (_e) {
+          appendLog(`globalTeardown: failed to remove pid file: ${_e && _e.message}`);
+        }
       }
-    } catch (_e) {
-      appendLog(`globalTeardown: failed to remove pid file: ${_e.message}`);
     }
   } catch (_e) {
     appendLog(`globalTeardown: unexpected error: ${_e && _e.message}`);
   }
 
-  // Append final marker
-  appendLog('globalTeardown: finished');
   // Best-effort: destroy global http/https agents to avoid Jest open-handle warnings
   try {
     try {
@@ -163,10 +195,6 @@ module.exports = async () => {
   } catch {}
 
   // If requested, produce a diagnostic dump of Node active handles/requests.
-  // This is gated behind DEBUG_TESTS or DUMP_ACTIVE_HANDLES to avoid noisy logs
-  // during normal runs. The dump is best-effort and will include socket
-  // creation stacks (if available) and basic handle info to help identify the
-  // source of Jest "bound-anonymous-fn" reports.
   try {
     const shouldDump =
       process.env.DEBUG_TESTS === 'true' || process.env.DUMP_ACTIVE_HANDLES === 'true';
@@ -235,4 +263,14 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
   }
+
+  // Final aggressive sweep (diagnostic only)
+  try {
+    forceDestroyRemainingSockets();
+    appendLog('globalTeardown: forceDestroyRemainingSockets invoked');
+  } catch (e) {
+    appendLog(`globalTeardown: final force destroy error: ${e && e.message}`);
+  }
+
+  appendLog('globalTeardown: finished');
 };

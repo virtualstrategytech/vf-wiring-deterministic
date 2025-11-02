@@ -19,10 +19,10 @@ if (Test-Path $envFile) {
   Move-Item -Path $envFile -Destination $bk -Force
   Write-Output ".env found and moved to $bk"
 }
-if (-not (Test-Path $envFile)) {
+if (Test-Path -Path $envFile -PathType Any -ErrorAction SilentlyContinue -eq $false) {
   if (Test-Path $envExample) {
-  Copy-Item -Path $envExample -Destination $envFile -Force
-  Write-Output ".env created from .env.example - edit $envFile with real values before pushing"
+    Copy-Item -Path $envExample -Destination $envFile -Force
+    Write-Output ".env created from .env.example - edit $envFile with real values before pushing"
   } else {
     Write-Output "No .env.example present; create .env manually if needed."
   }
@@ -32,7 +32,7 @@ if (-not (Test-Path $envFile)) {
 $envMap = @{}
 Get-Content $envFile | ForEach-Object {
   $line = $_.Trim()
-  if ($line -and (-not $line.StartsWith('#'))) {
+  if ($line -and ($line.StartsWith('#') -eq $false)) {
     $parts = $line -split '=', 2
     if ($parts.Length -eq 2) {
       $k = $parts[0].Trim()
@@ -46,7 +46,7 @@ Get-Content $envFile | ForEach-Object {
 $port = if ($envMap.ContainsKey('PORT') -and $envMap['PORT']) { $envMap['PORT'] } else { '3000' }
 
 # 3) Install webhook deps if node_modules missing
-if (-not (Test-Path (Join-Path $webhookDir 'node_modules'))) {
+if ((Test-Path -Path (Join-Path $webhookDir 'node_modules') -PathType Any -ErrorAction SilentlyContinue) -eq $false) {
   Write-Output "Installing webhook dependencies in $webhookDir ..."
   Push-Location $webhookDir
   npm install
@@ -63,7 +63,7 @@ foreach ($k in $envMap.Keys) {
 }
 $envCmdsString = $envCmds -join '; '
 
-if (-not (Test-Path $serverFile)) {
+if ((Test-Path -Path $serverFile -PathType Any -ErrorAction SilentlyContinue) -eq $false) {
   Write-Error "Server file not found: $serverFile"
   exit 1
 }

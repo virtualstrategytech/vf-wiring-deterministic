@@ -2,7 +2,18 @@ const serverHelper = require('./server-helper');
 const fetch = require('node-fetch');
 const http = require('http');
 const https = require('https');
-
+// top-level agent removed; use per-request agents inside requestApp to avoid socket reuse
+// When running in CI (GitHub Actions) prefer child-process server isolation
+// to avoid CI-specific detectOpenHandles flakes caused by native handles.
+try {
+  if (
+    typeof process !== 'undefined' &&
+    !process.env.USE_CHILD_PROCESS_SERVER &&
+    (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true')
+  ) {
+    process.env.USE_CHILD_PROCESS_SERVER = '1';
+  }
+} catch {}
 async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
@@ -33,16 +44,20 @@ async function requestApp(
         : new http.Agent({ keepAlive: false });
     // Tag sockets created by this per-request agent with a creation stack so
     // diagnostics can map them back to the call site.
+    let _origCreate;
     try {
       if (agent && typeof agent.createConnection === 'function') {
-        const _origCreate = agent.createConnection.bind(agent);
+        _origCreate = agent.createConnection.bind(agent);
         agent.createConnection = function createPerRequestAgentConnection(options, callback) {
           const sock = _origCreate(options, callback);
           try {
             sock._createdStack = new Error('per-request-agent-created').stack;
           } catch {}
           try {
-            if (process.env.DEBUG_TESTS) {
+            // Per-request agent socket creation can be noisy. Print only when
+            // DEBUG_TESTS is enabled and the verbosity level is >=2.
+            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
+            if (process.env.DEBUG_TESTS && verbose) {
               try {
                 const preview =
                   (sock && sock._createdStack && sock._createdStack.split('\n').slice(0, 6)) || [];
@@ -52,7 +67,8 @@ async function requestApp(
             }
           } catch {}
           try {
-            if (process.env.DEBUG_TESTS) {
+            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
+            if (process.env.DEBUG_TESTS && verbose) {
               try {
                 // Print the creation stack immediately for reliable CI capture
                 console.warn(new Error('per-request-agent-created').stack);
@@ -98,7 +114,23 @@ async function requestApp(
         controller.abort && typeof controller.abort === 'function' && controller.abort();
       } catch {}
       try {
+        // restore original createConnection implementation if we monkeypatched it
+        try {
+          if (
+            typeof _origCreate !== 'undefined' &&
+            agent &&
+            typeof agent.createConnection === 'function'
+          ) {
+            agent.createConnection = _origCreate;
+          }
+        } catch {}
+      } catch {}
+      try {
         if (agent && typeof agent.destroy === 'function') agent.destroy();
+      } catch {}
+      try {
+        // yield to the event loop to allow agent/socket destruction to propagate
+        await new Promise((r) => setImmediate(r));
       } catch {}
     }
   }
@@ -125,6 +157,26 @@ async function requestApp(
         env: Object.assign({}, process.env),
       });
 
+      // Forward child stdout/stderr to the parent process console so tests
+      // that capture console output (captureConsoleAsync) also see logs
+      // emitted by the child server (e.g., llm payload diagnostics).
+      try {
+        if (child.stdout && typeof child.stdout.on === 'function') {
+          child.stdout.on('data', (b) => {
+            try {
+              console.log(String(b || '').trim());
+            } catch {}
+          });
+        }
+        if (child.stderr && typeof child.stderr.on === 'function') {
+          child.stderr.on('data', (b) => {
+            try {
+              console.error(String(b || '').trim());
+            } catch {}
+          });
+        }
+      } catch {}
+
       const portPromise = new Promise((resolve, reject) => {
         let timeoutId;
         const clearGuard = () => {
@@ -138,7 +190,7 @@ async function requestApp(
               clearGuard();
               resolve(m.port);
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         };
@@ -165,7 +217,7 @@ async function requestApp(
         timeoutId = setTimeout(() => {
           try {
             reject(new Error('child server start timeout'));
-          } catch (e) {}
+          } catch {}
         }, 5000);
       });
 
@@ -228,10 +280,38 @@ async function requestApp(
           if (agent && typeof agent.destroy === 'function') agent.destroy();
         } catch {}
         try {
+          // yield to the event loop to allow agent/socket destruction to propagate
+          await new Promise((r) => setImmediate(r));
+        } catch {}
+        try {
           await close();
         } catch {}
+        // Aggressive sweep after child server close to ensure no lingering sockets
+        try {
+          if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+            // allow a tick for any final close callbacks
+            try {
+              await new Promise((r) => setImmediate(r));
+            } catch {}
+            try {
+              serverHelper._forceCloseAllSockets();
+            } catch {
+              void 0;
+            }
+          }
+        } catch {
+          // intentionally ignore errors during aggressive child cleanup
+        }
       }
     }
+    // Ensure test-time AsyncResource shim is enabled while starting the
+    // in-process test server so modules that rely on async_hooks (like
+    // raw-body/body-parser) don't create native handles that Jest reports
+    // as open. We restore the previous value in the finally block below.
+    const _prevTestPatch = process.env.TEST_PATCH_RAW_BODY;
+    try {
+      process.env.TEST_PATCH_RAW_BODY = '1';
+    } catch {}
     const started = await serverHelper.startTestServer(app);
     // Normalize any trailing slash on the ephemeral server base as well.
     const base = (started.base || '').replace(/\/+$/, '');
@@ -243,9 +323,10 @@ async function requestApp(
     const agent = base.startsWith('https://')
       ? new https.Agent({ keepAlive: false })
       : new http.Agent({ keepAlive: false });
+    let _origCreate2;
     try {
       if (agent && typeof agent.createConnection === 'function') {
-        const _origCreate2 = agent.createConnection.bind(agent);
+        _origCreate2 = agent.createConnection.bind(agent);
         agent.createConnection = function createPerRequestAgentConnection2(options, callback) {
           const sock = _origCreate2(options, callback);
           try {
@@ -304,10 +385,26 @@ async function requestApp(
     } finally {
       clearTimeout(to);
       try {
+        // restore original createConnection implementation if we monkeypatched it
+        try {
+          if (
+            typeof _origCreate2 !== 'undefined' &&
+            agent &&
+            typeof agent.createConnection === 'function'
+          ) {
+            agent.createConnection = _origCreate2;
+          }
+        } catch {}
+      } catch {}
+      try {
         // destroy per-request agent first to prevent connection reuse/pooling
         // from keeping sockets alive while we close the server.
         try {
           if (agent && typeof agent.destroy === 'function') agent.destroy();
+        } catch {}
+        try {
+          // yield to the event loop to allow agent/socket destruction to propagate
+          await new Promise((r) => setImmediate(r));
         } catch {}
       } catch {}
       try {
@@ -323,6 +420,12 @@ async function requestApp(
           await new Promise((r) => setImmediate(r));
           serverHelper._forceCloseAllSockets();
         }
+      } catch {}
+      // Restore TEST_PATCH_RAW_BODY to its previous state so other tests
+      // are unaffected by this temporary change.
+      try {
+        if (typeof _prevTestPatch === 'undefined') delete process.env.TEST_PATCH_RAW_BODY;
+        else process.env.TEST_PATCH_RAW_BODY = _prevTestPatch;
       } catch {}
     }
   }

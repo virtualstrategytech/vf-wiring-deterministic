@@ -2,6 +2,14 @@
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 
+// In CI environments prefer child-process server isolation to avoid native
+// handle flakiness observed on some runners. Enable only when running on CI.
+try {
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
+    process.env.USE_CHILD_PROCESS_SERVER = process.env.USE_CHILD_PROCESS_SERVER || '1';
+  }
+} catch {}
+
 const app = require('../novain-platform/webhook/server');
 
 describe('regression: raw/data.raw mirror', () => {

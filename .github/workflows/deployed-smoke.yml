@@ -6,15 +6,32 @@ on:
       target:
         description: 'Target environment name (informational)'
         required: false
+      debug_tests:
+        description: 'Set to "true" to enable DEBUG_TESTS=1 for verbose handle diagnostics (manual only)'
+        required: false
+        default: 'false'
+      debug_tests_level:
+        description: 'DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true'
+        required: false
+        default: '3'
+
+# Explicit permissions reduce editor/schema warnings and limit token scope for the workflow
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: '${{ secrets.WEBHOOK_API_KEY }}'
-      WEBHOOK_BASE: '${{ secrets.WEBHOOK_BASE }}'
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+      # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
+      # dispatch can enable verbose diagnostics without changing other workflows.
+      DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
+      DEBUG_TESTS_LEVEL: ${{ github.event.inputs.debug_tests_level || '' }}
     outputs:
       webhook_key_fingerprint: ${{ steps.set-fingerprint.outputs.fingerprint }}
     steps:
@@ -142,8 +159,41 @@ jobs:
           export WEBHOOK_HEALTH_TIMEOUT=15000
           export WEBHOOK_PING_TIMEOUT=20000
           export WEBHOOK_GENERATE_TIMEOUT=120000
+          # If DEBUG_TESTS is enabled, preload our instrumentation as early as possible
+          # by forcing Node to require the instrumentation file at process startup.
+          # This helps capture socket creation stacks that may be created before
+          # Jest's setupFiles run.
+          if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
+            echo "DEBUG_TESTS is enabled; preloading jest.instrumentation.js via NODE_OPTIONS"
+            # Prepend to NODE_OPTIONS so existing options are preserved
+            export NODE_OPTIONS="--require ${PWD}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            echo "NODE_OPTIONS=${NODE_OPTIONS}"
+          else
+            echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
+          fi
           # Run jest with a slightly larger test timeout to accommodate external slowness
           npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000
+
+      - name: Dump debug handles (when DEBUG_TESTS enabled)
+        if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+        run: |
+          echo 'DEBUG_TESTS enabled — writing async handle map and active handles to /tmp for artifact upload'
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
+
+      - name: Upload debug artifacts (only when DEBUG_TESTS)
+        if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-debug-handles
+          path: |
+            # Primary: any debug dumps produced in /tmp by the job
+            /tmp/async_handle_map.json
+            /tmp/active_handles.json
+            # Also upload any async handle maps written by the test process
+            # into the repository workspace (jest.setup.js writes into ./artifacts/)
+            artifacts/async_handles_*.json
+            artifacts/active_handles_*.json
 
       - name: Upload smoke diagnostics (on failure)
         if: failure()
@@ -156,6 +206,8 @@ jobs:
             /tmp/health_body.txt
             /tmp/health_err
             /tmp/socket_debug.log
+            # Also upload any socket_debug written into the repository artifacts folder
+            artifacts/socket_debug.log
             scripts/check-locks.js
       - name: Confirm webhook envs (non-secret)
         run: |

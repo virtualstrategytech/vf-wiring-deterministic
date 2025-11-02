@@ -1,0 +1,539 @@
+smoke	Set up job	﻿2025-10-27T22:40:50.4161835Z Current runner version: '2.328.0'
+smoke	Set up job	2025-10-27T22:40:50.4195162Z ##[group]Runner Image Provisioner
+smoke	Set up job	2025-10-27T22:40:50.4196367Z Hosted Compute Agent
+smoke	Set up job	2025-10-27T22:40:50.4197667Z Version: 20250912.392
+smoke	Set up job	2025-10-27T22:40:50.4198696Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+smoke	Set up job	2025-10-27T22:40:50.4199815Z Build Date: 2025-09-12T15:23:14Z
+smoke	Set up job	2025-10-27T22:40:50.4200858Z ##[endgroup]
+smoke	Set up job	2025-10-27T22:40:50.4201734Z ##[group]Operating System
+smoke	Set up job	2025-10-27T22:40:50.4202671Z Ubuntu
+smoke	Set up job	2025-10-27T22:40:50.4203438Z 24.04.3
+smoke	Set up job	2025-10-27T22:40:50.4204160Z LTS
+smoke	Set up job	2025-10-27T22:40:50.4205010Z ##[endgroup]
+smoke	Set up job	2025-10-27T22:40:50.4205850Z ##[group]Runner Image
+smoke	Set up job	2025-10-27T22:40:50.4206920Z Image: ubuntu-24.04
+smoke	Set up job	2025-10-27T22:40:50.4207913Z Version: 20250929.60.1
+smoke	Set up job	2025-10-27T22:40:50.4209624Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250929.60/images/ubuntu/Ubuntu2404-Readme.md
+smoke	Set up job	2025-10-27T22:40:50.4211993Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250929.60
+smoke	Set up job	2025-10-27T22:40:50.4213988Z ##[endgroup]
+smoke	Set up job	2025-10-27T22:40:50.4215889Z ##[group]GITHUB_TOKEN Permissions
+smoke	Set up job	2025-10-27T22:40:50.4218623Z Contents: read
+smoke	Set up job	2025-10-27T22:40:50.4219669Z Metadata: read
+smoke	Set up job	2025-10-27T22:40:50.4220510Z Packages: read
+smoke	Set up job	2025-10-27T22:40:50.4221355Z ##[endgroup]
+smoke	Set up job	2025-10-27T22:40:50.4224259Z Secret source: Actions
+smoke	Set up job	2025-10-27T22:40:50.4225394Z Prepare workflow directory
+smoke	Set up job	2025-10-27T22:40:50.4945566Z Prepare all required actions
+smoke	Set up job	2025-10-27T22:40:50.5001747Z Getting action download info
+smoke	Set up job	2025-10-27T22:40:50.7647941Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+smoke	Set up job	2025-10-27T22:40:50.8458801Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+smoke	Set up job	2025-10-27T22:40:50.9775229Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+smoke	Set up job	2025-10-27T22:40:51.1566359Z Complete job name: smoke
+smoke	Checkout	﻿2025-10-27T22:40:51.2200851Z ##[group]Run actions/checkout@v4
+smoke	Checkout	2025-10-27T22:40:51.2201706Z with:
+smoke	Checkout	2025-10-27T22:40:51.2202232Z   repository: virtualstrategytech/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.2203007Z   token: ***
+smoke	Checkout	2025-10-27T22:40:51.2203395Z   ssh-strict: true
+smoke	Checkout	2025-10-27T22:40:51.2203779Z   ssh-user: git
+smoke	Checkout	2025-10-27T22:40:51.2204184Z   persist-credentials: true
+smoke	Checkout	2025-10-27T22:40:51.2204626Z   clean: true
+smoke	Checkout	2025-10-27T22:40:51.2205023Z   sparse-checkout-cone-mode: true
+smoke	Checkout	2025-10-27T22:40:51.2205496Z   fetch-depth: 1
+smoke	Checkout	2025-10-27T22:40:51.2205877Z   fetch-tags: false
+smoke	Checkout	2025-10-27T22:40:51.2206266Z   show-progress: true
+smoke	Checkout	2025-10-27T22:40:51.2206949Z   lfs: false
+smoke	Checkout	2025-10-27T22:40:51.2207318Z   submodules: false
+smoke	Checkout	2025-10-27T22:40:51.2207716Z   set-safe-directory: true
+smoke	Checkout	2025-10-27T22:40:51.2208406Z env:
+smoke	Checkout	2025-10-27T22:40:51.2208960Z   WEBHOOK_API_KEY: ***
+smoke	Checkout	2025-10-27T22:40:51.2209507Z   WEBHOOK_BASE: ***
+smoke	Checkout	2025-10-27T22:40:51.2209918Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Checkout	2025-10-27T22:40:51.2210360Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.3268928Z Syncing repository: virtualstrategytech/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.3270930Z ##[group]Getting Git version info
+smoke	Checkout	2025-10-27T22:40:51.3271791Z Working directory is '/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic'
+smoke	Checkout	2025-10-27T22:40:51.3272872Z [command]/usr/bin/git version
+smoke	Checkout	2025-10-27T22:40:51.3310706Z git version 2.51.0
+smoke	Checkout	2025-10-27T22:40:51.3338583Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.3354356Z Temporarily overriding HOME='/home/runner/work/_temp/ce8b9d75-8afc-43d7-8a37-6382778a9ac6' before making global git config changes
+smoke	Checkout	2025-10-27T22:40:51.3356781Z Adding repository directory to the temporary git global config as a safe directory
+smoke	Checkout	2025-10-27T22:40:51.3374176Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.3411433Z Deleting the contents of '/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic'
+smoke	Checkout	2025-10-27T22:40:51.3415457Z ##[group]Initializing the repository
+smoke	Checkout	2025-10-27T22:40:51.3420110Z [command]/usr/bin/git init /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.3511540Z hint: Using 'master' as the name for the initial branch. This default branch name
+smoke	Checkout	2025-10-27T22:40:51.3513335Z hint: is subject to change. To configure the initial branch name to use in all
+smoke	Checkout	2025-10-27T22:40:51.3516002Z hint: of your new repositories, which will suppress this warning, call:
+smoke	Checkout	2025-10-27T22:40:51.3517270Z hint:
+smoke	Checkout	2025-10-27T22:40:51.3518015Z hint: 	git config --global init.defaultBranch <name>
+smoke	Checkout	2025-10-27T22:40:51.3518925Z hint:
+smoke	Checkout	2025-10-27T22:40:51.3519797Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+smoke	Checkout	2025-10-27T22:40:51.3521233Z hint: 'development'. The just-created branch can be renamed via this command:
+smoke	Checkout	2025-10-27T22:40:51.3522371Z hint:
+smoke	Checkout	2025-10-27T22:40:51.3522967Z hint: 	git branch -m <name>
+smoke	Checkout	2025-10-27T22:40:51.3523668Z hint:
+smoke	Checkout	2025-10-27T22:40:51.3524711Z hint: Disable this message with "git config set advice.defaultBranchName false"
+smoke	Checkout	2025-10-27T22:40:51.3526771Z Initialized empty Git repository in /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/.git/
+smoke	Checkout	2025-10-27T22:40:51.3529844Z [command]/usr/bin/git remote add origin https://github.com/virtualstrategytech/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.3566296Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.3567671Z ##[group]Disabling automatic garbage collection
+smoke	Checkout	2025-10-27T22:40:51.3569318Z [command]/usr/bin/git config --local gc.auto 0
+smoke	Checkout	2025-10-27T22:40:51.3601334Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.3602034Z ##[group]Setting up auth
+smoke	Checkout	2025-10-27T22:40:51.3609718Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+smoke	Checkout	2025-10-27T22:40:51.3649633Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+smoke	Checkout	2025-10-27T22:40:51.3930022Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+smoke	Checkout	2025-10-27T22:40:51.3963329Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+smoke	Checkout	2025-10-27T22:40:51.4210744Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+smoke	Checkout	2025-10-27T22:40:51.4264347Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.4265634Z ##[group]Fetching the repository
+smoke	Checkout	2025-10-27T22:40:51.4277445Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +7fda1be26116bfa6ebc94f637a137bc2e8a9a692:refs/remotes/origin/feat/wiring-agent
+smoke	Checkout	2025-10-27T22:40:51.6659860Z From https://github.com/virtualstrategytech/vf-wiring-deterministic
+smoke	Checkout	2025-10-27T22:40:51.6687955Z  * [new ref]         7fda1be26116bfa6ebc94f637a137bc2e8a9a692 -> origin/feat/wiring-agent
+smoke	Checkout	2025-10-27T22:40:51.6690518Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.6691320Z ##[group]Determining the checkout info
+smoke	Checkout	2025-10-27T22:40:51.6692636Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.6697149Z [command]/usr/bin/git sparse-checkout disable
+smoke	Checkout	2025-10-27T22:40:51.6734384Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+smoke	Checkout	2025-10-27T22:40:51.6761901Z ##[group]Checking out the ref
+smoke	Checkout	2025-10-27T22:40:51.6765586Z [command]/usr/bin/git checkout --progress --force -B feat/wiring-agent refs/remotes/origin/feat/wiring-agent
+smoke	Checkout	2025-10-27T22:40:51.6921639Z Switched to a new branch 'feat/wiring-agent'
+smoke	Checkout	2025-10-27T22:40:51.6924337Z branch 'feat/wiring-agent' set up to track 'origin/feat/wiring-agent'.
+smoke	Checkout	2025-10-27T22:40:51.6930445Z ##[endgroup]
+smoke	Checkout	2025-10-27T22:40:51.6965721Z [command]/usr/bin/git log -1 --format=%H
+smoke	Checkout	2025-10-27T22:40:51.6988823Z 7fda1be26116bfa6ebc94f637a137bc2e8a9a692
+smoke	Setup Node	﻿2025-10-27T22:40:51.7211069Z ##[group]Run actions/setup-node@v4
+smoke	Setup Node	2025-10-27T22:40:51.7211692Z with:
+smoke	Setup Node	2025-10-27T22:40:51.7212106Z   node-version: 18
+smoke	Setup Node	2025-10-27T22:40:51.7212544Z   always-auth: false
+smoke	Setup Node	2025-10-27T22:40:51.7212955Z   check-latest: false
+smoke	Setup Node	2025-10-27T22:40:51.7213492Z   token: ***
+smoke	Setup Node	2025-10-27T22:40:51.7213849Z env:
+smoke	Setup Node	2025-10-27T22:40:51.7214552Z   WEBHOOK_API_KEY: ***
+smoke	Setup Node	2025-10-27T22:40:51.7215102Z   WEBHOOK_BASE: ***
+smoke	Setup Node	2025-10-27T22:40:51.7215501Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Setup Node	2025-10-27T22:40:51.7215947Z ##[endgroup]
+smoke	Setup Node	2025-10-27T22:40:51.9172836Z Found in cache @ /opt/hostedtoolcache/node/18.20.8/x64
+smoke	Setup Node	2025-10-27T22:40:51.9180316Z ##[group]Environment details
+smoke	Setup Node	2025-10-27T22:40:54.0974111Z node: v18.20.8
+smoke	Setup Node	2025-10-27T22:40:54.0974866Z npm: 10.8.2
+smoke	Setup Node	2025-10-27T22:40:54.0975276Z yarn: 1.22.22
+smoke	Setup Node	2025-10-27T22:40:54.0976398Z ##[endgroup]
+smoke	Validate workflow inputs and secrets	﻿2025-10-27T22:40:54.1078665Z ##[group]Run echo "Validating inputs..."
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1079125Z [36;1mecho "Validating inputs..."[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1079639Z [36;1mif [ -z "$WEBHOOK_BASE" ]; then[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1080017Z [36;1m  echo "ERROR: WEBHOOK_BASE secret is empty." >&2[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1080352Z [36;1m  exit 1[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1080582Z [36;1mfi[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1080834Z [36;1mif [ -z "$WEBHOOK_API_KEY" ]; then[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1081197Z [36;1m  echo "ERROR: WEBHOOK_API_KEY secret is empty." >&2[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1081555Z [36;1m  exit 1[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1081787Z [36;1mfi[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1082030Z [36;1mecho "WEBHOOK_BASE is set to: $WEBHOOK_BASE"[0m
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1124480Z shell: /usr/bin/bash -e {0}
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1124808Z env:
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1125347Z   WEBHOOK_API_KEY: ***
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1125726Z   WEBHOOK_BASE: ***
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1125963Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1126206Z ##[endgroup]
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1205664Z Validating inputs...
+smoke	Validate workflow inputs and secrets	2025-10-27T22:40:54.1206423Z WEBHOOK_BASE is set to: ***
+smoke	Normalize WEBHOOK_BASE	﻿2025-10-27T22:40:54.1294552Z ##[group]Run # Remove any trailing slash(es) from WEBHOOK_BASE so joining paths
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1295202Z [36;1m# Remove any trailing slash(es) from WEBHOOK_BASE so joining paths[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1295719Z [36;1m# like "$WEBHOOK_BASE/health" won't produce double-slashes ("//health").[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1296224Z [36;1m# Persist normalized value to subsequent steps using $GITHUB_ENV.[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1296806Z [36;1mNORMALIZED=${WEBHOOK_BASE%/}[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1297172Z [36;1mecho "WEBHOOK_BASE=${NORMALIZED}" >> $GITHUB_ENV[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1297540Z [36;1mecho "Normalized WEBHOOK_BASE=${NORMALIZED}"[0m
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1328954Z shell: /usr/bin/bash -e {0}
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1329241Z env:
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1329620Z   WEBHOOK_API_KEY: ***
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1330020Z   WEBHOOK_BASE: ***
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1330255Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1330503Z ##[endgroup]
+smoke	Normalize WEBHOOK_BASE	2025-10-27T22:40:54.1385331Z Normalized WEBHOOK_BASE=https://vf-webhook-staging.onrender.com
+smoke	Quick readiness check (poll /ready then /health)	﻿2025-10-27T22:40:54.1413481Z ##[group]Run # Normalize base here to avoid accidental double-slashes when joining paths
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1414148Z [36;1m# Normalize base here to avoid accidental double-slashes when joining paths[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1414567Z [36;1mBASE=${WEBHOOK_BASE%/}[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1414958Z [36;1mecho "Checking service readiness at $BASE/ready (fallback to /health)"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1415360Z [36;1mattempts=0[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1415579Z [36;1mmax=18[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1415800Z [36;1mhttp_status=0[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1416211Z [36;1m# First try /ready (fast false/200 semantics); if that never becomes 200, fall back to /health[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1416886Z [36;1muntil [ $attempts -ge $max ][0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1417171Z [36;1mdo[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1417401Z [36;1m  attempts=$((attempts+1))[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1417725Z [36;1m  echo "Attempt $attempts/$max to /ready..."[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1418319Z [36;1m  http_status=$(curl --silent --show-error --max-time 8 -w '%{http_code}' -o /tmp/ready_body.txt "$BASE/ready" 2>/tmp/ready_err || true)[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1418924Z [36;1m  echo "ready HTTP status: $http_status"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1419240Z [36;1m  if [ "$http_status" = "200" ]; then[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1419534Z [36;1m    echo "/ready OK"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1419812Z [36;1m    cat /tmp/ready_body.txt || true[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1420280Z [36;1m    break[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1420497Z [36;1m  fi[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1420797Z [36;1m  # small delay and try again; allow more time before falling back[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1421164Z [36;1m  sleep 2[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1421374Z [36;1mdone[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1421607Z [36;1mif [ "$http_status" != "200" ]; then[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1422008Z [36;1m  echo "/ready did not return 200 within retries, falling back to /health" >&2[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1422395Z [36;1m  attempts=0[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1422618Z [36;1m  max=12[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1422835Z [36;1m  http_status=0[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1423098Z [36;1m  until [ $attempts -ge $max ][0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1423426Z [36;1m  do[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1423647Z [36;1m    attempts=$((attempts+1))[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1423967Z [36;1m    echo "Attempt $attempts/$max to /health..."[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1424612Z [36;1m    http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$BASE/health" 2>/tmp/health_err || true)[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1425219Z [36;1m    echo "health HTTP status: $http_status"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1425538Z [36;1m    if [ "$http_status" = "200" ]; then[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1425835Z [36;1m      echo "Health OK"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1426115Z [36;1m      cat /tmp/health_body.txt || true[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1426413Z [36;1m      break[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1426803Z [36;1m    fi[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1427049Z [36;1m    echo "Body/Error (health):"[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1427351Z [36;1m    cat /tmp/health_body.txt || true[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1427653Z [36;1m    cat /tmp/health_err || true[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1427919Z [36;1m    sleep 5[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1428136Z [36;1m  done[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1428334Z [36;1mfi[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1428557Z [36;1mif [ "$http_status" != "200" ]; then[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1428974Z [36;1m  echo "Readiness/Health check failed after retries (status $http_status)" >&2[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1429391Z [36;1m  exit 1[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1429596Z [36;1mfi[0m
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1460319Z shell: /usr/bin/bash -e {0}
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1460604Z env:
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1460976Z   WEBHOOK_API_KEY: ***
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1461306Z   WEBHOOK_BASE: https://vf-webhook-staging.onrender.com
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1461676Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1461926Z ##[endgroup]
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1514921Z Checking service readiness at ***ready (fallback to /health)
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.1515755Z Attempt 1/18 to /ready...
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.3055980Z ready HTTP status: 200
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.3057246Z /ready OK
+smoke	Quick readiness check (poll /ready then /health)	2025-10-27T22:40:54.3070150Z {"ok":true}
+smoke	Install dependencies (root + webhook)	﻿2025-10-27T22:40:54.3099516Z ##[group]Run echo "Installing repository root dependencies (for Jest and CI tools)"
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3100141Z [36;1mecho "Installing repository root dependencies (for Jest and CI tools)"[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3100630Z [36;1m# Run quick lockfile diagnostic to catch mismatches early[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3101024Z [36;1mnode scripts/check-locks.js || true[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3101310Z [36;1mnpm ci[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3101675Z [36;1mecho "Installing webhook subpackage dependencies (novain-platform/webhook)"[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3102126Z [36;1mcd novain-platform/webhook && npm ci[0m
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3135019Z shell: /usr/bin/bash -e {0}
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3135296Z env:
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3135757Z   WEBHOOK_API_KEY: ***
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3136078Z   WEBHOOK_BASE: https://vf-webhook-staging.onrender.com
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3136447Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3137001Z ##[endgroup]
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3189549Z Installing repository root dependencies (for Jest and CI tools)
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3537266Z Detected potential mismatches:
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3539861Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3540561Z Directory: /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3541771Z   - @typescript-eslint/eslint-plugin: package.json=^8.18.0  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3542844Z   - @typescript-eslint/parser: package.json=^8.18.0  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3543424Z   - axios: package.json=^1.12.2  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3544117Z   - eslint: package.json=^8.57.1  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3544916Z   - eslint-plugin-jsx-a11y: package.json=^6.7.1  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3545531Z   - eslint-plugin-react: package.json=^7.32.2  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3546118Z   - eslint-plugin-react-hooks: package.json=^4.6.0  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3547009Z   - husky: package.json=^8.0.3  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3547546Z   - jest: package.json=^27.5.1  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3548268Z   - lint-staged: package.json=^13.3.0  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3549060Z   - supertest: package.json=7.1.4  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3549840Z   - typescript: package.json=5.9.3  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3550377Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3551236Z Directory: /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/novain-platform/webhook
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:54.3551951Z   - eslint: package.json=^9.37.0  lock=<missing>
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:58.1066162Z npm warn deprecated w3c-hr-time@1.0.2: Use your platform's native performance.now() and performance.timeOrigin.
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:58.3914464Z npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:59.0386446Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:59.2008290Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:59.4671899Z npm warn deprecated domexception@2.0.1: Use your platform's native DOMException instead
+smoke	Install dependencies (root + webhook)	2025-10-27T22:40:59.8079468Z npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:00.0319947Z npm warn deprecated @humanwhocodes/object-schema@2.0.3: Use @eslint/object-schema instead
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:00.0736919Z npm warn deprecated @humanwhocodes/config-array@0.13.0: Use @eslint/config-array instead
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.2930096Z npm warn deprecated eslint@8.57.1: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.8471465Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.8473750Z > vf-wiring-deterministic@1.0.0 prepare
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.8474354Z > husky install
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.8474596Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.8944701Z husky - Git hooks installed
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9103468Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9104285Z added 645 packages, and audited 646 packages in 7s
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9105406Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9105871Z 171 packages are looking for funding
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9107034Z   run `npm fund` for details
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9120521Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9121573Z found 0 vulnerabilities
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:01.9413890Z Installing webhook subpackage dependencies (novain-platform/webhook)
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2760866Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2761578Z added 174 packages, and audited 175 packages in 1s
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2762238Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2762561Z 36 packages are looking for funding
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2763085Z   run `npm fund` for details
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2771950Z 
+smoke	Install dependencies (root + webhook)	2025-10-27T22:41:03.2772576Z found 0 vulnerabilities
+smoke	Compute fingerprint and export to outputs	﻿2025-10-27T22:41:03.2926184Z ##[group]Run node -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2928821Z [36;1mnode -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt[0m
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2930305Z [36;1mecho "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> $GITHUB_OUTPUT[0m
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2976764Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2977309Z env:
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2977839Z   WEBHOOK_API_KEY: ***
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2978285Z   WEBHOOK_BASE: https://vf-webhook-staging.onrender.com
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2978799Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Compute fingerprint and export to outputs	2025-10-27T22:41:03.2979171Z ##[endgroup]
+smoke	Run deployed smoke tests	﻿2025-10-27T22:41:03.3470698Z ##[group]Run # use a normalized base here as well
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3471174Z [36;1m# use a normalized base here as well[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3471445Z [36;1mBASE=${WEBHOOK_BASE%/}[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3471715Z [36;1mecho "Running smoke tests against $BASE"[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3472121Z [36;1m# Run a short, verbose curl trace to capture immediate network issues before Jest[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3472584Z [36;1m# Save traces to files so we can upload them on failure for debugging[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3472976Z [36;1mecho "Resolving target host for $BASE"[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3473543Z [36;1mHOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3473872Z [36;1mecho "Host: $HOST"[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3474142Z [36;1mnslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3474485Z [36;1mping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3474852Z [36;1mecho "Collecting quick curl traces..."[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3475431Z [36;1mcurl --silent --show-error --max-time 30 -v "$BASE/health" > /tmp/health_trace.txt 2>&1 || true[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3476031Z [36;1mprintf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3477071Z [36;1mcurl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3477712Z [36;1m[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3477984Z [36;1m# Export per-request timeouts for the smoke test runner (millis)[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3478382Z [36;1mexport WEBHOOK_HEALTH_TIMEOUT=15000[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3478656Z [36;1mexport WEBHOOK_PING_TIMEOUT=20000[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3479046Z [36;1mexport WEBHOOK_GENERATE_TIMEOUT=120000[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3479433Z [36;1m# Run jest with a slightly larger test timeout to accommodate external slowness[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3479974Z [36;1mnpx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3515282Z shell: /usr/bin/bash -e {0}
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3515515Z env:
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3515924Z   WEBHOOK_API_KEY: ***
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3516379Z   WEBHOOK_BASE: https://vf-webhook-staging.onrender.com
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3516830Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3517050Z   SKIP_SYNC_SECRET: true
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3517287Z ##[endgroup]
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3574790Z Running smoke tests against https://vf-webhook-staging.onrender.com
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3575855Z Resolving target host for https://vf-webhook-staging.onrender.com
+smoke	Run deployed smoke tests	2025-10-27T22:41:03.3601891Z Host: vf-webhook-staging.onrender.com
+smoke	Run deployed smoke tests	2025-10-27T22:41:13.5734076Z Collecting quick curl traces...
+smoke	Run deployed smoke tests	2025-10-27T22:41:14.8179822Z globalSetup skipped in CI / SKIP_SYNC_SECRET=true
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7567653Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7568481Z     CI diagnostic: active handles after test cleanup (non-WriteStream): 3
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7569220Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7569895Z     [0m [90m 88 |[39m             [36mreturn[39m[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7570609Z      [90m 89 |[39m           }
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7571395Z     [31m[1m>[22m[39m[90m 90 |[39m           console[33m.[39mwarn(
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7572262Z      [90m    |[39m                   [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7573560Z      [90m 91 |[39m             [32m'CI diagnostic: active handles after test cleanup (non-WriteStream):'[39m[33m,[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7574688Z      [90m 92 |[39m             meaningful[33m.[39mlength
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7575932Z      [90m 93 |[39m           )[33m;[39m[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7576289Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7576537Z       at tests/jest.setup.js:90:19
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7577103Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7629075Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7629840Z       handle[0] type=Socket
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7630340Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7630815Z     [0m [90m  96 |[39m               [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7632493Z      [90m  97 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7634005Z     [31m[1m>[22m[39m[90m  98 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7634950Z      [90m     |[39m                         [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7635611Z      [90m  99 |[39m                 [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7636912Z      [90m 100 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7638084Z      [90m 101 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7638554Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7638785Z       at forEach (tests/jest.setup.js:98:25)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7639305Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7639804Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7640083Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7666322Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7667238Z         socket-info: {"destroyed":false,"pending":false}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7668156Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7668960Z     [0m [90m 117 |[39m                       pending[33m:[39m h[33m.[39mpending[33m,[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7670204Z      [90m 118 |[39m                     }[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7672763Z     [31m[1m>[22m[39m[90m 119 |[39m                     console[33m.[39mwarn([32m`    socket-info: ${JSON.stringify(info)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7673784Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7674393Z      [90m 120 |[39m                   }
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7675060Z      [90m 121 |[39m                 } [36mcatch[39m {}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7675727Z      [90m 122 |[39m               } [36mcatch[39m {}[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7676092Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7676326Z       at forEach (tests/jest.setup.js:119:29)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7677019Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7677515Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7677793Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7699121Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7700028Z       handle[1] type=Socket
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7700798Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7702111Z     [0m [90m  96 |[39m               [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7703382Z      [90m  97 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7704821Z     [31m[1m>[22m[39m[90m  98 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7705756Z      [90m     |[39m                         [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7706378Z      [90m  99 |[39m                 [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7707732Z      [90m 100 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7708939Z      [90m 101 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7709423Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7709662Z       at forEach (tests/jest.setup.js:98:25)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7710190Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7710690Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7711274Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7725905Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7727550Z         socket-info: {"destroyed":false,"pending":false}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7727921Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7728478Z     [0m [90m 117 |[39m                       pending[33m:[39m h[33m.[39mpending[33m,[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7729220Z      [90m 118 |[39m                     }[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7730337Z     [31m[1m>[22m[39m[90m 119 |[39m                     console[33m.[39mwarn([32m`    socket-info: ${JSON.stringify(info)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7731610Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7732210Z      [90m 120 |[39m                   }
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7732823Z      [90m 121 |[39m                 } [36mcatch[39m {}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7733503Z      [90m 122 |[39m               } [36mcatch[39m {}[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7733846Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7734077Z       at forEach (tests/jest.setup.js:119:29)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7734605Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7735095Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7735382Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7760582Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7760951Z       handle[2] type=Socket
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7761195Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7761569Z     [0m [90m  96 |[39m               [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7762280Z      [90m  97 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7763115Z     [31m[1m>[22m[39m[90m  98 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7763640Z      [90m     |[39m                         [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7764001Z      [90m  99 |[39m                 [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7764607Z      [90m 100 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7765245Z      [90m 101 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7765501Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7765637Z       at forEach (tests/jest.setup.js:98:25)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7765931Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7766211Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7766378Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7786460Z   console.warn
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7787113Z         socket-info: {"destroyed":false,"pending":false}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7787469Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7787861Z     [0m [90m 117 |[39m                       pending[33m:[39m h[33m.[39mpending[33m,[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7788289Z      [90m 118 |[39m                     }[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7788895Z     [31m[1m>[22m[39m[90m 119 |[39m                     console[33m.[39mwarn([32m`    socket-info: ${JSON.stringify(info)}`[39m)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7789444Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7789777Z      [90m 120 |[39m                   }
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7790110Z      [90m 121 |[39m                 } [36mcatch[39m {}
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7790474Z      [90m 122 |[39m               } [36mcatch[39m {}[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7790667Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7790803Z       at forEach (tests/jest.setup.js:119:29)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7791099Z           at Array.forEach (<anonymous>)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7791375Z       at tests/jest.setup.js:95:24
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.7791533Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8047622Z PASS tests/webhook.smoke.test.js
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8053719Z   webhook smoke
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8056887Z     ✓ GET /health returns ok (146 ms)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8057585Z     ✓ POST /webhook (ping) returns 2xx (118 ms)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8058301Z     ✓ POST /webhook generate_lesson (best-effort) (176 ms)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8058895Z     ✓ POST /webhook generate_quiz (best-effort) (120 ms)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8059402Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8088266Z Test Suites: 1 passed, 1 total
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8088592Z Tests:       4 passed, 4 total
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8088863Z Snapshots:   0 total
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8089098Z Time:        0.982 s
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.8089470Z Ran all test suites matching /tests\/webhook.smoke.test.js/i.
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9746461Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9747643Z Jest has detected the following 4 open handles potentially keeping Jest from exiting:
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9748486Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9748813Z   ●  TLSWRAP
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9748967Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9749722Z     [0m [90m 320 |[39m       [36mconst[39m transport [33m=[39m u[33m.[39mprotocol [33m===[39m [32m'https:'[39m [33m?[39m https [33m:[39m http[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9750619Z      [90m 321 |[39m       [36mlet[39m sockRef [33m=[39m [36mnull[39m[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9751371Z     [31m[1m>[22m[39m[90m 322 |[39m       [36mconst[39m req [33m=[39m transport[33m.[39mrequest(options[33m,[39m (res) [33m=>[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9751996Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9752366Z      [90m 323 |[39m         [36mtry[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9752744Z      [90m 324 |[39m           clearTimeout(timer)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9753135Z      [90m 325 |[39m         } [36mcatch[39m {}[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9753334Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9753473Z       at tests/webhook.smoke.test.js:322:29
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9753815Z       at getText (tests/webhook.smoke.test.js:300:10)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9754231Z       at Object.<anonymous> (tests/webhook.smoke.test.js:92:22)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9754774Z       at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9755303Z       at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9755739Z       at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9756175Z       at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9756414Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9756426Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9756526Z   ●  TLSWRAP
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9756866Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9757468Z     [0m [90m 207 |[39m       [36mconst[39m transport [33m=[39m u[33m.[39mprotocol [33m===[39m [32m'https:'[39m [33m?[39m https [33m:[39m http[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9758191Z      [90m 208 |[39m       [36mlet[39m sockRef [33m=[39m [36mnull[39m[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9758940Z     [31m[1m>[22m[39m[90m 209 |[39m       [36mconst[39m req [33m=[39m transport[33m.[39mrequest(options[33m,[39m (res) [33m=>[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9759536Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9759940Z      [90m 210 |[39m         clearTimeout(timer)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9760378Z      [90m 211 |[39m         [36mlet[39m chunks [33m=[39m [][33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9761027Z      [90m 212 |[39m         res[33m.[39mon([32m'data'[39m[33m,[39m (c) [33m=>[39m chunks[33m.[39mpush(c))[33m;[39m[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9761361Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9761497Z       at tests/webhook.smoke.test.js:209:29
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9761852Z       at postJson (tests/webhook.smoke.test.js:177:10)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9762230Z       at Object.<anonymous> (tests/webhook.smoke.test.js:111:24)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9762726Z       at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9763221Z       at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9763621Z       at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764019Z       at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764237Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764243Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764348Z   ●  TLSWRAP
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764448Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9764978Z     [0m [90m 207 |[39m       [36mconst[39m transport [33m=[39m u[33m.[39mprotocol [33m===[39m [32m'https:'[39m [33m?[39m https [33m:[39m http[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9765840Z      [90m 208 |[39m       [36mlet[39m sockRef [33m=[39m [36mnull[39m[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9766529Z     [31m[1m>[22m[39m[90m 209 |[39m       [36mconst[39m req [33m=[39m transport[33m.[39mrequest(options[33m,[39m (res) [33m=>[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9767345Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9767728Z      [90m 210 |[39m         clearTimeout(timer)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9768141Z      [90m 211 |[39m         [36mlet[39m chunks [33m=[39m [][33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9768729Z      [90m 212 |[39m         res[33m.[39mon([32m'data'[39m[33m,[39m (c) [33m=>[39m chunks[33m.[39mpush(c))[33m;[39m[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9769048Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9769174Z       at tests/webhook.smoke.test.js:209:29
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9769502Z       at postJson (tests/webhook.smoke.test.js:177:10)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9769876Z       at Object.<anonymous> (tests/webhook.smoke.test.js:124:24)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9770374Z       at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9770860Z       at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9771256Z       at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9771647Z       at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9771869Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9771875Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9771969Z   ●  TLSWRAP
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9772074Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9772607Z     [0m [90m 207 |[39m       [36mconst[39m transport [33m=[39m u[33m.[39mprotocol [33m===[39m [32m'https:'[39m [33m?[39m https [33m:[39m http[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9773264Z      [90m 208 |[39m       [36mlet[39m sockRef [33m=[39m [36mnull[39m[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9773954Z     [31m[1m>[22m[39m[90m 209 |[39m       [36mconst[39m req [33m=[39m transport[33m.[39mrequest(options[33m,[39m (res) [33m=>[39m {
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9774509Z      [90m     |[39m                             [31m[1m^[22m[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9774883Z      [90m 210 |[39m         clearTimeout(timer)[33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9775286Z      [90m 211 |[39m         [36mlet[39m chunks [33m=[39m [][33m;[39m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9775875Z      [90m 212 |[39m         res[33m.[39mon([32m'data'[39m[33m,[39m (c) [33m=>[39m chunks[33m.[39mpush(c))[33m;[39m[0m
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9776188Z 
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9776306Z       at tests/webhook.smoke.test.js:209:29
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9776734Z       at postJson (tests/webhook.smoke.test.js:177:10)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9777121Z       at Object.<anonymous> (tests/webhook.smoke.test.js:150:24)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9777630Z       at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9778130Z       at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9778530Z       at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9778922Z       at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+smoke	Run deployed smoke tests	2025-10-27T22:41:15.9779152Z 
+smoke	Confirm webhook envs (non-secret)	﻿2025-10-27T22:41:15.9993760Z ##[group]Run echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:15.9994180Z [36;1mecho "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"[0m
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:15.9994509Z [36;1mecho "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"[0m
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:15.9994890Z [36;1mecho "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"[0m
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0026923Z shell: /usr/bin/bash -e {0}
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0027197Z env:
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0027578Z   WEBHOOK_API_KEY: ***
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0027850Z   WEBHOOK_BASE: https://vf-webhook-staging.onrender.com
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0028153Z   DEBUG_WEBHOOK_ENABLED: true
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0028363Z ##[endgroup]
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0097936Z HAS_WEBHOOK_BASE=yes
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0098342Z HAS_WEBHOOK_API_KEY=yes
+smoke	Confirm webhook envs (non-secret)	2025-10-27T22:41:16.0098692Z DEBUG_WEBHOOK_ENABLED=true
+smoke	Post Setup Node	﻿2025-10-27T22:41:16.0151851Z Post job cleanup.
+smoke	Post Checkout	﻿2025-10-27T22:41:16.1798187Z Post job cleanup.
+smoke	Post Checkout	2025-10-27T22:41:16.2727173Z [command]/usr/bin/git version
+smoke	Post Checkout	2025-10-27T22:41:16.2764629Z git version 2.51.0
+smoke	Post Checkout	2025-10-27T22:41:16.2809526Z Temporarily overriding HOME='/home/runner/work/_temp/1a4b7f54-6789-4292-944e-10b262cd1a9e' before making global git config changes
+smoke	Post Checkout	2025-10-27T22:41:16.2811061Z Adding repository directory to the temporary git global config as a safe directory
+smoke	Post Checkout	2025-10-27T22:41:16.2816313Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic
+smoke	Post Checkout	2025-10-27T22:41:16.2851957Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+smoke	Post Checkout	2025-10-27T22:41:16.2884282Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+smoke	Post Checkout	2025-10-27T22:41:16.3106230Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+smoke	Post Checkout	2025-10-27T22:41:16.3127350Z http.https://github.com/.extraheader
+smoke	Post Checkout	2025-10-27T22:41:16.3140861Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+smoke	Post Checkout	2025-10-27T22:41:16.3172554Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+smoke	Complete job	﻿2025-10-27T22:41:16.3499118Z Evaluate and set job outputs
+smoke	Complete job	2025-10-27T22:41:16.3503905Z Set output 'webhook_key_fingerprint'
+smoke	Complete job	2025-10-27T22:41:16.3506303Z Cleaning up orphan processes

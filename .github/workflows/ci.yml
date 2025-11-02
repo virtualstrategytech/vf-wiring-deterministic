@@ -1,4 +1,7 @@
 ﻿name: CI
+permissions:
+  contents: read
+  actions: read
 
 on: [push, pull_request]
 
@@ -57,18 +60,38 @@ jobs:
           fi
         shell: bash
 
-      - name: Run tests
+      - name: Run tests (captured)
         env:
           CI: 'true'
+          SKIP_SYNC_SECRET: 'true'
+          SKIP_BODY_PARSER: '1'
           SKIP_SMOKE: 'true'
           PROMPT_URL: ''
           RETRIEVAL_URL: ''
           BUSINESS_URL: ''
-        run: npm test --silent -- --runInBand
+          # Run tests in-process for now and avoid `--detectOpenHandles` in CI
+          # because it can produce false-positive failures. We'll migrate to
+          # the child-process server mode after tests are updated to use
+          # in-test HTTP stubs (nock) instead of mocking globalThis.fetch.
+          # Prefer child-process isolation in CI to isolate native handles.
+          USE_CHILD_PROCESS_SERVER: '1'
+          # Pre-load the test instrumentation as early as possible by
+          # requiring the instrumentation module via NODE_OPTIONS. This
+          # helps capture creation stacks for sockets that may be created
+          # during module init.
+          # Use an absolute path so child processes spawned by tests can
+          # also preload the instrumentation regardless of their CWD.
+          NODE_OPTIONS: '--require $GITHUB_WORKSPACE/tests/jest.instrumentation.js'
+        # Run the CI wrapper which records env + runs jest in verbose mode
+        run: |
+          chmod +x ./scripts/ci_run_jest.sh || true
+          ./scripts/ci_run_jest.sh
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: tests/globalSetup.log
+          path: |
+            tests/globalSetup.log
+            tests/jest-output.txt

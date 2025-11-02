@@ -1,0 +1,55 @@
+name: CI - Child-server diagnostic
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    env:
+      # Run tests in child-process server mode so native handles are isolated
+      USE_CHILD_PROCESS_SERVER: '1'
+      # Enable our test diagnostics; keep default verbosity low (DEBUG_TESTS_LEVEL=1)
+      DEBUG_TESTS: '1'
+      DEBUG_TESTS_LEVEL: '1'
+      # NODE_DEBUG is noisy (net,tls) — keep enabled for this diagnostic workflow
+      NODE_DEBUG: 'net,tls'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint (non-blocking)
+        run: npm run lint || true
+
+      - name: Create test-logs dir
+        run: mkdir -p test-logs || true
+
+      - name: Run tests (capture output)
+        continue-on-error: true
+        run: |
+          # Capture test output to a file so we can upload it. Keep exit code so we can still upload artifacts.
+          set -o pipefail
+          # Use DEBUG_TESTS_LEVEL=1 by default to reduce noisy per-socket stacks.
+          # If deeper diagnostics are needed, re-run with DEBUG_TESTS_LEVEL=2.
+          npm test -- --runInBand 2>&1 | tee test-logs/jest-output.txt
+        shell: bash
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            test-logs/**
+            tests/globalSetup.log

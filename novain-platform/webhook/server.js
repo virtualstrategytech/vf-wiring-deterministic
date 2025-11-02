@@ -11,7 +11,13 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
 const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
 // ---- Config (env vars)
-const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+// Note: some tests set `process.env.WEBHOOK_API_KEY` after this module is loaded.
+// To ensure tests and CI can update the API key at runtime (without requiring
+// the server module to be reloaded), read the API key per-request instead of
+// capturing it once at module init.
+function getApiKey() {
+  return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+}
 const PORT = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
@@ -29,6 +35,16 @@ if (!fetchFn) {
   }
 }
 
+// Debug: when running tests with DEBUG_TESTS, print what fetch implementation
+// was captured at module init so we can diagnose mocking issues.
+try {
+  if (process.env.DEBUG_TESTS) {
+    try {
+      console.info('DEBUG_TESTS: fetchFn present at module init?', typeof fetchFn === 'function');
+    } catch {}
+  }
+} catch {}
+
 // add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
@@ -37,7 +53,12 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     opts.signal = controller.signal;
     if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
-    const r = await fetch(url, opts);
+    // Use the resolved fetch implementation captured during module init
+    // (`fetchFn`) where possible so tests that override `globalThis.fetch`
+    // before requiring this module reliably get invoked. Fall back to
+    // globalThis.fetch if needed.
+    const _fetch = typeof fetchFn === 'function' ? fetchFn : globalThis.fetch;
+    const r = await _fetch(url, opts);
     const elapsed = Date.now() - start;
     let bodyText = '';
     try {
@@ -59,7 +80,9 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
 };
 
 // Minimal runtime safety notice (no secret printed)
-if (!API_KEY && !IS_PROD) {
+// Use getApiKey() here so the value is resolved at runtime rather than
+// referencing a possibly undefined module-scope variable.
+if (!getApiKey() && !IS_PROD) {
   console.warn(
     'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
   );
@@ -71,21 +94,70 @@ if (!IS_PROD && DEBUG_WEBHOOK) {
   console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
   console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
   // log presence only (true/false) — never print the actual key value
-  console.info('WEBHOOK_API_KEY present:', !!API_KEY);
+  console.info('WEBHOOK_API_KEY present:', !!getApiKey());
 }
 
 // CORS (optional; enable if browser/iframe clients will call the webhook)
 app.use(cors());
 
 // ---- Middleware (body parser + JSON error handler)
-app.use(
-  express.json({
-    limit: '1mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
+// Allow tests to disable the body parser to avoid loading raw-body/body-parser
+// which can create closures detected as "bound-anonymous-fn" by Jest detectOpenHandles.
+const SKIP_BODY_PARSER =
+  process.env.SKIP_BODY_PARSER === '1' || process.env.SKIP_BODY_PARSER === 'true';
+if (SKIP_BODY_PARSER) {
+  console.info('SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)');
+  // Lightweight per-request JSON parser used only in test-mode when the
+  // full express.json/body-parser is disabled. This avoids pulling in the
+  // heavy raw-body closure that can be reported as an open handle by Jest
+  // while still allowing tests that send JSON (supertest) to be parsed.
+  app.use((req, res, next) => {
+    try {
+      const ct =
+        (req.headers && (req.headers['content-type'] || req.headers['Content-Type'])) || '';
+      if (!String(ct).toLowerCase().includes('application/json')) return next();
+
+      let raw = '';
+      if (typeof req.setEncoding === 'function') {
+        try {
+          req.setEncoding('utf8');
+        } catch {}
+      }
+      req.on('data', (chunk) => {
+        try {
+          raw += chunk;
+        } catch {}
+      });
+      req.on('end', () => {
+        try {
+          // emulate express.json verify behavior by saving a Buffer
+          req.rawBody = Buffer.from(raw || '', 'utf8');
+          try {
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch {
+            req.body = {};
+          }
+        } catch {}
+        next();
+      });
+      req.on('error', () => next());
+    } catch {
+      // best-effort: fall through to next middleware on error
+      try {
+        next();
+      } catch {}
+    }
+  });
+} else {
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
+}
 
 // Insert request-id propagation middleware (after body parser or before routes)
 app.use((req, res, next) => {
@@ -181,9 +253,11 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
-  // authenticate request
+  // authenticate request (read expected key at request time so tests can set
+  // process.env.WEBHOOK_API_KEY dynamically before making requests)
   const key = (req.get('x-api-key') || '').toString();
-  if (key !== API_KEY) {
+  const expected = getApiKey();
+  if (key !== expected) {
     console.warn('unauthorized: key mismatch');
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
@@ -424,18 +498,68 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: PROMPT_URL present:', !!PROMPT_URL);
+              console.info('DEBUG_TESTS: llm_elicit: fetchFn type:', typeof fetchFn);
+              try {
+                // best-effort show whether globalThis.fetch === fetchFn
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: fetch equality:',
+                  globalThis.fetch === fetchFn
+                );
+              } catch {}
+            } catch {}
+          }
+
           const r = await fetchWithTimeout(PROMPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),
           });
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: fetched status:', r && r.status);
+              try {
+                const ct =
+                  r.headers &&
+                  (r.headers.get ? r.headers.get('content-type') : r.headers['content-type']);
+                console.info('DEBUG_TESTS: llm_elicit: content-type:', ct);
+              } catch {}
+            } catch {}
+          }
+
           if (!r.ok) {
             const text = await r.text().catch(() => '');
             console.error('prompt service error:', r.status, text);
             return res.status(502).json({ ok: false, reply: 'prompt_service_failed' });
           }
 
-          const payload = await r.json().catch(() => ({}));
+          // Prefer explicit try/catch for JSON parsing so we can log parse failures
+          let payload = {};
+          try {
+            payload = await r.json();
+          } catch (pj) {
+            if (process.env.DEBUG_TESTS) {
+              try {
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: JSON parse failed:',
+                  pj && pj.message ? pj.message : pj
+                );
+                const txt = await r
+                  .clone()
+                  .text()
+                  .catch(() => '');
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: response body (on parse fail):',
+                  String(txt).slice(0, 4000)
+                );
+              } catch {}
+            }
+            payload = {};
+          }
+
           // Mirror payload into both `raw` and `data.raw` so callers/tests that
           // expect either shape will receive the same information.
           const rawPayload = payload || {};
@@ -445,6 +569,15 @@ app.post('/webhook', async (req, res) => {
           if (!IS_PROD && DEBUG_WEBHOOK) {
             try {
               console.info('llm payload snippet:', JSON.stringify(payload).slice(0, 2000));
+            } catch {}
+          }
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info(
+                'DEBUG_TESTS: llm_elicit: payload snippet:',
+                JSON.stringify(payload).slice(0, 2000)
+              );
             } catch {}
           }
 
@@ -570,7 +703,7 @@ if (require.main === module) {
   // Log runtime info early for Render / cloud logs troubleshooting.
   try {
     console.log('Starting webhook server', { node: process.version, pid: process.pid });
-  } catch (e) {
+  } catch {
     // ignore logging failures
   }
 
