@@ -187,8 +187,13 @@ jobs:
         with:
           name: smoke-debug-handles
           path: |
+            # Primary: any debug dumps produced in /tmp by the job
             /tmp/async_handle_map.json
             /tmp/active_handles.json
+            # Also upload any async handle maps written by the test process
+            # into the repository workspace (jest.setup.js writes into ./artifacts/)
+            artifacts/async_handles_*.json
+            artifacts/active_handles_*.json
 
       - name: Upload smoke diagnostics (on failure)
         if: failure()

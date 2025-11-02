@@ -18,7 +18,6 @@ try {
     process.env.USE_CHILD_PROCESS_SERVER = '1';
   }
 } catch {}
-
 // Test-only: best-effort patch to make AsyncResource a no-op wrapper so
 // modules that create AsyncResources during parsing (raw-body) don't leave
 // persistent native handles that show up as "bound-anonymous-fn" in
@@ -698,16 +697,23 @@ afterAll(async () => {
             }
           }
           try {
-            const path = require('path').join(
-              process.cwd(),
-              'artifacts',
-              `async_handles_${Date.now()}.json`
-            );
+            const repoPath = require('path').join(process.cwd(), 'artifacts');
+            const path = require('path').join(repoPath, `async_handles_${Date.now()}.json`);
             try {
               fs.mkdirSync(require('path').dirname(path), { recursive: true });
             } catch {}
             fs.writeFileSync(path, JSON.stringify(out, null, 2));
             console.warn('DEBUG_TESTS: wrote async handle map to', path);
+            // Also write a copy into /tmp so the workflow's tmp-based upload
+            // step will reliably pick it up regardless of where the test
+            // process executes or which user the runner uses.
+            try {
+              const tmpPath = '/tmp/async_handle_map.json';
+              fs.writeFileSync(tmpPath, JSON.stringify(out, null, 2));
+              console.warn('DEBUG_TESTS: also wrote async handle map to', tmpPath);
+            } catch (e) {
+              // best-effort: ignore failures on non-Unix runners
+            }
           } catch {
             void 0;
           }

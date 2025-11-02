@@ -474,13 +474,14 @@ function startTestServer(app) {
     server.once('error', onError);
     // Patch AsyncResource in tests before any modules that rely on it (such
     // as raw-body) create native async resources we can't easily cleanup.
-    // This is best-effort and only happens during process.env.TEST_PATCH_RAW_BODY or
-    // when DEBUG_TESTS is set so we don't change runtime behavior in CI/Prod.
+    // Historically this was gated behind TEST_PATCH_RAW_BODY or DEBUG_TESTS,
+    // but experiments show raw-body (and other libs) can create native
+    // AsyncResources during server.listen which lead to a persistent
+    // "bound-anonymous-fn" open handle reported by Jest. For test helpers
+    // we always attempt a best-effort patch here. The patch function itself
+    // is defensive and will no-op if async_hooks is unavailable.
     try {
-      const shouldPatch = process.env.TEST_PATCH_RAW_BODY === '1' || process.env.DEBUG_TESTS;
-      if (shouldPatch) {
-        _patchAsyncResourceNoop();
-      }
+      _patchAsyncResourceNoop();
     } catch {
       void 0;
     }
@@ -523,14 +524,10 @@ function startTestServer(app) {
     } catch {
       void 0;
     }
-    // Restore any patched AsyncResource implementation once the server has
-    // finished closing so other parts of the test environment (or later
-    // tests) use the normal AsyncResource behavior.
-    try {
-      _restoreAsyncResource();
-    } catch {
-      void 0;
-    }
+    // NOTE: restoration of the AsyncResource is deferred until the server
+    // close path completes. See below where we restore after forceful
+    // cleanup in the `close` function so any AsyncResources created during
+    // startup/listen are captured while the server is active.
     try {
       if (typeof server.unref === 'function') server.unref();
     } catch {
@@ -728,6 +725,83 @@ function _forceCloseAllSockets() {
                 } catch {
                   void 0;
                 }
+                // Extra: attempt to call underlying native handle close/destroy where available.
+                try {
+                  for (let i2 = 0; i2 < handles.length; i2++) {
+                    const hh = handles[i2];
+                    try {
+                      const nm = hh && hh.constructor && hh.constructor.name;
+                      if (!hh) continue;
+                      if (String(nm) === 'Socket' || String(nm) === 'TLSSocket') {
+                        try {
+                          if (hh._handle && typeof hh._handle.close === 'function') {
+                            try {
+                              hh._handle.close();
+                            } catch {
+                              void 0;
+                            }
+                          }
+                        } catch {
+                          void 0;
+                        }
+                        try {
+                          if (hh._handle && typeof hh._handle.destroy === 'function') {
+                            try {
+                              hh._handle.destroy();
+                            } catch {
+                              void 0;
+                            }
+                          }
+                        } catch {
+                          void 0;
+                        }
+                      }
+                    } catch {
+                      void 0;
+                    }
+                  }
+                } catch {
+                  void 0;
+                }
+
+                // Drain common http/https Agent pools (sockets/freeSockets) and destroy agents
+                try {
+                  const drainAgent = (agent) => {
+                    if (!agent) return;
+                    try {
+                      const iter = (obj) => {
+                        if (!obj) return;
+                        try {
+                          Object.values(obj).forEach((arr) => {
+                            if (Array.isArray(arr)) {
+                              arr.forEach((s) => {
+                                try {
+                                  if (s && typeof s.destroy === 'function') s.destroy();
+                                } catch {}
+                              });
+                            }
+                          });
+                        } catch {}
+                      };
+                      iter(agent.sockets);
+                      iter(agent.freeSockets);
+                      if (typeof agent.destroy === 'function') {
+                        try {
+                          agent.destroy();
+                        } catch {}
+                      }
+                    } catch {}
+                  };
+                  try {
+                    drainAgent(http && http.globalAgent);
+                  } catch {}
+                  try {
+                    const httpsAgent = require('https') && require('https').globalAgent;
+                    drainAgent(httpsAgent);
+                  } catch {}
+                } catch {
+                  void 0;
+                }
               });
             } catch {
               void 0;
@@ -754,6 +828,15 @@ function _forceCloseAllSockets() {
         void 0;
       }
     }
+  } catch {
+    void 0;
+  }
+
+  // Restore AsyncResource implementation (if we patched it) now that the
+  // server close and aggressive cleanup has completed. This avoids leaving
+  // the NoopAsyncResource in place for other tests or code paths.
+  try {
+    _restoreAsyncResource();
   } catch {
     void 0;
   }
