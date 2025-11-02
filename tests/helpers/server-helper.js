@@ -273,6 +273,41 @@ function startTestServer(app) {
           void 0;
         }
 
+        // Defensive: ensure any remaining sockets created by this server are
+        // explicitly ended/destroyed before we continue. Some Node versions
+        // and CI environments can retain socket handles briefly after
+        // server.close completes; end/destroy them here to reduce Jest
+        // detectOpenHandles false positives.
+        try {
+          const all = Array.from(sockets).concat(Array.from(_sockets || []));
+          for (const rs of all) {
+            try {
+              if (rs && typeof rs.end === 'function') {
+                try {
+                  rs.end();
+                } catch {
+                  void 0;
+                }
+              }
+            } catch {
+              void 0;
+            }
+            try {
+              if (rs && typeof rs.destroy === 'function' && !rs.destroyed) {
+                try {
+                  rs.destroy();
+                } catch {
+                  void 0;
+                }
+              }
+            } catch {
+              void 0;
+            }
+          }
+        } catch {
+          void 0;
+        }
+
         await new Promise((r) => setImmediate(r));
 
         try {
@@ -301,18 +336,37 @@ function startTestServer(app) {
               void 0;
             }
           }
+          // Try to close any remaining servers and wait briefly for the
+          // close callbacks to run. Collect promises and await them so the
+          // native handles have a better chance to be freed before we
+          // continue with a global sweep.
+          const closePromises = [];
           for (const serv of Array.from(_servers)) {
             try {
               serv.removeAllListeners('connection');
               serv.removeAllListeners('listening');
               try {
-                serv.close();
+                const p = new Promise((resolve) => {
+                  try {
+                    serv.close(() => resolve());
+                  } catch {
+                    resolve();
+                  }
+                  setTimeout(() => resolve(), 1500);
+                });
+                closePromises.push(p);
               } catch {
                 void 0;
               }
             } catch {
               void 0;
             }
+          }
+          try {
+            // wait for the best-effort close attempts to settle
+            await Promise.allSettled(closePromises);
+          } catch {
+            void 0;
           }
         } catch {
           void 0;
