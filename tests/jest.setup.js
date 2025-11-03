@@ -617,9 +617,14 @@ afterAll(async () => {
                   const type = info && info.type ? info.type : '<unknown>';
                   console.warn(`  asyncId=${id} type=${type}`);
                   if (info && info.stack) {
-                    (String(info.stack).split('\n').slice(0, 6) || []).forEach((ln) =>
-                      console.warn(`    ${String(ln).trim()}`)
-                    );
+                    try {
+                      const lines = String(info.stack).split('\n').slice(0, 6) || [];
+                      lines.forEach((ln) => {
+                        try {
+                          console.warn('    ' + String(ln).trim());
+                        } catch {}
+                      });
+                    } catch {}
                   }
                 } catch {}
               }
