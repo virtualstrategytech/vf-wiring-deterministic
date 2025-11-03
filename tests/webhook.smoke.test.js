@@ -32,6 +32,20 @@ try {
     `DEBUG test-file loaded: ${path.basename(__filename)} ts:${new Date().toISOString()}`
   );
 } catch {}
+// When DEBUG_TESTS is set (CI smoke runs), make extra effort here to ensure
+// nock won't block the outgoing requests made by the smoke test. Some test
+// harness ordering can still cause nock to reject requests; enabling net
+// connect here ensures the smoke test can reach the deployed webhook.
+try {
+  if (process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true') {
+    try {
+      require('nock').enableNetConnect();
+    } catch (e) {}
+    try {
+      writeDebugLog('DEBUG_TESTS: nock.enableNetConnect() invoked in smoke test');
+    } catch (e) {}
+  }
+} catch {}
 try {
   // also write the same short debug line to the CI artifact log helper (best-effort)
   writeDebugLog &&

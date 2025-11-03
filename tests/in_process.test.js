@@ -1,6 +1,13 @@
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
+// Ensure external service URLs are blank for in-process tests so the
+// `llm_elicit` handler uses the deterministic local stub instead of
+// attempting network calls that change the response shape (and can
+// cause flakiness when developers or CI set these globals).
+process.env.PROMPT_URL = process.env.PROMPT_URL || '';
+process.env.BUSINESS_URL = process.env.BUSINESS_URL || '';
+process.env.RETRIEVAL_URL = process.env.RETRIEVAL_URL || '';
 
 const app = require('../novain-platform/webhook/server');
 

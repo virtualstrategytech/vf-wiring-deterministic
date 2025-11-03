@@ -3,11 +3,74 @@
 // and confuse Jest's open-handle detection. Allows localhost/127.0.0.1.
 try {
   const nock = require('nock');
-  // disallow all external network connections
+  // disallow all external network connections by default. Build a single
+  // whitelist regex that always includes localhost and, when provided,
+  // the WEBHOOK_BASE host so the deployed smoke test can reach staging.
   nock.disableNetConnect();
-  // allow localhost (both IPv4 and IPv6) and any ephemeral localhost ports
-  // Use a regex so ports like 127.0.0.1:56976 are allowed.
-  nock.enableNetConnect(/127\.0\.0\.1|::1|localhost/);
+  // If DEBUG_TESTS is enabled we are intentionally running a deployed smoke
+  // test that must reach an external host. In that mode, allow external
+  // network connections so the smoke test can exercise the deployed webhook.
+  // We still keep metadata mocks below to avoid long cloud metadata timeouts.
+  const DEBUG_TESTS = process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true';
+  if (DEBUG_TESTS) {
+    try {
+      nock.enableNetConnect();
+      try {
+        require('fs').appendFileSync(
+          '/tmp/nock_allowlist.log',
+          'DEBUG_TESTS enabled: allowing external network connects\n'
+        );
+      } catch (e) {}
+      // proceed but still register harmless metadata mocks below
+    } catch (e) {}
+  }
+  if (!DEBUG_TESTS) {
+    try {
+      const allowed = ['127\\.0\\.0\\.1', '::1', 'localhost'];
+      try {
+        const base = process.env.WEBHOOK_BASE || '';
+        if (base) {
+          const hostMatch = String(base)
+            .replace(/^https?:\/\//, '')
+            .replace(/\/.*$/, '');
+          const esc = hostMatch.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+          allowed.push(esc);
+        }
+      } catch {}
+      const combined = new RegExp(allowed.join('|'));
+      // Enable net connect for our combined allowlist. Also write a short
+      // debugging hint so CI uploads include the allowlist if nock later
+      // rejects the deployed host (helps triage "Disallowed net connect").
+      nock.enableNetConnect(combined);
+      try {
+        // prefer /tmp for CI; fall back to console if not writable (e.g., Windows dev)
+        const fs = require('fs');
+        const msg = `nock allowlist regex: ${combined}\n`;
+        try {
+          fs.appendFileSync('/tmp/nock_allowlist.log', msg);
+        } catch (e) {
+          /* ignore */
+        }
+        // also emit to console for immediate developer visibility
+        // eslint-disable-next-line no-console
+        console.log('jest.netblock: set nock allowlist ->', combined);
+      } catch (e) {
+        // swallow errors to avoid blocking tests
+      }
+    } catch {
+      // fallback to localhost-only allow if something goes wrong
+      try {
+        nock.enableNetConnect(/127\.0\.0\.1|::1|localhost/);
+      } catch {}
+    }
+  } else {
+    try {
+      require('fs').appendFileSync(
+        '/tmp/nock_allowlist.log',
+        'DEBUG_TESTS: external connects allowed (skip allowlist)\n'
+      );
+    } catch (e) {}
+  }
   // Prevent cloud metadata calls (AWS/Azure) from being attempted during tests.
   // Some SDKs attempt to reach instance metadata (169.254.169.254 for AWS,
   // 168.63.129.16 for Azure). Disable AWS metadata lookups via env var and

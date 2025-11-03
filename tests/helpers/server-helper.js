@@ -336,6 +336,18 @@ function startTestServer(app) {
 
         _servers.delete(server);
 
+        // clear any scheduled verbose dump timers to avoid lingering handles
+        try {
+          if (server && server.__verboseDumpTimer) {
+            try {
+              clearTimeout(server.__verboseDumpTimer);
+            } catch {}
+            try {
+              server.__verboseDumpTimer = null;
+            } catch {}
+          }
+        } catch {}
+
         try {
           for (const s of Array.from(_sockets)) {
             try {
@@ -425,42 +437,53 @@ function startTestServer(app) {
       try {
         const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 3;
         if (process.env.DEBUG_TESTS && verbose) {
-          setTimeout(() => {
-            try {
-              if (typeof process._getActiveHandles === 'function') {
-                const h = process._getActiveHandles() || [];
-                console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
-                h.forEach((hh, ii) => {
-                  try {
-                    const name = hh && hh.constructor && hh.constructor.name;
-                    console.warn(`  [${ii}] ${String(name)}`);
+          // schedule a short verbose dump and track the timer so it can be
+          // cleared when the server is closed to avoid leaving a pending
+          // Timeout handle that may be reported by Jest.
+          try {
+            const _t = setTimeout(() => {
+              try {
+                if (typeof process._getActiveHandles === 'function') {
+                  const h = process._getActiveHandles() || [];
+                  console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
+                  h.forEach((hh, ii) => {
                     try {
-                      if (typeof hh._createdStack === 'string') {
-                        console.warn('    createdStack-preview:');
-                        (hh._createdStack.split('\n').slice(0, 8) || []).forEach((ln) =>
-                          console.warn('      ' + String(ln).trim())
-                        );
+                      const name = hh && hh.constructor && hh.constructor.name;
+                      console.warn(`  [${ii}] ${String(name)}`);
+                      try {
+                        if (typeof hh._createdStack === 'string') {
+                          console.warn('    createdStack-preview:');
+                          (hh._createdStack.split('\n').slice(0, 8) || []).forEach((ln) =>
+                            console.warn('      ' + String(ln).trim())
+                          );
+                        }
+                      } catch {
+                        void 0;
+                      }
+                      if (String(name) === 'Function') {
+                        try {
+                          const s = String(hh).slice(0, 1000);
+                          console.warn('    fn:', s);
+                        } catch {
+                          void 0;
+                        }
                       }
                     } catch {
                       void 0;
                     }
-                    if (String(name) === 'Function') {
-                      try {
-                        const s = String(hh).slice(0, 1000);
-                        console.warn('    fn:', s);
-                      } catch {
-                        void 0;
-                      }
-                    }
-                  } catch {
-                    void 0;
-                  }
-                });
+                  });
+                }
+              } catch {
+                void 0;
               }
-            } catch {
-              void 0;
-            }
-          }, 50);
+            }, 50);
+            try {
+              if (typeof _t.unref === 'function') _t.unref();
+            } catch {}
+            try {
+              server.__verboseDumpTimer = _t;
+            } catch {}
+          } catch {}
         }
       } catch {
         void 0;

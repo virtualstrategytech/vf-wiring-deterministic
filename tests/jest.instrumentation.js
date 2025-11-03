@@ -238,3 +238,129 @@ try {
     };
   }
 } catch {}
+
+// Best-effort: ensure common pooled network resources are closed on process
+// exit. This helps catch cases where Jest or the runner kills the process
+// before our normal afterAll teardown runs. We close undici's global
+// dispatcher and destroy http/https global agents where available.
+try {
+  const closeResources = () => {
+    try {
+      // undici global dispatcher
+      const undici = require('undici');
+      if (
+        undici &&
+        undici.globalDispatcher &&
+        typeof undici.globalDispatcher.close === 'function'
+      ) {
+        try {
+          undici.globalDispatcher.close();
+        } catch {}
+      }
+    } catch {}
+    try {
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+        try {
+          http.globalAgent.destroy();
+        } catch {}
+      }
+    } catch {}
+    try {
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+        try {
+          https.globalAgent.destroy();
+        } catch {}
+      }
+    } catch {}
+  };
+
+  // Hook multiple termination events to be robust in CI.
+  process.on('exit', closeResources);
+  process.on('beforeExit', closeResources);
+  process.on('SIGINT', () => {
+    closeResources();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    closeResources();
+    process.exit(143);
+  });
+} catch {}
+
+// When DEBUG_TESTS is enabled, ensure the test process writes async-handle
+// diagnostics into /tmp (or ./artifacts as a fallback) on exit so CI uploads
+// will include them even when Jest fails or the process is terminated.
+try {
+  const writeDebugDumps = () => {
+    try {
+      if (!(process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true')) return;
+      const fs = require('fs');
+      // Dump async handle map if present
+      try {
+        const out = [];
+        const m = global.__async_handle_map || new Map();
+        for (const [id, info] of m.entries()) {
+          out.push({
+            id,
+            type: String(info && info.type),
+            stack: String(info && info.stack)
+              .split('\n')
+              .slice(0, 8)
+              .join('\n'),
+          });
+        }
+        try {
+          fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2));
+        } catch (e) {
+          try {
+            fs.writeFileSync('./artifacts/async_handle_map.json', JSON.stringify(out, null, 2));
+          } catch {}
+        }
+      } catch (e) {}
+      // Dump active handles
+      try {
+        const fs = require('fs');
+        const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+        const out = handles.map((h, i) => {
+          try {
+            const name = (h && h.constructor && h.constructor.name) || '<unknown>';
+            const info = { idx: i, type: name };
+            try {
+              if (h && typeof h._createdStack === 'string')
+                info._createdStack = h._createdStack.split('\n').slice(0, 6).join('\n');
+            } catch {}
+            try {
+              if (h && h.localAddress) info.localAddress = h.localAddress;
+              if (h && h.localPort) info.localPort = h.localPort;
+              if (h && h.remoteAddress) info.remoteAddress = h.remoteAddress;
+              if (h && h.remotePort) info.remotePort = h.remotePort;
+            } catch {}
+            return info;
+          } catch (e) {
+            return { idx: i, type: 'error' };
+          }
+        });
+        try {
+          fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2));
+        } catch (e) {
+          try {
+            fs.writeFileSync('./artifacts/active_handles.json', JSON.stringify(out, null, 2));
+          } catch {}
+        }
+      } catch (e) {}
+    } catch (e) {}
+  };
+
+  process.on('exit', writeDebugDumps);
+  process.on('beforeExit', writeDebugDumps);
+  process.on('SIGINT', () => {
+    try {
+      writeDebugDumps();
+    } catch {}
+  });
+  process.on('SIGTERM', () => {
+    try {
+      writeDebugDumps();
+    } catch {}
+  });
+} catch {}
