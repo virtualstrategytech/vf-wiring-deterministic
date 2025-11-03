@@ -20,9 +20,9 @@ try {
           '/tmp/nock_allowlist.log',
           'DEBUG_TESTS enabled: allowing external network connects\n'
         );
-      } catch (e) {}
+      } catch {}
       // proceed but still register harmless metadata mocks below
-    } catch (e) {}
+    } catch {}
   }
   if (!DEBUG_TESTS) {
     try {
@@ -48,13 +48,13 @@ try {
         const msg = `nock allowlist regex: ${combined}\n`;
         try {
           fs.appendFileSync('/tmp/nock_allowlist.log', msg);
-        } catch (e) {
+        } catch {
           /* ignore */
         }
         // also emit to console for immediate developer visibility
         // eslint-disable-next-line no-console
         console.log('jest.netblock: set nock allowlist ->', combined);
-      } catch (e) {
+      } catch {
         // swallow errors to avoid blocking tests
       }
     } catch {
@@ -69,7 +69,7 @@ try {
         '/tmp/nock_allowlist.log',
         'DEBUG_TESTS: external connects allowed (skip allowlist)\n'
       );
-    } catch (e) {}
+    } catch {}
   }
   // Prevent cloud metadata calls (AWS/Azure) from being attempted during tests.
   // Some SDKs attempt to reach instance metadata (169.254.169.254 for AWS,

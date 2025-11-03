@@ -44,7 +44,7 @@ try {
     try {
       const CH = http2.ClientHttp2Session;
       if (CH && CH.prototype && !CH.prototype.__stackPatched) {
-        const origCtor = CH.prototype.connect || function () {};
+        // const origCtor = CH.prototype.connect || function () {};
         // best-effort: attach stack on instances when possible
         const origEmit = CH.prototype.emit;
         CH.prototype.emit = function (ev, ...args) {
@@ -156,7 +156,7 @@ try {
         let inst;
         try {
           inst = Reflect.construct(OrigSocket, args, SocketWithStack);
-        } catch (e) {
+        } catch {
           // fallback for older Node versions
           inst = Object.create(OrigSocket.prototype);
           OrigSocket.apply(inst, args);
@@ -194,7 +194,7 @@ try {
         let inst;
         try {
           inst = Reflect.construct(OrigTLSSocket, args, TLSSocketWithStack);
-        } catch (e) {
+        } catch {
           inst = Object.create(OrigTLSSocket.prototype);
           OrigTLSSocket.apply(inst, args);
         }
@@ -311,15 +311,16 @@ try {
         }
         try {
           fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2));
-        } catch (e) {
+        } catch {
           try {
             fs.writeFileSync('./artifacts/async_handle_map.json', JSON.stringify(out, null, 2));
           } catch {}
         }
-      } catch (e) {}
+      } catch {}
+
       // Dump active handles
       try {
-        const fs = require('fs');
+        const fs2 = require('fs');
         const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
         const out = handles.map((h, i) => {
           try {
@@ -336,19 +337,19 @@ try {
               if (h && h.remotePort) info.remotePort = h.remotePort;
             } catch {}
             return info;
-          } catch (e) {
+          } catch {
             return { idx: i, type: 'error' };
           }
         });
         try {
-          fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2));
-        } catch (e) {
+          fs2.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2));
+        } catch {
           try {
-            fs.writeFileSync('./artifacts/active_handles.json', JSON.stringify(out, null, 2));
+            fs2.writeFileSync('./artifacts/active_handles.json', JSON.stringify(out, null, 2));
           } catch {}
         }
-      } catch (e) {}
-    } catch (e) {}
+      } catch {}
+    } catch {}
   };
 
   process.on('exit', writeDebugDumps);

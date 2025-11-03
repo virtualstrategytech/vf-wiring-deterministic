@@ -40,10 +40,10 @@ try {
   if (process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true') {
     try {
       require('nock').enableNetConnect();
-    } catch (e) {}
+    } catch {}
     try {
       writeDebugLog('DEBUG_TESTS: nock.enableNetConnect() invoked in smoke test');
-    } catch (e) {}
+    } catch {}
   }
 } catch {}
 try {
