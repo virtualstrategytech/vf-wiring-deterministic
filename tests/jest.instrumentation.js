@@ -1,6 +1,15 @@
 // Early instrumentation for socket/TLS creation stacks.
 // This file runs in Jest `setupFiles` to ensure instrumentation happens
 // before any modules that may open sockets during require-time.
+// Guard: only enable this heavy instrumentation when DEBUG_TESTS is set
+// to avoid changing runtime behavior for normal test runs.
+try {
+  const enabled = process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true';
+  if (!enabled) {
+    // Exit early: do not perform instrumentation when DEBUG_TESTS is not enabled.
+    return;
+  }
+} catch {}
 const http = require('http');
 const https = require('https');
 const net = require('net');
