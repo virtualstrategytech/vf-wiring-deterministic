@@ -210,19 +210,29 @@ describe('Webhook (in-process)', () => {
   afterAll(() => {
     try {
       if (typeof process._getActiveHandles === 'function') {
-        const handles = process._getActiveHandles() || [];
-        console.warn('DEBUG: active handles summary:');
-        handles.forEach((h, i) => {
+        try {
+          const handles = process._getActiveHandles() || [];
           try {
-            const name = h && h.constructor && h.constructor.name;
-            const s = String(h || '').slice(0, 400);
-            console.warn(`  [${i}] type=${String(name)} str=${s}`);
-          } catch (e) {
+            console.warn('DEBUG: active handles summary:');
+          } catch {}
+          handles.forEach((h, i) => {
             try {
-              console.warn('  [err printing handle]', e && e.stack);
-            } catch {}
-          }
-        });
+              const name = h && h.constructor && h.constructor.name;
+              const s = String(h || '').slice(0, 400);
+              try {
+                console.warn(`  [${i}] type=${String(name)} str=${s}`);
+              } catch {}
+            } catch (e) {
+              try {
+                console.warn('  [err printing handle]', e && e.stack);
+              } catch {}
+            }
+          });
+        } catch (e) {
+          try {
+            console.warn('DEBUG dump failed', e && e.stack);
+          } catch {}
+        }
       }
     } catch (e) {
       try {
@@ -232,20 +242,30 @@ describe('Webhook (in-process)', () => {
     // Also print any Server.listen callbacks we captured during the run
     try {
       const cbs = global.__test_listen_callbacks || [];
-      console.warn('DEBUG: captured listen callbacks count =', cbs.length);
-      cbs.forEach((cb, idx) => {
+      try {
         try {
-          const stack =
-            cb && cb._createdStack
-              ? cb._createdStack.split('\n').slice(0, 10).join('\n')
-              : String(cb).slice(0, 400);
-          console.warn(`  listen-cb[${idx}]: ${stack}`);
-        } catch (e) {
+          console.warn('DEBUG: captured listen callbacks count =', cbs.length);
+        } catch {}
+        cbs.forEach((cb, idx) => {
           try {
-            console.warn(`  listen-cb[${idx}]: <err printing>`, e && e.stack);
-          } catch {}
-        }
-      });
+            const stack =
+              cb && cb._createdStack
+                ? cb._createdStack.split('\n').slice(0, 10).join('\n')
+                : String(cb).slice(0, 400);
+            try {
+              console.warn(`  listen-cb[${idx}]: ${stack}`);
+            } catch {}
+          } catch (e) {
+            try {
+              console.warn(`  listen-cb[${idx}]: <err printing>`, e && e.stack);
+            } catch {}
+          }
+        });
+      } catch (e) {
+        try {
+          console.warn('DEBUG listen-callback dump failed', e && e.stack);
+        } catch {}
+      }
     } catch (e) {
       try {
         console.warn('DEBUG listen-callback dump failed', e && e.stack);

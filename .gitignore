@@ -233,3 +233,16 @@ logs/
 tests/webhook.secret
 # ignore temporary markdown outputs
 tmp.md
+
+# Ignore diagnostic and CI artifact folders produced by local/CI smoke runs
+artifacts/
+artifacts-*
+artifacts-ci*/
+artifacts-ci-runs/
+smoke-artifacts/
+novain-platform/smoke-artifacts/
+ci-artifacts*/
+.github/pr-artifacts/
+run_*.log
+local-debug*
+tests/local-jest-output.txt
