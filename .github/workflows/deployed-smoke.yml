@@ -190,15 +190,6 @@ jobs:
 
           # Exit with the original Jest exit code so CI reflects test status
           exit $EXIT_CODE
-
-          - name: Collect repo debug dumps to /tmp (always)
-            if: always()
-            run: |
-              # Copy any artifacts written into the repository workspace artifacts/ into /tmp so the upload step (which also searches /tmp) will include them reliably
-              mkdir -p /tmp/smoke-debug || true
-              cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
-              cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
-              ls -l /tmp/smoke-debug || true
       - name: Dump debug handles (when DEBUG_TESTS enabled)
         if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
         run: |
@@ -221,6 +212,29 @@ jobs:
             # into the repository workspace (jest.setup.js writes into ./artifacts/)
             artifacts/async_handles_*.json
             artifacts/active_handles_*.json
+
+      - name: Collect repo debug dumps to /tmp (always)
+        if: always()
+        run: |
+          # Copy any artifacts written into the repository workspace artifacts/ into /tmp so the upload step (which also searches /tmp) will include them reliably
+          mkdir -p /tmp/smoke-debug || true
+          cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          # Helpful listing to make sure artifacts are present in job logs
+          echo '--- /tmp listing ---'
+          ls -la /tmp || true
+          echo '--- /tmp/smoke-debug listing ---'
+          ls -la /tmp/smoke-debug || true
+          echo '--- workspace artifacts listing (artifacts/) ---'
+          ls -la artifacts || true
+
+      - name: Preview debug dumps (if present)
+        if: always()
+        run: |
+          echo 'Preview /tmp/async_handle_map.json (first 200 lines if present)'
+          if [ -f /tmp/async_handle_map.json ]; then head -n 200 /tmp/async_handle_map.json || true; else echo 'no /tmp/async_handle_map.json'; fi
+          echo 'Preview /tmp/active_handles.json (first 200 lines if present)'
+          if [ -f /tmp/active_handles.json ]; then head -n 200 /tmp/active_handles.json || true; else echo 'no /tmp/active_handles.json'; fi
 
       - name: Upload smoke diagnostics (always)
         if: always()
