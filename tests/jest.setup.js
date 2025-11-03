@@ -648,6 +648,13 @@ afterAll(async () => {
                   return false;
                 }
               } catch {}
+              // drop ReadStream for stdin (fd 0) which commonly appears on
+              // interactive shells and is benign for CI/local diagnostic runs
+              try {
+                if (String(name) === 'ReadStream' && h && typeof h.fd === 'number' && h.fd === 0) {
+                  return false;
+                }
+              } catch {}
               // drop plain Function handles that look like bound anonymous
               // functions (their string representation often contains "bound").
               if (String(name) === 'Function') {

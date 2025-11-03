@@ -27,10 +27,7 @@ describe('in-process webhook app (refactored)', () => {
 
       // Debug: print the response body to capture actual shape when tests fail
       // (helps diagnose mismatch between test expectation and server response)
-      try {
-        // eslint-disable-next-line no-console
-        console.log('DEBUG resp.body:', JSON.stringify(resp.body));
-      } catch {}
+      // (debug logging removed) response shape is asserted below
 
       expect(resp.status).toBe(200);
 
