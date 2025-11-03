@@ -862,7 +862,7 @@ afterAll(async () => {
               const tmpPath = '/tmp/async_handle_map.json';
               fs.writeFileSync(tmpPath, JSON.stringify(out, null, 2));
               console.warn('DEBUG_TESTS: also wrote async handle map to', tmpPath);
-            } catch (e) {
+            } catch {
               // best-effort: ignore failures on non-Unix runners
             }
           } catch {
