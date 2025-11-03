@@ -190,6 +190,11 @@ jobs:
 
           # Exit with the original Jest exit code so CI reflects test status
           exit $EXIT_CODE
+      - name: Final cleanup: attempt to close any remaining sockets in this job
+        if: always()
+        run: |
+          echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'
+          node -e "try{ const handles=(process._getActiveHandles&&process._getActiveHandles())||[]; handles.forEach((h,i)=>{ try{ const n=h&&h.constructor&&h.constructor.name||'<unknown>'; if(n==='Socket'||n==='TLSSocket'){ try{ if(h && typeof h.end==='function') h.end(); }catch{} try{ if(h && typeof h.destroy==='function') h.destroy(); }catch{} try{ if(h && h._handle && typeof h._handle.close==='function') h._handle.close(); }catch{} } }catch(e){} }); console.error('cleanup attempted'); }catch(e){console.error('cleanup failed',e&&e.stack);}"
       - name: Dump debug handles (when DEBUG_TESTS enabled)
         if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
         run: |
