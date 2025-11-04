@@ -32,9 +32,8 @@ describe('in-process webhook app (refactored)', () => {
       expect(resp.status).toBe(200);
 
       const body = resp.body || {};
-      const rawSource =
-        (body && body.raw && body.raw.source) ||
-        (body && body.data && body.data.raw && body.data.raw.source);
+      // tolerate either shape: prefer `data.raw.source` but fall back to `raw.source`
+      const rawSource = body?.data?.raw?.source ?? body?.raw?.source;
       expect(rawSource).toBe('stub');
     } finally {
       // no TCP server to close when using supertest(app)
