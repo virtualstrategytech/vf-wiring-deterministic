@@ -1,0 +1,68 @@
+name: Branch-dispatch smoke (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_to_test:
+        description: 'The branch to check out and run the smoke tests from'
+        required: true
+        default: 'wiring-agent-fixes/catch-cleanup'
+      debug_tests:
+        description: 'Enable DEBUG_TESTS to produce handle dumps (0/1)'
+        required: false
+        default: 'false'
+      debug_tests_level:
+        description: 'DEBUG_TESTS_LEVEL (numeric)'
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
+      DEBUG_TESTS_LEVEL: ${{ github.event.inputs.debug_tests_level || '' }}
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch_to_test }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Run smoke tests (branch)
+        env:
+          SKIP_SYNC_SECRET: 'true'
+        run: |
+          echo "Running smoke test from branch: ${{ github.event.inputs.branch_to_test }}"
+          BASE=${WEBHOOK_BASE%/}
+          echo "Normalized base: $BASE"
+          if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
+            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            echo "NODE_OPTIONS set for debug: $NODE_OPTIONS"
+          fi
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000 || EXIT_CODE=$?
+          # Always attempt to write dumps for debug
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); }catch(e){}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(handles.map((h,i)=>({idx:i,type:(h&&h.constructor&&h.constructor.name)||'<unknown>'})), null, 2)); }catch(e){}"
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-smoke-diagnostics
+          path: |
+            /tmp/async_handle_map.json
+            /tmp/active_handles.json
+            /tmp/health_trace.txt
+            /tmp/ping_trace.txt

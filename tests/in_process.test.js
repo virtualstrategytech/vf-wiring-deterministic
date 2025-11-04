@@ -1,6 +1,13 @@
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
+// Ensure external service URLs are blank for in-process tests so the
+// `llm_elicit` handler uses the deterministic local stub instead of
+// attempting network calls that change the response shape (and can
+// cause flakiness when developers or CI set these globals).
+process.env.PROMPT_URL = process.env.PROMPT_URL || '';
+process.env.BUSINESS_URL = process.env.BUSINESS_URL || '';
+process.env.RETRIEVAL_URL = process.env.RETRIEVAL_URL || '';
 
 const app = require('../novain-platform/webhook/server');
 
@@ -20,17 +27,13 @@ describe('in-process webhook app (refactored)', () => {
 
       // Debug: print the response body to capture actual shape when tests fail
       // (helps diagnose mismatch between test expectation and server response)
-      try {
-        // eslint-disable-next-line no-console
-        console.log('DEBUG resp.body:', JSON.stringify(resp.body));
-      } catch {}
+      // (debug logging removed) response shape is asserted below
 
       expect(resp.status).toBe(200);
 
       const body = resp.body || {};
-      const rawSource =
-        (body && body.raw && body.raw.source) ||
-        (body && body.data && body.data.raw && body.data.raw.source);
+      // tolerate either shape: prefer `data.raw.source` but fall back to `raw.source`
+      const rawSource = body?.data?.raw?.source ?? body?.raw?.source;
       expect(rawSource).toBe('stub');
     } finally {
       // no TCP server to close when using supertest(app)

@@ -336,6 +336,18 @@ function startTestServer(app) {
 
         _servers.delete(server);
 
+        // clear any scheduled verbose dump timers to avoid lingering handles
+        try {
+          if (server && server.__verboseDumpTimer) {
+            try {
+              clearTimeout(server.__verboseDumpTimer);
+            } catch {}
+            try {
+              server.__verboseDumpTimer = null;
+            } catch {}
+          }
+        } catch {}
+
         try {
           for (const s of Array.from(_sockets)) {
             try {
@@ -425,42 +437,60 @@ function startTestServer(app) {
       try {
         const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 3;
         if (process.env.DEBUG_TESTS && verbose) {
-          setTimeout(() => {
-            try {
-              if (typeof process._getActiveHandles === 'function') {
-                const h = process._getActiveHandles() || [];
-                console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
-                h.forEach((hh, ii) => {
+          // schedule a short verbose dump and track the timer so it can be
+          // cleared when the server is closed to avoid leaving a pending
+          // Timeout handle that may be reported by Jest.
+          try {
+            const _t = setTimeout(() => {
+              try {
+                if (typeof process._getActiveHandles === 'function') {
+                  const h = process._getActiveHandles() || [];
+                  console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
                   try {
-                    const name = hh && hh.constructor && hh.constructor.name;
-                    console.warn(`  [${ii}] ${String(name)}`);
-                    try {
-                      if (typeof hh._createdStack === 'string') {
-                        console.warn('    createdStack-preview:');
-                        (hh._createdStack.split('\n').slice(0, 8) || []).forEach((ln) =>
-                          console.warn('      ' + String(ln).trim())
-                        );
-                      }
-                    } catch {
-                      void 0;
-                    }
-                    if (String(name) === 'Function') {
+                    h.forEach((hh, ii) => {
                       try {
-                        const s = String(hh).slice(0, 1000);
-                        console.warn('    fn:', s);
-                      } catch {
-                        void 0;
-                      }
-                    }
-                  } catch {
-                    void 0;
-                  }
-                });
+                        const name = hh && hh.constructor && hh.constructor.name;
+                        try {
+                          console.warn(`  [${ii}] ${String(name)}`);
+                        } catch {}
+                        try {
+                          if (typeof hh._createdStack === 'string') {
+                            try {
+                              console.warn('    createdStack-preview:');
+                            } catch {}
+                            try {
+                              const lines = hh._createdStack.split('\n').slice(0, 8) || [];
+                              lines.forEach((ln) => {
+                                try {
+                                  console.warn('      ' + String(ln).trim());
+                                } catch {}
+                              });
+                            } catch {}
+                          }
+                        } catch {}
+                        if (String(name) === 'Function') {
+                          try {
+                            const s = String(hh).slice(0, 1000);
+                            try {
+                              console.warn('    fn:', s);
+                            } catch {}
+                          } catch {}
+                        }
+                      } catch {}
+                    });
+                  } catch {}
+                }
+              } catch {
+                void 0;
               }
-            } catch {
-              void 0;
-            }
-          }, 50);
+            }, 50);
+            try {
+              if (typeof _t.unref === 'function') _t.unref();
+            } catch {}
+            try {
+              server.__verboseDumpTimer = _t;
+            } catch {}
+          } catch {}
         }
       } catch {
         void 0;
@@ -579,28 +609,17 @@ function _forceCloseAllSockets() {
     if (process.env.DEBUG_TESTS) {
       try {
         console.warn('DEBUG_TESTS: sweeping active handles, count=' + handles.length);
-        handles.forEach((h, i) => {
+        for (let i = 0; i < handles.length; i++) {
           try {
+            const h = handles[i];
             const name = h && h.constructor && h.constructor.name;
-            const info = {
-              idx: i,
-              type: String(name),
-              destroyed: Boolean(h && h.destroyed),
-            };
+            const info = { idx: i, type: String(name), destroyed: Boolean(h && h.destroyed) };
             try {
               if (typeof h.fd !== 'undefined') info.fd = h.fd;
             } catch {}
             try {
               if (typeof h.pending !== 'undefined') info.pending = h.pending;
             } catch {}
-            try {
-              if (h && typeof h._createdStack === 'string') {
-                info._createdStack = h._createdStack.split('\n').slice(0, 6).join('\n');
-              }
-            } catch {}
-            // If this looks like a file ReadStream, try to capture extra
-            // properties (path, bytesRead, readableEnded) which help
-            // map the handle back to the creator in diagnostics.
             try {
               if (h && (String(name) === 'ReadStream' || String(name) === 'FileReadStream')) {
                 try {
@@ -617,28 +636,28 @@ function _forceCloseAllSockets() {
                   if (typeof h.readableEnded !== 'undefined') info.readableEnded = h.readableEnded;
                 } catch {}
               }
-            } catch {
-              void 0;
-            }
-            console.warn(`  handle[${i}] summary: ${JSON.stringify(info)}`);
-            // If there is any stack attached, print a short preview for CI capture
+            } catch {}
+            try {
+              console.warn(`  handle[${i}] summary: ${JSON.stringify(info)}`);
+            } catch {}
             try {
               if (h && typeof h._createdStack === 'string') {
-                console.warn('    createdStack-preview:');
-                (h._createdStack.split('\n').slice(0, 6) || []).forEach((ln) =>
-                  console.warn('      ' + String(ln).trim())
-                );
+                try {
+                  console.warn('    createdStack-preview:');
+                } catch {}
+                try {
+                  const lines = h._createdStack.split('\n').slice(0, 6) || [];
+                  lines.forEach((ln) => {
+                    try {
+                      console.warn('      ' + String(ln).trim());
+                    } catch {}
+                  });
+                } catch {}
               }
-            } catch {
-              void 0;
-            }
-          } catch {
-            void 0;
-          }
-        });
-      } catch {
-        void 0;
-      }
+            } catch {}
+          } catch {}
+        }
+      } catch {}
     }
 
     for (let i = 0; i < handles.length; i++) {
@@ -772,15 +791,19 @@ function _forceCloseAllSockets() {
                       const iter = (obj) => {
                         if (!obj) return;
                         try {
-                          Object.values(obj).forEach((arr) => {
-                            if (Array.isArray(arr)) {
-                              arr.forEach((s) => {
-                                try {
-                                  if (s && typeof s.destroy === 'function') s.destroy();
-                                } catch {}
-                              });
-                            }
-                          });
+                          try {
+                            Object.values(obj).forEach((arr) => {
+                              try {
+                                if (Array.isArray(arr)) {
+                                  arr.forEach((s) => {
+                                    try {
+                                      if (s && typeof s.destroy === 'function') s.destroy();
+                                    } catch {}
+                                  });
+                                }
+                              } catch {}
+                            });
+                          } catch {}
                         } catch {}
                       };
                       iter(agent.sockets);

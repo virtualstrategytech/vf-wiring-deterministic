@@ -164,16 +164,40 @@ jobs:
           # This helps capture socket creation stacks that may be created before
           # Jest's setupFiles run.
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
-            echo "DEBUG_TESTS is enabled; preloading jest.instrumentation.js via NODE_OPTIONS"
-            # Prepend to NODE_OPTIONS so existing options are preserved
-            export NODE_OPTIONS="--require ${PWD}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            echo "DEBUG_TESTS is enabled; preloading jest.netblock.js and jest.instrumentation.js via NODE_OPTIONS"
+            # Prepend to NODE_OPTIONS so existing options are preserved. Require the
+            # netblock file first so nock allowlist is established before other
+            # setup files run; then preload the instrumentation file to capture
+            # socket creation stacks as early as possible.
+            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
           fi
-          # Run jest with a slightly larger test timeout to accommodate external slowness
-          npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000
 
+          # Run jest in a guarded block so we can always dump async handles even on failure.
+          set -o pipefail
+          EXIT_CODE=0
+          npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000 || EXIT_CODE=$?
+
+          # Always try to collect async handle dumps in the same shell context so they reflect the test process state.
+          echo 'Collecting async handle dumps to /tmp (guarded)' >> /tmp/socket_debug.log || true
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
+
+          # Also copy any repo-written debug dumps into /tmp for upload
+          mkdir -p /tmp/smoke-debug || true
+          cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          ls -l /tmp/smoke-debug || true
+
+          # Exit with the original Jest exit code so CI reflects test status
+          exit $EXIT_CODE
+      - name: Final cleanup: attempt to close any remaining sockets in this job
+        if: always()
+        run: |
+          echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'
+          node -e "try{ const handles=(process._getActiveHandles&&process._getActiveHandles())||[]; handles.forEach((h,i)=>{ try{ const n=h&&h.constructor&&h.constructor.name||'<unknown>'; if(n==='Socket'||n==='TLSSocket'){ try{ if(h && typeof h.end==='function') h.end(); }catch{} try{ if(h && typeof h.destroy==='function') h.destroy(); }catch{} try{ if(h && h._handle && typeof h._handle.close==='function') h._handle.close(); }catch{} } }catch(e){} }); console.error('cleanup attempted'); }catch(e){console.error('cleanup failed',e&&e.stack);}"
       - name: Dump debug handles (when DEBUG_TESTS enabled)
         if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
         run: |
@@ -181,8 +205,8 @@ jobs:
           node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
           node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
 
-      - name: Upload debug artifacts (only when DEBUG_TESTS)
-        if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+      - name: Upload debug artifacts (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-debug-handles
@@ -190,13 +214,38 @@ jobs:
             # Primary: any debug dumps produced in /tmp by the job
             /tmp/async_handle_map.json
             /tmp/active_handles.json
+            # Any repo-written debug dumps copied into /tmp by the previous step
+            /tmp/smoke-debug/*
             # Also upload any async handle maps written by the test process
             # into the repository workspace (jest.setup.js writes into ./artifacts/)
             artifacts/async_handles_*.json
             artifacts/active_handles_*.json
 
-      - name: Upload smoke diagnostics (on failure)
-        if: failure()
+      - name: Collect repo debug dumps to /tmp (always)
+        if: always()
+        run: |
+          # Copy any artifacts written into the repository workspace artifacts/ into /tmp so the upload step (which also searches /tmp) will include them reliably
+          mkdir -p /tmp/smoke-debug || true
+          cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
+          # Helpful listing to make sure artifacts are present in job logs
+          echo '--- /tmp listing ---'
+          ls -la /tmp || true
+          echo '--- /tmp/smoke-debug listing ---'
+          ls -la /tmp/smoke-debug || true
+          echo '--- workspace artifacts listing (artifacts/) ---'
+          ls -la artifacts || true
+
+      - name: Preview debug dumps (if present)
+        if: always()
+        run: |
+          echo 'Preview /tmp/async_handle_map.json (first 200 lines if present)'
+          if [ -f /tmp/async_handle_map.json ]; then head -n 200 /tmp/async_handle_map.json || true; else echo 'no /tmp/async_handle_map.json'; fi
+          echo 'Preview /tmp/active_handles.json (first 200 lines if present)'
+          if [ -f /tmp/active_handles.json ]; then head -n 200 /tmp/active_handles.json || true; else echo 'no /tmp/active_handles.json'; fi
+
+      - name: Upload smoke diagnostics (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-diagnostics
