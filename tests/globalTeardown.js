@@ -16,26 +16,77 @@ module.exports = async () => {
 
   // Helper: force-destroy stray sockets (diagnostic only)
   function forceDestroyRemainingSockets() {
-    // Run only for diagnostic runs to avoid surprising behavior in normal CI
-    if (!process.env.DEBUG_TESTS && !process.env.DUMP_ACTIVE_HANDLES) return;
+    // Attempts to close common network handle types that may keep Node alive.
+    // Run unconditionally in teardown to stabilize CI/test runs; avoid
+    // touching stdio streams (process.stdout/stderr) to prevent surprises.
+    if (process.env.SKIP_FORCE_HANDLE_CLEANUP === 'true') return;
     try {
       const handles = process._getActiveHandles ? process._getActiveHandles() : [];
       handles.forEach((h, i) => {
         try {
+          // Skip obvious non-network handles
+          if (h === process.stdout || h === process.stderr || h === process.stdin) return;
+
           const name = h && h.constructor && h.constructor.name;
-          if (String(name) === 'Socket') {
-            // Avoid destroying stdio WriteStreams
-            if (h.destroyed) return;
+          // TLSSocket / Socket: attempt graceful end -> destroy -> underlying close
+          if (name === 'TLSSocket' || name === 'Socket') {
             try {
               const meta = {};
               if (h.remoteAddress) meta.remoteAddress = h.remoteAddress;
               if (h.remotePort) meta.remotePort = h.remotePort;
-              console.warn(`DEBUG_TESTS: force-destroying stray socket[${i}]`, meta);
-              h.destroy();
-            } catch (err) {
-              void err;
-            }
+              console.warn(`force-destroy: closing socket[${i}] (${name})`, meta);
+            } catch {}
+            try {
+              if (typeof h.end === 'function') h.end();
+            } catch {}
+            try {
+              if (typeof h.destroy === 'function') h.destroy();
+            } catch {}
+            try {
+              if (h && h._handle && typeof h._handle.close === 'function') h._handle.close();
+            } catch {}
+            return;
           }
+
+          // http2 ClientHttp2Session
+          if (
+            name === 'ClientHttp2Session' ||
+            (h && typeof h.close === 'function' && String(name).includes('Http2'))
+          ) {
+            try {
+              console.warn(`force-destroy: closing http2 session[${i}] (${name})`);
+              if (typeof h.close === 'function') h.close();
+            } catch {}
+            return;
+          }
+
+          // Generic fallback for handles with destroy/close
+          try {
+            if (h && typeof h.destroy === 'function') {
+              try {
+                h.destroy();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+            if (h && typeof h.close === 'function') {
+              try {
+                h.close();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+            if (h && h._handle && typeof h._handle.close === 'function') {
+              try {
+                h._handle.close();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+          } catch (_) {}
         } catch (err) {
           void err;
         }

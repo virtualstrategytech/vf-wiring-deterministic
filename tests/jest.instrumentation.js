@@ -19,6 +19,53 @@ try {
 if (process.env.__JEST_INSTRUMENTATION_SKIPPED === '1') {
   // instrumentation disabled; noop
 } else {
+  // Early async_hooks tracer: populate global.__async_handle_map as soon as
+  // the instrumentation file is required. This helps capture handle init
+  // events that occur during module load/require-time which may otherwise
+  // be missed if async_hooks is installed later in setupFiles.
+  try {
+    if (process.env.DEBUG_TESTS === '1' || process.env.DEBUG_TESTS === 'true') {
+      try {
+        const async_hooks = require('async_hooks');
+        const handleMap = new Map();
+        global.__async_handle_map = handleMap;
+        const hook = async_hooks.createHook({
+          init(id, type) {
+            try {
+              const t = String(type).toLowerCase();
+              if (t === 'promise') return;
+              // conservative filter unless verbose
+              const verbose = !!process.env.DEBUG_TESTS;
+              if (!verbose) {
+                if (
+                  !(
+                    t.includes('tcp') ||
+                    t.includes('tcpwrap') ||
+                    t === 'timeout' ||
+                    t.includes('pipe') ||
+                    t.includes('timer') ||
+                    t.includes('tty') ||
+                    t.includes('signal') ||
+                    t.includes('tls')
+                  )
+                ) {
+                  return;
+                }
+              }
+              const s = new Error('handle-init').stack;
+              handleMap.set(id, { type, stack: s });
+            } catch {}
+          },
+          destroy(id) {
+            try {
+              handleMap.delete(id);
+            } catch {}
+          },
+        });
+        hook.enable();
+      } catch {}
+    }
+  } catch {}
   const http = require('http');
   const https = require('https');
   const net = require('net');

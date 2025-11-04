@@ -707,13 +707,68 @@ if (require.main === module) {
     // ignore logging failures
   }
 
-  app.listen(PORT, () => {
+  // Save server so we can close it cleanly on shutdown and attempt to
+  // close any persistent HTTP/undici resources that may keep sockets alive.
+  const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     // Mark readiness once the server has actually bound the port.
     __ready = true;
-    // In case other background initialization is added in future, it should
-    // set __ready = true only after completion (or call a helper that does).
   });
+
+  // Graceful shutdown helper: close undici global dispatcher (if present),
+  // destroy http/https global agents, and close the server. This reduces
+  // the chance of lingering TLSSocket/TCPWRAP handles after process exit.
+  const gracefulShutdown = (signal) => {
+    try {
+      console.log(`Received ${signal}; performing graceful shutdown`);
+    } catch {}
+    __ready = false;
+
+    // Use centralized cleanup for HTTP/undici resources.
+    try {
+      const client = require('../lib/http-client');
+      if (client && typeof client.closeAllClients === 'function') {
+        try {
+          client.closeAllClients();
+        } catch (e) {}
+      }
+    } catch (e) {
+      /* ignore */
+    }
+
+    // Stop accepting new connections and close existing ones. If server
+    // close hangs, force exit after a short timeout to avoid stalls in CI.
+    try {
+      server.close(() => {
+        try {
+          console.log('gracefulShutdown: HTTP server closed');
+        } catch {}
+        // allow process to exit normally
+        try {
+          process.exit(0);
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch (e) {
+      try {
+        console.error('gracefulShutdown: server.close failed', e && e.stack ? e.stack : e);
+      } catch {}
+    }
+
+    // Force exit after 5s if graceful close did not complete.
+    setTimeout(() => {
+      try {
+        console.error('gracefulShutdown: forcing process exit');
+      } catch {}
+      try {
+        process.exit(1);
+      } catch {}
+    }, 5000).unref();
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
 // Attach a helper to create a raw http.Server for tests that need explicit

@@ -1,0 +1,32 @@
+name: Detect open handles
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  detect-open-handles:
+    name: Run tests with detectOpenHandles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Run tests (fast) with detectOpenHandles
+        env:
+          CI: '1'
+        run: |
+          # Run tests in-band and enable Jest's detectOpenHandles to catch
+          # socket/handle regressions quickly. Keep a short timeout so this
+          # gate stays fast on PRs.
+          npx jest --runInBand --detectOpenHandles --testTimeout=60000

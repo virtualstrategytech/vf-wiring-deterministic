@@ -74,4 +74,28 @@ app.post('/v1/elicitation/generate', (req, res) =>
 );
 
 const port = process.env.PORT || 4000;
-app.listen(port, () => console.log(`Mock BUSINESS service listening on ${port}`));
+const server = app.listen(port, () => console.log(`Mock BUSINESS service listening on ${port}`));
+
+function gracefulShutdown(signal) {
+  try {
+    console.log(`Received ${signal}; shutting down mock business server`);
+  } catch {}
+  try {
+    const client = require('../lib/http-client');
+    if (client && typeof client.closeAllClients === 'function') client.closeAllClients();
+  } catch (e) {}
+  try {
+    server.close(() => {
+      try {
+        process.exit(0);
+      } catch {}
+    });
+  } catch (e) {}
+  setTimeout(() => {
+    try {
+      process.exit(1);
+    } catch {}
+  }, 5000).unref();
+}
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
