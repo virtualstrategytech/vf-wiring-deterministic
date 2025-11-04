@@ -3,28 +3,31 @@
 
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test-key';
 
-const request = require('supertest');
 const path = require('path');
+const { requestApp } = require('./helpers/request-helper');
 
 // require the app directly (exports the Express app and a createServer helper)
 const app = require(path.join(__dirname, '..', 'novain-platform', 'webhook', 'server.js'));
 
 describe('in-process app smoke', () => {
   test('GET /health returns ok', async () => {
-    const res = await request(app).get('/health').expect(200);
-    expect(String(res.text)).toBe('ok');
+    const res = await requestApp(app, { method: 'get', path: '/health' });
+    expect(res.status).toBe(200);
+    expect(String(res.body)).toBe('ok');
   });
 
   test('POST /webhook ping (in-process) works with API key', async () => {
     const payload = require('./fixtures/ping.json');
-    const res = await request(app)
-      .post('/webhook')
-      .set('x-api-key', 'test-key')
-      .send(payload)
-      .expect(200);
+    const res = await requestApp(app, {
+      method: 'post',
+      path: '/webhook',
+      headers: { 'x-api-key': 'test-key', 'content-type': 'application/json' },
+      body: payload,
+    });
 
+    expect(res.status).toBe(200);
     expect(res.body && res.body.ok).toBe(true);
-    expect(typeof res.body.reply).toBe('string');
-    expect(res.body.port).toBeDefined();
+    expect(typeof (res.body && res.body.reply)).toBe('string');
+    expect(res.body && res.body.port).toBeDefined();
   });
 });
