@@ -265,3 +265,4 @@ jobs:
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"
 
 # force reparse 2025-11-04T10:52:32.6734367-05:00
+# Touch: ensure this workflow file is present on feature branches for manual dispatch (updated by agent)
