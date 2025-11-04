@@ -164,10 +164,12 @@ jobs:
           # This helps capture socket creation stacks that may be created before
           # Jest's setupFiles run.
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
-            echo "DEBUG_TESTS is enabled; preloading jest.instrumentation.js via NODE_OPTIONS"
-            # Prepend to NODE_OPTIONS so existing options are preserved. Use GITHUB_WORKSPACE
-            # to reliably resolve the workspace root in the Actions runner (safer than ${PWD}).
-            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            echo "DEBUG_TESTS is enabled; preloading jest.netblock.js and jest.instrumentation.js via NODE_OPTIONS"
+            # Prepend to NODE_OPTIONS so existing options are preserved. Require the
+            # netblock file first so nock allowlist is established before other
+            # setup files run; then preload the instrumentation file to capture
+            # socket creation stacks as early as possible.
+            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
