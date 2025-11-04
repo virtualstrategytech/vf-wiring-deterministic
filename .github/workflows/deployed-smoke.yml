@@ -193,7 +193,7 @@ jobs:
 
           # Exit with the original Jest exit code so CI reflects test status
           exit $EXIT_CODE
-      - name: Final cleanup: attempt to close any remaining sockets in this job
+      - name: 'Final cleanup: attempt to close any remaining sockets in this job'
         if: always()
         run: |
           echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'
@@ -263,4 +263,5 @@ jobs:
           echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
           echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"
+
 # force reparse 2025-11-04T10:52:32.6734367-05:00
