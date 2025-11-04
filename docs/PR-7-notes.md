@@ -23,6 +23,7 @@ Notes and recommendations for reviewers:
 - If you'd like me to open/update the GitHub PR body with this text, I can prepare the exact PR body. I don't have direct GitHub API access in this session, so please paste this text into PR #7 or give me permission to attempt a remote PR edit.
 
 Next actions (optional, choose):
+
 - Dispatch 3 CI smoke runs using the manual workflow `.github/workflows/deployed-smoke.yml` with `DEBUG_TESTS` enabled, then download artifacts for analysis.
 - Remove or further reduce debug instrumentation after CI validation.
 - Merge this branch into `feat/wiring-agent` once reviewers sign off.
