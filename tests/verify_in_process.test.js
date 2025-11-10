@@ -1,7 +1,10 @@
 // Lightweight in-process verification test: require the Express app without listening
 // and exercise a couple of endpoints using supertest.
 
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test-key';
+// Ensure tests run deterministically in CI (use provided secret when present,
+// otherwise fall back to a stable test key). Capture the runtime key into
+// a local constant so requests use the exact expected value.
+const API_KEY = (process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test-key');
 
 const path = require('path');
 const { requestApp } = require('./helpers/request-helper');
@@ -21,7 +24,7 @@ describe('in-process app smoke', () => {
     const res = await requestApp(app, {
       method: 'post',
       path: '/webhook',
-      headers: { 'x-api-key': 'test-key', 'content-type': 'application/json' },
+      headers: { 'x-api-key': API_KEY, 'content-type': 'application/json' },
       body: payload,
     });
 
