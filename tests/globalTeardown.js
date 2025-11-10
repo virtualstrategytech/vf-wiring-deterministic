@@ -395,6 +395,111 @@ module.exports = async () => {
     appendLog(`globalTeardown: orphan-child-sweep error: ${_e && _e.message}`);
   }
 
+  // Extra conservative step: attempt platform-specific forced kills for
+  // common orphan test servers that may not have been tracked or that
+  // ignored earlier kill attempts. This helps CI where a reparented or
+  // stubborn child process can keep the job alive despite prior cleanup.
+  try {
+    appendLog(
+      'globalTeardown: attempting platform-specific pkill/taskkill for common orphan servers'
+    );
+    if (process.platform !== 'win32') {
+      try {
+        // try to terminate any child process started via server-runner
+        spawnSync('pkill', ['-TERM', '-f', 'server-runner'], { stdio: 'ignore' });
+        appendLog('globalTeardown: pkill server-runner invoked');
+      } catch (_) {}
+      try {
+        // try to terminate any node process running the webhook server file
+        spawnSync('pkill', ['-TERM', '-f', 'novain-platform/webhook/server.js'], {
+          stdio: 'ignore',
+        });
+        appendLog('globalTeardown: pkill webhook server.js invoked');
+      } catch (_) {}
+      try {
+        // catch variants named server-runner.js or similar
+        spawnSync('pkill', ['-TERM', '-f', 'server-runner.js'], { stdio: 'ignore' });
+      } catch (_) {}
+    } else {
+      try {
+        // On Windows: avoid killing all node.exe processes (too aggressive).
+        // Instead use PowerShell to find node processes whose command line
+        // mentions our test-server runner or the webhook server file and
+        // then taskkill those PIDs specifically.
+        try {
+          spawnSync(
+            'powershell',
+            [
+              '-NoProfile',
+              '-Command',
+              "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like '*server-runner*' -or $_.CommandLine -like '*novain-platform\\webhook\\server.js*') } | Select-Object -ExpandProperty ProcessId | ForEach-Object { taskkill /PID $_ /T /F }",
+            ],
+            { stdio: 'ignore' }
+          );
+          appendLog('globalTeardown: targeted taskkill via PowerShell invoked');
+        } catch (_) {}
+      } catch (_) {}
+    }
+
+    // Give the OS a short moment to clean up reparented processes
+    try {
+      await new Promise((r) => setTimeout(r, 200));
+    } catch (_) {}
+
+    // Re-scan active handles/requests and perform a second best-effort
+    // ChildProcess kill sweep to catch any remaining orphaned children.
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              if (!pid) continue;
+              appendLog(
+                `globalTeardown: re-check found child handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+              try {
+                process.kill(pid, 'SIGTERM');
+                appendLog(`globalTeardown: re-sent SIGTERM to ${pid}`);
+              } catch (_) {}
+
+              const start = Date.now();
+              let alive = true;
+              const waitMs = 300;
+              while (Date.now() - start < waitMs) {
+                try {
+                  process.kill(pid, 0);
+                } catch {
+                  alive = false;
+                  break;
+                }
+              }
+
+              if (alive) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                  appendLog(`globalTeardown: re-sent SIGKILL to ${pid}`);
+                } catch (_) {
+                  try {
+                    if (process.platform === 'win32')
+                      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+                  } catch (_) {}
+                }
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: platform-specific kill attempts error: ${e && e.message}`);
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: platform kill outer error: ${e && e.message}`);
+  }
+
   // Final aggressive sweep (diagnostic only)
   try {
     forceDestroyRemainingSockets();
