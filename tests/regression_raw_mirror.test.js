@@ -1,5 +1,7 @@
 // Regression test to ensure the webhook always returns both `raw` and `data.raw`
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
+// Resolve API key consistently via helper so CI/local fallback behavior is uniform
+const { resolveApiKey } = require('./helpers/api-key');
+resolveApiKey();
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 
 // In CI environments prefer child-process server isolation to avoid native

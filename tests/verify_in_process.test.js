@@ -4,7 +4,7 @@
 // Ensure tests run deterministically in CI (use provided secret when present,
 // otherwise fall back to a stable test key). Capture the runtime key into
 // a local constant so requests use the exact expected value.
-const API_KEY = (process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test-key');
+const API_KEY = (process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123');
 
 const path = require('path');
 const { requestApp } = require('./helpers/request-helper');

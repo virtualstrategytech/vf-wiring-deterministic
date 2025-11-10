@@ -1,4 +1,5 @@
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
+const { resolveApiKey } = require('./helpers/api-key');
+resolveApiKey();
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
 // Ensure external service URLs are blank for in-process tests so the

@@ -721,6 +721,78 @@ afterAll(async () => {
                   }
                 } catch {}
               }
+
+              // Extra diagnostic: when a deeper debug level is requested, persist a
+              // focused dump of any handles that look like anonymous functions or
+              // AsyncResource-like constructs (these are the typical 'bound-anonymous-fn'
+              // reports from Jest). This file is intended for short-lived triage only
+              // and is gated behind DEBUG_TESTS_LEVEL>=4.
+              try {
+                const deep = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 4;
+                if (process.env.DEBUG_TESTS && deep) {
+                  try {
+                    const handles =
+                      (process._getActiveHandles && process._getActiveHandles()) || [];
+                    const suspicious = [];
+                    for (let i = 0; i < handles.length; i++) {
+                      try {
+                        const h = handles[i];
+                        const ctor = h && h.constructor && h.constructor.name;
+                        const created =
+                          h && typeof h._createdStack === 'string' ? h._createdStack : '';
+                        const stringified = (() => {
+                          try {
+                            return String(h).slice(0, 800);
+                          } catch {
+                            return '';
+                          }
+                        })();
+
+                        // Heuristic: Function objects, anonymous-looking stacks, or
+                        // objects whose toString seems to include bound/anonymous text.
+                        if (
+                          String(ctor) === 'Function' ||
+                          /anonymous|bound|<anonymous>/i.test(created) ||
+                          /bound anonymous|bound-anonymous/i.test(stringified)
+                        ) {
+                          suspicious.push({
+                            idx: i,
+                            type: String(ctor),
+                            created: created.slice(0, 1000),
+                            repr: stringified,
+                          });
+                        }
+                      } catch {}
+                    }
+
+                    if (suspicious.length) {
+                      try {
+                        const fs = require('fs');
+                        const path = require('path');
+                        const repoPath = path.join(process.cwd(), 'artifacts');
+                        fs.mkdirSync(repoPath, { recursive: true });
+                        const diagFile = path.join(
+                          repoPath,
+                          `async_handle_diagnostic_${Date.now()}.json`
+                        );
+                        fs.writeFileSync(diagFile, JSON.stringify(suspicious, null, 2));
+                        try {
+                          console.warn(
+                            'DEBUG_TESTS: wrote suspicious-handle diagnostic to',
+                            diagFile
+                          );
+                        } catch {}
+                      } catch {}
+                    } else {
+                      try {
+                        console.warn(
+                          'DEBUG_TESTS: no suspicious anonymous/function handles detected'
+                        );
+                      } catch {}
+                    }
+                  } catch {}
+                }
+              } catch {}
             } catch {}
           }
         } catch {}
