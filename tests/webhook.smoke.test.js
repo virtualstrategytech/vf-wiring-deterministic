@@ -129,7 +129,7 @@ describe('webhook smoke', () => {
       if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
         https.globalAgent.destroy();
       }
-      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => process.nextTick(r));
     } catch {}
     // If DEBUG_TESTS is enabled, persist any async handle map and active handles
     // produced by the test process into /tmp and the repo artifacts folder so
@@ -229,8 +229,13 @@ describe('webhook smoke', () => {
       } catch (err) {
         lastErr = err;
         if (attempt < retries) {
-          // wait then retry
-          await new Promise((r) => setTimeout(r, retryDelay));
+          // wait then retry (use unref'd timer so retry delay doesn't keep loop alive)
+          await new Promise((r) => {
+            const t = setTimeout(r, retryDelay);
+            try {
+              if (t && typeof t.unref === 'function') t.unref();
+            } catch {}
+          });
         }
       }
     }

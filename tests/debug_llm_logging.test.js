@@ -84,7 +84,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
         https.globalAgent.destroy();
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => process.nextTick(resolve));
     } catch {}
   });
 

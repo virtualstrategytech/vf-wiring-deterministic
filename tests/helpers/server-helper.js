@@ -100,6 +100,24 @@ function _attachSocketTracking(server, sockets) {
       void 0;
     }
 
+    // Defensive handlers: ensure sockets that time out or error are
+    // destroyed so they don't linger as open handles in Jest/CI.
+    function _onSocketTimeout() {
+      try {
+        if (sock && typeof sock.destroy === 'function') sock.destroy();
+      } catch {
+        void 0;
+      }
+    }
+
+    function _onSocketError() {
+      try {
+        if (sock && typeof sock.destroy === 'function') sock.destroy();
+      } catch {
+        void 0;
+      }
+    }
+
     function _onSocketClose() {
       sockets.delete(sock);
       _sockets.delete(sock);
@@ -108,12 +126,57 @@ function _attachSocketTracking(server, sockets) {
       } catch {
         void 0;
       }
+      try {
+        sock.removeListener && sock.removeListener('timeout', _onSocketTimeout);
+      } catch {
+        void 0;
+      }
+      try {
+        sock.removeListener && sock.removeListener('error', _onSocketError);
+      } catch {
+        void 0;
+      }
     }
 
+    try {
+      sock.on('timeout', _onSocketTimeout);
+    } catch {}
+    try {
+      sock.on('error', _onSocketError);
+    } catch {}
     sock.on('close', _onSocketClose);
   }
 
   server.on('connection', _onConnection);
+}
+
+// Helper to detect obvious stdio/tty handles so we can avoid printing
+// noisy createdStack previews for benign runtime stdio objects.
+function _isStdIoHandle(h) {
+  try {
+    if (!h) return false;
+    try {
+      if (typeof h.fd !== 'undefined') {
+        const fd = Number(h.fd);
+        if (fd === 0 || fd === 1 || fd === 2) return true;
+      }
+    } catch {}
+    try {
+      const cs = h && typeof h._createdStack === 'string' ? h._createdStack : '';
+      if (
+        cs &&
+        (cs.includes('createWritableStdioStream') ||
+          cs.includes('getStdout') ||
+          cs.includes('getStderr') ||
+          cs.includes('isInteractive') ||
+          cs.includes('TTY') ||
+          cs.includes('WriteStream'))
+      ) {
+        return true;
+      }
+    } catch {}
+  } catch {}
+  return false;
 }
 
 function startTestServer(app) {
@@ -209,6 +272,9 @@ function startTestServer(app) {
               res();
             }
           }, 2000);
+          try {
+            if (timeout && typeof timeout.unref === 'function') timeout.unref();
+          } catch {}
 
           function onClose() {
             if (!called) {
@@ -218,7 +284,7 @@ function startTestServer(app) {
               } catch {
                 void 0;
               }
-              setImmediate(() => res());
+              process.nextTick(() => res());
             }
           }
 
@@ -237,7 +303,7 @@ function startTestServer(app) {
                   void 0;
                 }
               }
-              setImmediate(() => res());
+              process.nextTick(() => res());
             }
           }
 
@@ -315,7 +381,7 @@ function startTestServer(app) {
           void 0;
         }
 
-        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => process.nextTick(r));
 
         try {
           if (typeof server.unref === 'function') server.unref();
@@ -372,7 +438,10 @@ function startTestServer(app) {
                   } catch {
                     resolve();
                   }
-                  setTimeout(() => resolve(), 1500);
+                  const _closeT = setTimeout(() => resolve(), 1500);
+                  try {
+                    if (_closeT && typeof _closeT.unref === 'function') _closeT.unref();
+                  } catch {}
                 });
                 closePromises.push(p);
               } catch {
@@ -385,6 +454,21 @@ function startTestServer(app) {
           try {
             // wait for the best-effort close attempts to settle
             await Promise.allSettled(closePromises);
+          } catch {
+            void 0;
+          }
+          // Give a very short grace period to allow OS-level close callbacks
+          // and socket 'close' events to propagate before we run the
+          // aggressive global sweep. This reduces timing-based flakiness
+          // on CI where a server.close() resolves slightly before native
+          // handles finish teardown.
+          try {
+            await new Promise((r) => {
+              const t = setTimeout(r, 25);
+              try {
+                if (t && typeof t.unref === 'function') t.unref();
+              } catch {}
+            });
           } catch {
             void 0;
           }
@@ -404,7 +488,12 @@ function startTestServer(app) {
         // to settle after forceful destruction. This is test-only and
         // reduces flaky detectOpenHandles reports on CI/Windows.
         try {
-          await new Promise((r) => setTimeout(r, 75));
+          await new Promise((r) => {
+            const t = setTimeout(r, 75);
+            try {
+              if (t && typeof t.unref === 'function') t.unref();
+            } catch {}
+          });
         } catch {
           void 0;
         }
@@ -446,43 +535,43 @@ function startTestServer(app) {
                 if (typeof process._getActiveHandles === 'function') {
                   const h = process._getActiveHandles() || [];
                   console.warn('DEBUG_TESTS: post-listen verbose active handles dump:');
-                  try {
-                    h.forEach((hh, ii) => {
+                  h.forEach((hh, ii) => {
+                    try {
+                      // silently skip obvious stdio/tty handles
+                      if (_isStdIoHandle(hh)) return;
+                      const name = hh && hh.constructor && hh.constructor.name;
                       try {
-                        const name = hh && hh.constructor && hh.constructor.name;
-                        try {
-                          console.warn(`  [${ii}] ${String(name)}`);
-                        } catch {}
-                        try {
-                          if (typeof hh._createdStack === 'string') {
-                            try {
-                              console.warn('    createdStack-preview:');
-                            } catch {}
-                            try {
-                              const lines = hh._createdStack.split('\n').slice(0, 8) || [];
-                              lines.forEach((ln) => {
-                                try {
-                                  console.warn('      ' + String(ln).trim());
-                                } catch {}
-                              });
-                            } catch {}
-                          }
-                        } catch {}
-                        if (String(name) === 'Function') {
+                        console.warn(`  [${ii}] ${String(name)}`);
+                      } catch {}
+
+                      try {
+                        if (!_isStdIoHandle(hh) && typeof hh._createdStack === 'string') {
                           try {
-                            const s = String(hh).slice(0, 1000);
-                            try {
-                              console.warn('    fn:', s);
-                            } catch {}
+                            console.warn('    createdStack-preview:');
+                          } catch {}
+                          try {
+                            const lines = hh._createdStack.split('\n').slice(0, 8) || [];
+                            lines.forEach((ln) => {
+                              try {
+                                console.warn('      ' + String(ln).trim());
+                              } catch {}
+                            });
                           } catch {}
                         }
                       } catch {}
-                    });
-                  } catch {}
+
+                      if (String(name) === 'Function') {
+                        try {
+                          const s = String(hh).slice(0, 1000);
+                          try {
+                            console.warn('    fn:', s);
+                          } catch {}
+                        } catch {}
+                      }
+                    } catch {}
+                  });
                 }
-              } catch {
-                void 0;
-              }
+              } catch {}
             }, 50);
             try {
               if (typeof _t.unref === 'function') _t.unref();
@@ -567,6 +656,81 @@ function startTestServer(app) {
 }
 
 function _forceCloseAllSockets() {
+  // Best-effort: kill any child processes started by tests that may keep
+  // stdio pipes and sockets open. Some test helpers spawn child servers and
+  // don't reliably remove them; attempt to terminate tracked ChildProcess
+  // objects (if any) and fallback to any recorded global list.
+  try {
+    const tracked = (global.__TEST_CHILD_PROCESSES && global.__TEST_CHILD_PROCESSES.slice()) || [];
+    if (tracked.length) {
+      try {
+        _debugWarn(`DEBUG_TESTS: killing ${tracked.length} tracked test child process(es)`);
+      } catch {}
+    }
+
+    for (const c of tracked) {
+      try {
+        const pid = c && c.pid;
+        if (!pid) continue;
+
+        try {
+          // close stdio streams (they are often Socket handles)
+          if (c.stdin && typeof c.stdin.destroy === 'function') c.stdin.destroy();
+        } catch {}
+        try {
+          if (c.stdout && typeof c.stdout.destroy === 'function') c.stdout.destroy();
+        } catch {}
+        try {
+          if (c.stderr && typeof c.stderr.destroy === 'function') c.stderr.destroy();
+        } catch {}
+
+        try {
+          // graceful
+          if (typeof c.kill === 'function') c.kill('SIGTERM');
+          else process.kill(pid, 'SIGTERM');
+        } catch {}
+
+        // short wait then escalate
+        const waitMs = 500;
+        const start = Date.now();
+        let alive = true;
+        while (Date.now() - start < waitMs) {
+          try {
+            process.kill(pid, 0);
+            // still alive
+            // give it a tiny sleep
+            const now = Date.now();
+            const until = Math.min(50, waitMs - (now - start));
+            Atomics ? Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, until) : null;
+          } catch {
+            alive = false;
+            break;
+          }
+        }
+
+        if (alive) {
+          try {
+            // force
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            try {
+              if (process.platform === 'win32')
+                require('child_process').spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']);
+            } catch {}
+          }
+        }
+      } catch {
+        void 0;
+      }
+    }
+
+    // clear the tracked list
+    try {
+      global.__TEST_CHILD_PROCESSES = [];
+    } catch {}
+  } catch {
+    void 0;
+  }
   // First, destroy any sockets we have tracked explicitly
   for (const s of Array.from(_sockets)) {
     try {
@@ -590,7 +754,10 @@ function _forceCloseAllSockets() {
             resolve();
           }
           // ensure we don't block indefinitely
-          setTimeout(() => resolve(), 1500);
+          const _fcloseT = setTimeout(() => resolve(), 1500);
+          try {
+            if (_fcloseT && typeof _fcloseT.unref === 'function') _fcloseT.unref();
+          } catch {}
         });
         // don't await here synchronously; let the promise run and continue
         p.catch(() => {});
@@ -606,9 +773,96 @@ function _forceCloseAllSockets() {
   // handles that may not have been tracked (avoid destroying stdio streams).
   try {
     const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+    // If any ChildProcess handles are present in the active handles list,
+    // attempt a best-effort kill similar to above (covers cases where the
+    // child wasn't tracked via global.__TEST_CHILD_PROCESSES).
+    try {
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const hh = handles[i];
+          const nm = hh && hh.constructor && hh.constructor.name;
+          if (String(nm) === 'ChildProcess' || (hh && typeof hh.pid === 'number')) {
+            try {
+              const pid = hh.pid;
+              if (!pid) continue;
+              try {
+                if (
+                  hh &&
+                  typeof hh.stdin === 'object' &&
+                  hh.stdin &&
+                  typeof hh.stdin.destroy === 'function'
+                )
+                  hh.stdin.destroy();
+              } catch {}
+              try {
+                if (
+                  hh &&
+                  typeof hh.stdout === 'object' &&
+                  hh.stdout &&
+                  typeof hh.stdout.destroy === 'function'
+                )
+                  hh.stdout.destroy();
+              } catch {}
+              try {
+                if (
+                  hh &&
+                  typeof hh.stderr === 'object' &&
+                  hh.stderr &&
+                  typeof hh.stderr.destroy === 'function'
+                )
+                  hh.stderr.destroy();
+              } catch {}
+
+              try {
+                process.kill(pid, 'SIGTERM');
+              } catch {}
+
+              // small synchronous wait loop (non-blocking best-effort)
+              const start = Date.now();
+              let alive = true;
+              while (Date.now() - start < 300) {
+                try {
+                  process.kill(pid, 0);
+                } catch {
+                  alive = false;
+                  break;
+                }
+              }
+
+              if (alive) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                } catch {
+                  try {
+                    if (process.platform === 'win32')
+                      require('child_process').spawnSync('taskkill', [
+                        '/PID',
+                        String(pid),
+                        '/T',
+                        '/F',
+                      ]);
+                  } catch {}
+                }
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch {}
     if (process.env.DEBUG_TESTS) {
       try {
-        console.warn('DEBUG_TESTS: sweeping active handles, count=' + handles.length);
+        // Show filtered count that excludes obvious stdio handles to reduce
+        // noise in CI logs (we still print individual handle summaries below).
+        let visibleCount = 0;
+        try {
+          visibleCount = handles.filter((hh) => !_isStdIoHandle(hh)).length;
+        } catch {}
+        console.warn(
+          'DEBUG_TESTS: sweeping active handles, total=' +
+            handles.length +
+            ', visible=' +
+            visibleCount
+        );
         for (let i = 0; i < handles.length; i++) {
           try {
             const h = handles[i];
@@ -641,19 +895,23 @@ function _forceCloseAllSockets() {
               console.warn(`  handle[${i}] summary: ${JSON.stringify(info)}`);
             } catch {}
             try {
-              if (h && typeof h._createdStack === 'string') {
-                try {
-                  console.warn('    createdStack-preview:');
-                } catch {}
-                try {
-                  const lines = h._createdStack.split('\n').slice(0, 6) || [];
-                  lines.forEach((ln) => {
-                    try {
-                      console.warn('      ' + String(ln).trim());
-                    } catch {}
-                  });
-                } catch {}
-              }
+              // Only show createdStack-preview for non-stdio handles to
+              // reduce noise in CI logs.
+              try {
+                if (!_isStdIoHandle(h) && h && typeof h._createdStack === 'string') {
+                  try {
+                    console.warn('    createdStack-preview:');
+                  } catch {}
+                  try {
+                    const lines = h._createdStack.split('\n').slice(0, 6) || [];
+                    lines.forEach((ln) => {
+                      try {
+                        console.warn('      ' + String(ln).trim());
+                      } catch {}
+                    });
+                  } catch {}
+                }
+              } catch {}
             } catch {}
           } catch {}
         }
@@ -664,6 +922,83 @@ function _forceCloseAllSockets() {
       const h = handles[i];
       try {
         const name = h && h.constructor && h.constructor.name;
+        // If we encounter a Server handle that wasn't tracked, attempt a
+        // best-effort close/remove listeners before treating it like a
+        // socket/stream. This helps free native handles that otherwise
+        // linger until process exit.
+        try {
+          if (String(name) === 'Server') {
+            try {
+              if (h && typeof h.removeAllListeners === 'function') {
+                try {
+                  h.removeAllListeners('connection');
+                } catch {}
+              }
+            } catch {}
+            try {
+              if (h && typeof h.close === 'function') {
+                try {
+                  h.close();
+                } catch {}
+              }
+            } catch {}
+            try {
+              if (h && h._handle && typeof h._handle.close === 'function') {
+                try {
+                  h._handle.close();
+                } catch {}
+              }
+            } catch {}
+            // proceed to next handle after attempts
+            continue;
+          }
+        } catch {}
+        try {
+          // Best-effort: clear timer-like native handles (Timeout/Immediate)
+          // that may not be tracked by our global timer wrapper. This mirrors
+          // the cleanup added to `tests/jest.setup.js` so both in-process and
+          // child-process server teardown attempt to clear timers.
+          try {
+            if (String(name) === 'Timeout') {
+              try {
+                clearTimeout(h);
+              } catch {}
+            }
+          } catch {}
+          try {
+            if (String(name) === 'Immediate') {
+              try {
+                clearImmediate(h);
+              } catch {}
+            }
+          } catch {}
+        } catch {}
+
+        // Small defensive filter: skip obvious stdio/tty handles that the
+        // instrumentation intentionally captures (createWritableStdioStream,
+        // process.getStdout/getStderr, jest util isInteractive). These are
+        // runtime stdio handles and not actionable leaks; filtering them
+        // avoids noisy false-positives while keeping the aggressive
+        // destruction for real sockets/streams.
+        try {
+          const cs = h && typeof h._createdStack === 'string' ? h._createdStack : '';
+          if (
+            cs &&
+            (cs.includes('createWritableStdioStream') ||
+              cs.includes('getStdout') ||
+              cs.includes('getStderr') ||
+              cs.includes('isInteractive') ||
+              cs.includes('TTY') ||
+              cs.includes('WriteStream'))
+          ) {
+            if (process.env.DEBUG_TESTS) {
+              try {
+                console.warn(`DEBUG_TESTS: skipping stdio/tty handle[${i}] name=${String(name)}`);
+              } catch {}
+            }
+            continue;
+          }
+        } catch {}
 
         // Consider common names for file/socket read handles. We also
         // fall back to duck-typing (has readable/close/destroy) so we don't
@@ -732,7 +1067,7 @@ function _forceCloseAllSockets() {
 
             // Defensive second attempt on next tick
             try {
-              setImmediate(() => {
+              process.nextTick(() => {
                 try {
                   if (h && !h.destroyed && typeof h.destroy === 'function') {
                     try {
@@ -869,4 +1204,13 @@ function _forceCloseAllSockets() {
   _servers.clear();
 }
 
-module.exports = { startTestServer, _forceCloseAllSockets };
+function registerTestChild(child) {
+  try {
+    global.__TEST_CHILD_PROCESSES = global.__TEST_CHILD_PROCESSES || [];
+    if (child && child.pid) global.__TEST_CHILD_PROCESSES.push(child);
+  } catch {
+    void 0;
+  }
+}
+
+module.exports = { startTestServer, _forceCloseAllSockets, registerTestChild };

@@ -129,6 +129,17 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     }
 
     if (child) {
+      try {
+        // register tracked child so teardown can kill it explicitly
+        const serverHelper = require('./helpers/server-helper');
+        if (serverHelper && typeof serverHelper.registerTestChild === 'function') {
+          try {
+            serverHelper.registerTestChild(child);
+            logLine('globalSetup: registered child with server-helper');
+          } catch {}
+        }
+      } catch {}
+
       child.on('error', (e) => logLine('globalSetup: spawn error:', e.message));
       child.on('exit', (code, sig) =>
         logLine('globalSetup: server exited', `code=${code}`, `sig=${sig}`)

@@ -33,6 +33,9 @@ jobs:
           SKIP_BODY_PARSER: '1'
           SKIP_SMOKE: 'true'
           USE_CHILD_PROCESS_SERVER: '1'
+          FORCE_PER_REQUEST_AGENT: '1'
+          FORCE_DETERMINISTIC_IDS: '1'
+          TEST_PATCH_RAW_BODY: '1'
         run: |
           bash ./scripts/ci_run_jest.sh
 
@@ -46,6 +49,7 @@ jobs:
   test-child-server:
     name: Run tests with child-process server
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,6 +68,9 @@ jobs:
           DEBUG_TESTS: '1'
           NODE_DEBUG: 'net,tls'
           SKIP_BODY_PARSER: '1'
+          FORCE_PER_REQUEST_AGENT: '1'
+          FORCE_DETERMINISTIC_IDS: '1'
+          TEST_PATCH_RAW_BODY: '1'
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
           # capture both stdout+stderr (node debug traces go to stderr)

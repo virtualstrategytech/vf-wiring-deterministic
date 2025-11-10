@@ -162,7 +162,7 @@ jobs:
           ls -l /tmp/smoke-debug || true
           exit $EXIT_CODE
 
-      - name: Final cleanup: attempt to close any remaining sockets in this job
+      - name: 'Final cleanup: attempt to close any remaining sockets in this job'
         if: always()
         run: |
           echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'

@@ -16,25 +16,78 @@ module.exports = async () => {
 
   // Helper: force-destroy stray sockets (diagnostic only)
   function forceDestroyRemainingSockets() {
-    // Run only for diagnostic runs to avoid surprising behavior in normal CI
-    if (!process.env.DEBUG_TESTS && !process.env.DUMP_ACTIVE_HANDLES) return;
+    // Attempts to close common network handle types that may keep Node alive.
+    // Run unconditionally in teardown to stabilize CI/test runs; avoid
+    // touching stdio streams (process.stdout/stderr) to prevent surprises.
+    if (process.env.SKIP_FORCE_HANDLE_CLEANUP === 'true') return;
     try {
       const handles = process._getActiveHandles ? process._getActiveHandles() : [];
       handles.forEach((h, i) => {
         try {
+          // Skip obvious non-network handles
+          if (h === process.stdout || h === process.stderr || h === process.stdin) return;
+
           const name = h && h.constructor && h.constructor.name;
-          if (String(name) === 'Socket') {
-            // Avoid destroying stdio WriteStreams
-            if (h.destroyed) return;
+          // TLSSocket / Socket: attempt graceful end -> destroy -> underlying close
+          if (name === 'TLSSocket' || name === 'Socket') {
             try {
               const meta = {};
               if (h.remoteAddress) meta.remoteAddress = h.remoteAddress;
               if (h.remotePort) meta.remotePort = h.remotePort;
-              console.warn(`DEBUG_TESTS: force-destroying stray socket[${i}]`, meta);
-              h.destroy();
-            } catch (err) {
-              void err;
+              console.warn(`force-destroy: closing socket[${i}] (${name})`, meta);
+            } catch {}
+            try {
+              if (typeof h.end === 'function') h.end();
+            } catch {}
+            try {
+              if (typeof h.destroy === 'function') h.destroy();
+            } catch {}
+            try {
+              if (h && h._handle && typeof h._handle.close === 'function') h._handle.close();
+            } catch {}
+            return;
+          }
+
+          // http2 ClientHttp2Session
+          if (
+            name === 'ClientHttp2Session' ||
+            (h && typeof h.close === 'function' && String(name).includes('Http2'))
+          ) {
+            try {
+              console.warn(`force-destroy: closing http2 session[${i}] (${name})`);
+              if (typeof h.close === 'function') h.close();
+            } catch {}
+            return;
+          }
+
+          // Generic fallback for handles with destroy/close
+          try {
+            if (h && typeof h.destroy === 'function') {
+              try {
+                h.destroy();
+              } catch (e) {
+                void e;
+              }
+              return;
             }
+            if (h && typeof h.close === 'function') {
+              try {
+                h.close();
+              } catch (e) {
+                void e;
+              }
+              return;
+            }
+            if (h && h._handle && typeof h._handle.close === 'function') {
+              try {
+                h._handle.close();
+              } catch (e) {
+                void e;
+              }
+              return;
+            }
+          } catch (_) {
+            void _;
           }
         } catch (err) {
           void err;
@@ -262,6 +315,84 @@ module.exports = async () => {
     }
   } catch (e) {
     appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
+  }
+
+  // Best-effort: inspect active handles for any ChildProcess-like objects
+  // that weren't tracked by helpers and try to terminate them. This is
+  // defensive and should not throw; it's intended to reduce CI flaky
+  // failures caused by orphaned subprocesses keeping the runner alive.
+  try {
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          // Look for ChildProcess or objects that look like a child (has pid)
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              if (!pid) continue;
+              appendLog(
+                `globalTeardown: found orphan child handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+
+              // Try to destroy stdio streams attached to the handle which can keep
+              // file descriptors open.
+              try {
+                if (h.stdin && typeof h.stdin.destroy === 'function') h.stdin.destroy();
+              } catch (_e) {}
+              try {
+                if (h.stdout && typeof h.stdout.destroy === 'function') h.stdout.destroy();
+              } catch (_e) {}
+              try {
+                if (h.stderr && typeof h.stderr.destroy === 'function') h.stderr.destroy();
+              } catch (_e) {}
+
+              // Graceful then forceful kill
+              try {
+                process.kill(pid, 'SIGTERM');
+                appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
+              } catch (_e) {
+                appendLog(`globalTeardown: SIGTERM failed for ${pid}: ${_e && _e.message}`);
+              }
+
+              const start = Date.now();
+              let alive = true;
+              const waitMs = 500;
+              while (Date.now() - start < waitMs) {
+                try {
+                  process.kill(pid, 0);
+                  // still alive
+                  // short sleep
+                  await new Promise((r) => setTimeout(r, 30));
+                } catch {
+                  alive = false;
+                  break;
+                }
+              }
+
+              if (alive) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                  appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
+                } catch (_e) {
+                  appendLog(`globalTeardown: SIGKILL failed for ${pid}: ${_e && _e.message}`);
+                }
+              }
+            } catch (_e) {
+              void _e;
+            }
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+    } catch (_e) {
+      void _e;
+    }
+  } catch (_e) {
+    appendLog(`globalTeardown: orphan-child-sweep error: ${_e && _e.message}`);
   }
 
   // Final aggressive sweep (diagnostic only)

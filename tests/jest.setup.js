@@ -6,6 +6,63 @@ const https = require('https');
 const net = require('net');
 const tls = require('tls');
 
+// Defensive shim: make console.warn safe during aggressive debug sweeps.
+// Some test cleanup paths attempt to write to stdio pipes that may have
+// been closed (child-process teardown). Wrapping console.warn here keeps
+// the rest of the diagnostic code simple while preventing "write after end"
+// exceptions from bubbling up and failing tests.
+try {
+  const util = require('util');
+  const _origConsoleWarn = console.warn;
+  console.warn = function safeConsoleWarn(...args) {
+    try {
+      // If stderr is closed/unwritable, avoid writing diagnostics.
+      if (
+        process &&
+        process.stderr &&
+        (process.stderr.destroyed || process.stderr.writable === false)
+      )
+        return;
+    } catch {}
+
+    try {
+      // Allow controlled verbosity via DEBUG_TESTS_LEVEL (0 = minimal)
+      const lvl = Number(process.env.DEBUG_TESTS_LEVEL || '0');
+      if (lvl <= 0) {
+        // Shallow-inspect objects to avoid huge dumps and avoid passing
+        // unstable resources (sockets/streams) to the real console which
+        // may throw when attempting to serialize them.
+        const safe = args.map((a) => {
+          try {
+            if (a && typeof a === 'object') {
+              return util.inspect(a, { depth: 1, maxArrayLength: 5, breakLength: 120 });
+            }
+            return String(a);
+          } catch {
+            return '[unserializable]';
+          }
+        });
+        try {
+          return _origConsoleWarn.apply(console, safe);
+        } catch {
+          return undefined;
+        }
+      }
+
+      // Higher verbosity: pass arguments through but still guard against
+      // stderr being closed or write errors.
+      try {
+        return _origConsoleWarn.apply(console, args);
+      } catch {
+        return undefined;
+      }
+    } catch {
+      // swallow any unexpected errors from diagnostics to avoid failing tests
+      return undefined;
+    }
+  };
+} catch {}
+
 // In CI prefer isolating ephemeral servers in a child process to avoid
 // native-handle flakes on GitHub Actions/Ubuntu runners. Force-enable here
 // so test helpers that start servers pick up child-mode early.
@@ -57,6 +114,24 @@ function __restoreAsyncResource() {
       __origAsyncResource = null;
     }
   } catch {}
+}
+
+// Helper: determine if a captured createdStack indicates stdio/tty
+function __isStdIoCreatedStack(cs) {
+  try {
+    if (!cs || typeof cs !== 'string') return false;
+    if (
+      cs.includes('createWritableStdioStream') ||
+      cs.includes('getStdout') ||
+      cs.includes('getStderr') ||
+      cs.includes('isInteractive') ||
+      cs.includes('TTY') ||
+      cs.includes('WriteStream')
+    ) {
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 try {
@@ -506,12 +581,18 @@ afterAll(async () => {
     }
 
     // yield to the event loop to allow handles to close
-    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => process.nextTick(r));
 
     // Slightly longer delay to allow native handles and pending callbacks to
     // fully settle on CI/Windows. Increasing this reduces false-positive
-    // detectOpenHandles reports for short-lived bound callbacks.
-    await new Promise((r) => setTimeout(r, 200));
+    // detectOpenHandles reports for short-lived bound callbacks. Use an
+    // unref'd timer so the delay itself won't keep the event loop alive.
+    await new Promise((r) => {
+      const t = setTimeout(r, 200);
+      try {
+        if (t && typeof t.unref === 'function') t.unref();
+      } catch {}
+    });
 
     // CI diagnostic: if Jest still sees open handles, try to list them and aggressively close
     try {
@@ -526,6 +607,12 @@ afterAll(async () => {
             handles.forEach((h, i) => {
               try {
                 const name = h && h.constructor && h.constructor.name;
+                // Skip handles that instrumentation tagged as stdio/TTY
+                // to avoid noisy but benign entries in CI/debug logs.
+                try {
+                  const cs = h && typeof h._createdStack === 'string' ? h._createdStack : '';
+                  if (cs && __isStdIoCreatedStack(cs)) return;
+                } catch {}
                 console.warn(`  [${i}] type=${String(name)}`);
               } catch {}
             });
@@ -585,6 +672,12 @@ afterAll(async () => {
               handles.forEach((h, i) => {
                 try {
                   const name = h && h.constructor && h.constructor.name;
+                  // Skip stdio/TTY handles that were tagged by the instrumentation
+                  // to reduce noise in the detailed dump.
+                  try {
+                    const cs = h && typeof h._createdStack === 'string' ? h._createdStack : '';
+                    if (cs && __isStdIoCreatedStack(cs)) return;
+                  } catch {}
                   console.warn(`  [${i}] type=${String(name)}`);
                   if (h && typeof h._createdStack === 'string') {
                     console.warn('    created at:');
@@ -774,7 +867,12 @@ afterAll(async () => {
           } catch {}
 
           // give the runtime a short moment to settle after forced cleanup
-          await new Promise((r) => setTimeout(r, 200));
+          await new Promise((r) => {
+            const t = setTimeout(r, 200);
+            try {
+              if (t && typeof t.unref === 'function') t.unref();
+            } catch {}
+          });
 
           // Extra safety: explicitly destroy any remaining global agent sockets again
           try {
@@ -828,9 +926,36 @@ afterAll(async () => {
                 } catch {}
               }
             } catch {}
+            try {
+              // Also attempt to clear timer-like handles that may keep the
+              // event loop alive (Timeout, Immediate). process._getActiveHandles
+              // returns Timeout/Immediate objects in Node and clearTimeout/clearImmediate
+              // accept those objects as ids, so call them here as a best-effort
+              // cleanup for timers created by libraries that don't use the
+              // instrumented global wrappers.
+              try {
+                if (String(name) === 'Timeout') {
+                  try {
+                    clearTimeout(h);
+                  } catch {}
+                }
+              } catch {}
+              try {
+                if (String(name) === 'Immediate') {
+                  try {
+                    clearImmediate(h);
+                  } catch {}
+                }
+              } catch {}
+            } catch {}
           }
           // allow native resources a moment to be released
-          await new Promise((r) => setTimeout(r, 200));
+          await new Promise((r) => {
+            const t = setTimeout(r, 200);
+            try {
+              if (t && typeof t.unref === 'function') t.unref();
+            } catch {}
+          });
         }
       }
     } catch {}
