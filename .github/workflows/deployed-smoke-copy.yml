@@ -145,7 +145,7 @@ jobs:
           export WEBHOOK_GENERATE_TIMEOUT=120000
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
             echo "DEBUG_TESTS is enabled; preloading jest.netblock.js and jest.instrumentation.js via NODE_OPTIONS"
-            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"

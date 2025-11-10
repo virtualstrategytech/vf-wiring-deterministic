@@ -174,7 +174,7 @@ jobs:
             # netblock file first so nock allowlist is established before other
             # setup files run; then preload the instrumentation file to capture
             # socket creation stacks as early as possible.
-            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
