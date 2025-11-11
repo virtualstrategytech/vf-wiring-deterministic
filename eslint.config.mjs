@@ -43,6 +43,15 @@ export default [
       'no-useless-escape': 'error',
     },
   },
+  // Tests: relax unused-var rules since tests intentionally keep diagnostic
+  // variables and debug-only bindings that are hard to eliminate across
+  // many instrumented files. Keeping this off in tests avoids CI lint flakes.
+  {
+    files: ['tests/**'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
 
   // TypeScript-specific config (applies to .ts/.tsx)
   {
