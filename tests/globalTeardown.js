@@ -89,6 +89,46 @@ module.exports = async () => {
           } catch (_) {
             void _;
           }
+
+          // http2 ClientHttp2Session
+          if (
+            name === 'ClientHttp2Session' ||
+            (h && typeof h.close === 'function' && String(name).includes('Http2'))
+          ) {
+            try {
+              console.warn(`force-destroy: closing http2 session[${i}] (${name})`);
+              if (typeof h.close === 'function') h.close();
+            } catch {}
+            return;
+          }
+
+          // Generic fallback for handles with destroy/close
+          try {
+            if (h && typeof h.destroy === 'function') {
+              try {
+                h.destroy();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+            if (h && typeof h.close === 'function') {
+              try {
+                h.close();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+            if (h && h._handle && typeof h._handle.close === 'function') {
+              try {
+                h._handle.close();
+              } catch (e) {
+                /* ignore */
+              }
+              return;
+            }
+          } catch (_) {}
         } catch (err) {
           void err;
         }
