@@ -178,6 +178,11 @@ try {
           const sock = orig.call(this, options, callback);
           try {
             sock._createdStack = new Error('agent-socket-created').stack;
+            // Unref short-lived client sockets so they don't keep the
+            // Node event loop alive during teardown in CI.
+            if (sock && typeof sock.unref === 'function') {
+              try { sock.unref(); } catch {}
+            }
           } catch {}
           return sock;
         };
@@ -204,6 +209,9 @@ try {
             const sock = orig.apply(this, args);
             try {
               sock._createdStack = new Error('agent-proto-socket-created').stack;
+              if (sock && typeof sock.unref === 'function') {
+                try { sock.unref(); } catch {}
+              }
             } catch {}
             return sock;
           };
@@ -226,6 +234,9 @@ try {
         const sock = origNetCreate.apply(net, args);
         try {
           sock._createdStack = new Error('net-createConnection-created').stack;
+          if (sock && typeof sock.unref === 'function') {
+            try { sock.unref(); } catch {}
+          }
         } catch {}
         return sock;
       };
@@ -274,6 +285,9 @@ try {
       net.Socket.prototype.connect = function connectProtoWithStack(...args) {
         try {
           this._createdStack = new Error('net-socket-proto-connect').stack;
+          if (this && typeof this.unref === 'function') {
+            try { this.unref(); } catch {}
+          }
         } catch {}
         return origProtoConnect.apply(this, args);
       };
@@ -289,8 +303,12 @@ try {
     tls.connect = function tlsConnectWithStack(...args) {
       const sock = origTlsConnect.apply(tls, args);
       try {
-        if (sock && typeof sock === 'object')
+        if (sock && typeof sock === 'object') {
           sock._createdStack = new Error('tls-connect-created').stack;
+          if (typeof sock.unref === 'function') {
+            try { sock.unref(); } catch {}
+          }
+        }
       } catch {}
       return sock;
     };
