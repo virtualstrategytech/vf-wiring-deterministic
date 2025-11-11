@@ -21,14 +21,23 @@ jobs:
       - name: Install dependencies
         run: |
           # Use legacy-peer-deps to avoid CI npm install failures for older
-          # lockfiles or peer-dependency conflicts in third-party dev deps.
+          # lockfiles or peer-dependency peer-dependency conflicts.
           npm ci --legacy-peer-deps
 
       - name: Run tests (fast) with detectOpenHandles
         env:
           CI: '1'
+          # Use the child-process server mode to avoid in-process native
+          # handle retention caused by third-party test helpers (supertest/
+          # superagent). This mirrors local validation where child-mode fixed
+          # detectOpenHandles flakiness.
+          USE_CHILD_PROCESS_SERVER: '1'
+          # Preload the same test instrumentation used locally so creation
+          # stacks for handles are captured when this diagnostic workflow
+          # runs.
+          NODE_OPTIONS: '--require ${{ github.workspace }}/tests/jest.instrumentation.js'
         run: |
           # Run tests in-band and enable Jest's detectOpenHandles to catch
           # socket/handle regressions quickly. Keep a short timeout so this
           # gate stays fast on PRs.
-          npx jest --runInBand --detectOpenHandles --testTimeout=60000
+          npx jest --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js --runInBand --detectOpenHandles --testTimeout=60000
