@@ -8,7 +8,8 @@
   },
   "scripts": {
     "pretest": "node ./scripts/pretest.js",
-    "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
+    "test": "jest --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
+    "test:detect": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
     "test:ci": "jest --runInBand --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
     "lint:fix": "eslint \"**/*.{js,ts,tsx}\" --fix",

@@ -1,13 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const secretFile = path.resolve(__dirname, 'webhook.secret');
-const key =
-  process.env.WEBHOOK_API_KEY ||
-  (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
-
-// Ensure the in-process server reads the same API key at module-load time
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || key;
+const { resolveApiKey } = require('./helpers/api-key');
+const key = resolveApiKey();
 
 // In CI environments prefer child-process server isolation to avoid native
 // handle flakiness observed on some runners. This is conservative and only

@@ -1,437 +1,181 @@
+'use strict';
+
+const util = require('util');
+const supertest = require('supertest');
 const serverHelper = require('./server-helper');
-const fetch = require('node-fetch');
-const http = require('http');
-const https = require('https');
-// top-level agent removed; use per-request agents inside requestApp to avoid socket reuse
-// When running in CI (GitHub Actions) prefer child-process server isolation
-// to avoid CI-specific detectOpenHandles flakes caused by native handles.
-try {
-  if (
-    typeof process !== 'undefined' &&
-    !process.env.USE_CHILD_PROCESS_SERVER &&
-    (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true')
-  ) {
-    process.env.USE_CHILD_PROCESS_SERVER = '1';
+
+// Best-effort test-only helper: temporarily replace async_hooks.AsyncResource
+// with a no-op wrapper while starting an ephemeral server. Some libraries
+// create AsyncResources during server.listen/startup which can leave
+// native handles visible to Jest's detectOpenHandles; replacing with a
+// synchronous runner around listen reduces false positives in tests.
+let __req_origAsyncResource = null;
+function __req_patchAsyncResourceNoop() {
+  try {
+    const ah = require('async_hooks');
+    if (!ah || !ah.AsyncResource) return () => {};
+    if (__req_origAsyncResource) return () => {};
+    __req_origAsyncResource = ah.AsyncResource;
+    class NoopAsyncResource {
+      constructor(_name) {}
+      runInAsyncScope(fn, thisArg, ...args) {
+        return fn.call(thisArg, ...args);
+      }
+    }
+    try {
+      ah.AsyncResource = NoopAsyncResource;
+    } catch {
+      __req_origAsyncResource = null;
+      return () => {};
+    }
+    return function __restore() {
+      try {
+        const ah2 = require('async_hooks');
+        if (ah2 && __req_origAsyncResource) {
+          try {
+            ah2.AsyncResource = __req_origAsyncResource;
+          } catch {}
+        }
+      } catch {}
+      __req_origAsyncResource = null;
+    };
+  } catch {
+    return () => {};
   }
-} catch {}
+}
+
+// Lightweight, low-dependency request helper for tests. Uses supertest
+// to call an Express app directly (no ephemeral server/network sockets),
+// or treats a string as a base URL for remote tests. This avoids creating
+// long-lived http.Agent sockets in most in-process test scenarios.
 async function requestApp(
   app,
   { method = 'post', path = '/', body, headers = {}, timeout = 5000 } = {}
 ) {
-  // If app is a string base URL, use node-fetch directly.
+  let closeServer = null;
+  let client;
+
+  // If `app` is a string assume it's a base URL. Otherwise pass the
+  // Express app directly to supertest so we don't need to start an
+  // ephemeral server.
   if (typeof app === 'string') {
-    // Defensive: normalize base by stripping any trailing slashes so callers
-    // that accidentally include a trailing '/' (or environment values) don't
-    // produce URLs with '//' which can lead to 404s like `//health`.
-    const base = (app || '').replace(/\/+$/, '');
-    const url = `${base}${path}`;
-    // provide a clearer error when an invalid/empty base is supplied
-    // parse the URL once and reuse the parsed object below (was previously
-    // calling `new URL(url)` without storing it, then referencing `u` which
-    // caused a ReferenceError).
-    let u;
+    client = supertest(app);
+  } else if (app && typeof app.createServer === 'function') {
+    // Prefer passing the Express app directly to supertest to avoid
+    // starting an ephemeral server (which may create transient native
+    // async handles visible to Jest). Starting a server is only attempted
+    // in specialized scenarios; for typical in-process tests using the
+    // Express app, supertest(app) is sufficient and avoids listen()
+    // related noise.
     try {
-      u = new URL(url);
-    } catch {
-      throw new Error(`requestApp: invalid URL constructed from base: ${String(app)}`);
-    }
-    const controller = new AbortController();
-    const to = setTimeout(() => controller.abort(), timeout || 5000);
-    // use a per-request agent (no keepAlive) so node-fetch does not reuse sockets
-    const agent =
-      u.protocol === 'https:'
-        ? new https.Agent({ keepAlive: false })
-        : new http.Agent({ keepAlive: false });
-    // Tag sockets created by this per-request agent with a creation stack so
-    // diagnostics can map them back to the call site.
-    let _origCreate;
-    try {
-      if (agent && typeof agent.createConnection === 'function') {
-        _origCreate = agent.createConnection.bind(agent);
-        agent.createConnection = function createPerRequestAgentConnection(options, callback) {
-          const sock = _origCreate(options, callback);
+      client = supertest(app);
+    } catch (e) {
+      // fallback to conservative behavior when supertest doesn't accept app
+      try {
+        const srv = app.createServer();
+        const __restore = __req_patchAsyncResourceNoop();
+        await new Promise((resolve, reject) => {
           try {
-            sock._createdStack = new Error('per-request-agent-created').stack;
-          } catch {}
-          try {
-            // Per-request agent socket creation can be noisy. Print only when
-            // DEBUG_TESTS is enabled and the verbosity level is >=2.
-            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
-            if (process.env.DEBUG_TESTS && verbose) {
+            srv.listen(0, () => {
               try {
-                const preview =
-                  (sock && sock._createdStack && sock._createdStack.split('\n').slice(0, 6)) || [];
-                console.warn('DEBUG_TESTS: per-request agent socket created at:');
-                preview.forEach((ln) => console.warn(`  ${String(ln).trim()}`));
+                if (typeof __restore === 'function') __restore();
               } catch {}
-            }
-          } catch {}
-          try {
-            const verbose = Number(process.env.DEBUG_TESTS_LEVEL || '0') >= 2;
-            if (process.env.DEBUG_TESTS && verbose) {
+              resolve();
+            });
+          } catch (err) {
+            try {
+              if (typeof __restore === 'function') __restore();
+            } catch {}
+            try {
+              srv.close(() => {});
+            } catch {}
+            reject(err);
+          }
+        });
+        closeServer = async () =>
+          new Promise((resolve) => {
+            try {
               try {
-                // Print the creation stack immediately for reliable CI capture
-                console.warn(new Error('per-request-agent-created').stack);
+                if (typeof srv.unref === 'function') srv.unref();
               } catch {}
-            }
-          } catch {}
-          return sock;
-        };
-      }
-    } catch {}
-    try {
-      const resp = await fetch(url, {
-        method: method.toUpperCase(),
-        // explicitly close connections to avoid keep-alive sockets lingering in CI
-        headers: Object.assign(
-          { 'Content-Type': 'application/json', Connection: 'close' },
-          headers || {}
-        ),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-        agent,
-      });
-      const text = await resp.text();
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-      // ensure any response body streams are destroyed to avoid lingering sockets
-      try {
-        if (resp && resp.body && typeof resp.body.destroy === 'function') {
-          try {
-            resp.body.destroy();
-          } catch {}
-        }
-      } catch {}
-      return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
-    } finally {
-      clearTimeout(to);
-      try {
-        // ensure controller is aborted to free any associated request resources
-        controller.abort && typeof controller.abort === 'function' && controller.abort();
-      } catch {}
-      try {
-        // restore original createConnection implementation if we monkeypatched it
-        try {
-          if (
-            typeof _origCreate !== 'undefined' &&
-            agent &&
-            typeof agent.createConnection === 'function'
-          ) {
-            agent.createConnection = _origCreate;
-          }
-        } catch {}
-      } catch {}
-      try {
-        if (agent && typeof agent.destroy === 'function') agent.destroy();
-      } catch {}
-      try {
-        // yield to the event loop to allow agent/socket destruction to propagate
-        await new Promise((r) => setImmediate(r));
-      } catch {}
-    }
-  }
-
-  // If app looks like an Express app (function with listen), start a
-  // controlled ephemeral server and perform a normal HTTP request. This
-  // avoids letting supertest create internal servers which can leave
-  // bound anonymous handles detected by Jest.
-  if (app && typeof app.listen === 'function') {
-    // Optional isolated child-process mode: when USE_CHILD_PROCESS_SERVER=1
-    // we fork a separate Node process that loads the same `app` and listens
-    // there. This isolates any Node-internals (like bound anonymous fns)
-    // into the child process so Jest in the parent process doesn't flag
-    // them as open handles.
-    if (process.env.USE_CHILD_PROCESS_SERVER === '1') {
-      const { fork } = require('child_process');
-      // Resolve path to our runner module (tests/server-runner.js)
-      const runner = require.resolve('../server-runner');
-      const child = fork(runner, [], {
-        cwd: __dirname + '/../',
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-        // make sure the child gets the same environment (including any
-        // WEBHOOK_API_KEY or test-specific variables set by the test file)
-        env: Object.assign({}, process.env),
-      });
-
-      // Forward child stdout/stderr to the parent process console so tests
-      // that capture console output (captureConsoleAsync) also see logs
-      // emitted by the child server (e.g., llm payload diagnostics).
-      try {
-        if (child.stdout && typeof child.stdout.on === 'function') {
-          child.stdout.on('data', (b) => {
-            try {
-              console.log(String(b || '').trim());
-            } catch {}
-          });
-        }
-        if (child.stderr && typeof child.stderr.on === 'function') {
-          child.stderr.on('data', (b) => {
-            try {
-              console.error(String(b || '').trim());
-            } catch {}
-          });
-        }
-      } catch {}
-
-      const portPromise = new Promise((resolve, reject) => {
-        let timeoutId;
-        const clearGuard = () => {
-          try {
-            if (timeoutId) clearTimeout(timeoutId);
-          } catch {}
-        };
-        const onMsg = (m) => {
-          try {
-            if (m && typeof m === 'object' && m.port) {
-              clearGuard();
-              resolve(m.port);
-            }
-          } catch {
-            // ignore
-          }
-        };
-        child.once('message', onMsg);
-        // fallback: if child prints to stdout instead of IPC
-        if (child.stdout) {
-          const onStdout = (b) => {
-            try {
-              const s = String(b || '').trim();
-              const m = /TEST_SERVER_PORT:(\d+)/.exec(s);
-              if (m) {
-                clearGuard();
-                resolve(Number(m[1]));
-              }
-            } catch {}
-          };
-          child.stdout.on('data', onStdout);
-        }
-        child.once('error', (err) => {
-          clearGuard();
-          reject(err);
-        });
-        // guard timeout
-        timeoutId = setTimeout(() => {
-          try {
-            reject(new Error('child server start timeout'));
-          } catch {}
-        }, 5000);
-      });
-
-      const port = await portPromise;
-      const base = `http://127.0.0.1:${port}`;
-      const close = async () => {
-        try {
-          // Ask child to shutdown via IPC
-          try {
-            child.send && child.send('shutdown');
-          } catch {}
-        } catch {}
-        try {
-          // Give it a moment and then force kill if still around
-          await new Promise((r) => setTimeout(r, 200));
-        } catch {}
-        try {
-          child.kill('SIGTERM');
-        } catch {}
-      };
-
-      // proceed to make request against child-hosted server
-      const controller = new AbortController();
-      const to = setTimeout(() => controller.abort(), timeout || 5000);
-      const agent = base.startsWith('https://')
-        ? new https.Agent({ keepAlive: false })
-        : new http.Agent({ keepAlive: false });
-      try {
-        const resp = await fetch(`${base}${path}`, {
-          method: method.toUpperCase(),
-          headers: Object.assign(
-            { 'Content-Type': 'application/json', Connection: 'close' },
-            headers || {}
-          ),
-          body: body ? JSON.stringify(body) : undefined,
-          signal: controller.signal,
-          agent,
-        });
-        const text = await resp.text();
-        let parsed;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = text;
-        }
-        try {
-          if (resp && resp.body && typeof resp.body.destroy === 'function') resp.body.destroy();
-        } catch {}
-        return {
-          status: resp.status,
-          headers: resp.headers.raw && resp.headers.raw(),
-          body: parsed,
-        };
-      } finally {
-        clearTimeout(to);
-        try {
-          controller.abort && typeof controller.abort === 'function' && controller.abort();
-        } catch {}
-        try {
-          if (agent && typeof agent.destroy === 'function') agent.destroy();
-        } catch {}
-        try {
-          // yield to the event loop to allow agent/socket destruction to propagate
-          await new Promise((r) => setImmediate(r));
-        } catch {}
-        try {
-          await close();
-        } catch {}
-        // Aggressive sweep after child server close to ensure no lingering sockets
-        try {
-          if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
-            // allow a tick for any final close callbacks
-            try {
-              await new Promise((r) => setImmediate(r));
-            } catch {}
-            try {
-              serverHelper._forceCloseAllSockets();
+              srv.close(() => resolve());
             } catch {
-              void 0;
+              resolve();
             }
-          }
-        } catch {
-          // intentionally ignore errors during aggressive child cleanup
-        }
+          });
+        client = supertest(srv);
+      } catch (e2) {
+        client = supertest(app);
       }
     }
-    // Ensure test-time AsyncResource shim is enabled while starting the
-    // in-process test server so modules that rely on async_hooks (like
-    // raw-body/body-parser) don't create native handles that Jest reports
-    // as open. We restore the previous value in the finally block below.
-    const _prevTestPatch = process.env.TEST_PATCH_RAW_BODY;
-    try {
-      process.env.TEST_PATCH_RAW_BODY = '1';
-    } catch {}
-    const started = await serverHelper.startTestServer(app);
-    // Normalize any trailing slash on the ephemeral server base as well.
-    const base = (started.base || '').replace(/\/+$/, '');
-    const close = started.close;
-    const url = `${base}${path}`;
-    const controller = new AbortController();
-    const to = setTimeout(() => controller.abort(), timeout || 5000);
-    // per-request agent for ephemeral server requests as well
-    const agent = base.startsWith('https://')
-      ? new https.Agent({ keepAlive: false })
-      : new http.Agent({ keepAlive: false });
-    let _origCreate2;
-    try {
-      if (agent && typeof agent.createConnection === 'function') {
-        _origCreate2 = agent.createConnection.bind(agent);
-        agent.createConnection = function createPerRequestAgentConnection2(options, callback) {
-          const sock = _origCreate2(options, callback);
-          try {
-            sock._createdStack = new Error('per-request-agent-created').stack;
-          } catch {}
-          try {
-            if (process.env.DEBUG_TESTS) {
-              try {
-                const preview =
-                  (sock && sock._createdStack && sock._createdStack.split('\n').slice(0, 6)) || [];
-                console.warn('DEBUG_TESTS: per-request agent socket created at:');
-                preview.forEach((ln) => console.warn(`  ${String(ln).trim()}`));
-              } catch {}
-            }
-          } catch {}
-          try {
-            if (process.env.DEBUG_TESTS) {
-              try {
-                // Print the creation stack immediately for reliable CI capture
-                console.warn(new Error('per-request-agent-created').stack);
-              } catch {}
-            }
-          } catch {}
-          return sock;
-        };
-      }
-    } catch {}
-    try {
-      const resp = await fetch(url, {
-        method: method.toUpperCase(),
-        // explicitly close connections to avoid keep-alive sockets lingering in CI
-        headers: Object.assign(
-          { 'Content-Type': 'application/json', Connection: 'close' },
-          headers || {}
-        ),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-        agent,
-      });
-      const text = await resp.text();
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-      // ensure any response body streams are destroyed to avoid lingering sockets
-      try {
-        if (resp && resp.body && typeof resp.body.destroy === 'function') {
-          try {
-            resp.body.destroy();
-          } catch {}
-        }
-      } catch {}
-      return { status: resp.status, headers: resp.headers.raw && resp.headers.raw(), body: parsed };
-    } finally {
-      clearTimeout(to);
-      try {
-        // restore original createConnection implementation if we monkeypatched it
-        try {
-          if (
-            typeof _origCreate2 !== 'undefined' &&
-            agent &&
-            typeof agent.createConnection === 'function'
-          ) {
-            agent.createConnection = _origCreate2;
-          }
-        } catch {}
-      } catch {}
-      try {
-        // destroy per-request agent first to prevent connection reuse/pooling
-        // from keeping sockets alive while we close the server.
-        try {
-          if (agent && typeof agent.destroy === 'function') agent.destroy();
-        } catch {}
-        try {
-          // yield to the event loop to allow agent/socket destruction to propagate
-          await new Promise((r) => setImmediate(r));
-        } catch {}
-      } catch {}
-      try {
-        await close();
-      } catch {}
-      try {
-        // ensure the fetch controller is aborted to free any associated request resources
-        controller.abort && typeof controller.abort === 'function' && controller.abort();
-      } catch {}
-      try {
-        if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
-          // allow a tick for server.close to finish, then aggressively sweep
-          await new Promise((r) => setImmediate(r));
-          serverHelper._forceCloseAllSockets();
-        }
-      } catch {}
-      // Restore TEST_PATCH_RAW_BODY to its previous state so other tests
-      // are unaffected by this temporary change.
-      try {
-        if (typeof _prevTestPatch === 'undefined') delete process.env.TEST_PATCH_RAW_BODY;
-        else process.env.TEST_PATCH_RAW_BODY = _prevTestPatch;
-      } catch {}
-    }
+  } else {
+    client = supertest(app);
   }
 
-  // For other inputs, fallback to throwing to surface incorrect usage.
-  throw new Error('requestApp expects an Express app or a base URL string');
+  const req = client[method](path);
+  if (headers) {
+    for (const [k, v] of Object.entries(headers)) req.set(k, v);
+  }
+  // Prefer explicit Connection: close for remote requests to avoid lingering
+  // keep-alive sockets that can show up as open handles in Jest.
+  try {
+    const hasConnection = Object.keys(headers || {}).some(
+      (k) => String(k).toLowerCase() === 'connection'
+    );
+    if (!hasConnection) req.set('Connection', 'close');
+  } catch {}
+  if (body) req.send(body);
+  if (timeout) req.timeout({ deadline: timeout });
+
+  try {
+    const res = await req;
+    // Normalize response for tests: supertest sometimes leaves `res.body` as
+    // an empty object for plain-text responses; prefer `res.text` when body
+    // is empty so callers that expect string results (eg: /health) receive
+    // the textual payload.
+    try {
+      const out = {
+        status: res.status || res.statusCode || 0,
+        headers: res.headers || res.header || {},
+        body: res.body,
+        text: typeof res.text === 'string' ? res.text : undefined,
+      };
+      if (
+        out &&
+        out.body &&
+        typeof out.body === 'object' &&
+        Object.keys(out.body || {}).length === 0 &&
+        typeof out.text === 'string'
+      ) {
+        out.body = out.text;
+      }
+      return out;
+    } catch (e) {
+      // fallback: return the raw supertest response if normalization fails
+      return res;
+    }
+  } finally {
+    // close any server we started
+    try {
+      if (typeof closeServer === 'function') await closeServer();
+    } catch {}
+    // Small pause to allow native handles to settle after server close.
+    try {
+      await new Promise((r) => process.nextTick(r));
+      await new Promise((r) => {
+        const t = setTimeout(r, 10);
+        try {
+          if (t && typeof t.unref === 'function') t.unref();
+        } catch {}
+      });
+    } catch {}
+    // fallback: ensure helper-tracked sockets are destroyed
+    try {
+      if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+        serverHelper._forceCloseAllSockets();
+      }
+    } catch {}
+  }
 }
 
 module.exports = { requestApp };

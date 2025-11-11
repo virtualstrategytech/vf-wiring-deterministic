@@ -66,6 +66,48 @@ module.exports = async () => {
               try {
                 h.destroy();
               } catch (e) {
+                void e;
+              }
+              return;
+            }
+            if (h && typeof h.close === 'function') {
+              try {
+                h.close();
+              } catch (e) {
+                void e;
+              }
+              return;
+            }
+            if (h && h._handle && typeof h._handle.close === 'function') {
+              try {
+                h._handle.close();
+              } catch (e) {
+                void e;
+              }
+              return;
+            }
+          } catch (_) {
+            void _;
+          }
+
+          // http2 ClientHttp2Session
+          if (
+            name === 'ClientHttp2Session' ||
+            (h && typeof h.close === 'function' && String(name).includes('Http2'))
+          ) {
+            try {
+              console.warn(`force-destroy: closing http2 session[${i}] (${name})`);
+              if (typeof h.close === 'function') h.close();
+            } catch {}
+            return;
+          }
+
+          // Generic fallback for handles with destroy/close
+          try {
+            if (h && typeof h.destroy === 'function') {
+              try {
+                h.destroy();
+              } catch (e) {
                 /* ignore */
               }
               return;
@@ -315,12 +357,309 @@ module.exports = async () => {
     appendLog(`globalTeardown: diagnostic dump error: ${e && e.message}`);
   }
 
+  // Best-effort: inspect active handles for any ChildProcess-like objects
+  // that weren't tracked by helpers and try to terminate them. This is
+  // defensive and should not throw; it's intended to reduce CI flaky
+  // failures caused by orphaned subprocesses keeping the runner alive.
+  try {
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          // Look for ChildProcess or objects that look like a child (has pid)
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              if (!pid) continue;
+              appendLog(
+                `globalTeardown: found orphan child handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+
+              // Try to destroy stdio streams attached to the handle which can keep
+              // file descriptors open.
+              try {
+                if (h.stdin && typeof h.stdin.destroy === 'function') h.stdin.destroy();
+              } catch (_e) {}
+              try {
+                if (h.stdout && typeof h.stdout.destroy === 'function') h.stdout.destroy();
+              } catch (_e) {}
+              try {
+                if (h.stderr && typeof h.stderr.destroy === 'function') h.stderr.destroy();
+              } catch (_e) {}
+
+              // Graceful then forceful kill
+              try {
+                process.kill(pid, 'SIGTERM');
+                appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
+              } catch (_e) {
+                appendLog(`globalTeardown: SIGTERM failed for ${pid}: ${_e && _e.message}`);
+              }
+
+              const start = Date.now();
+              let alive = true;
+              const waitMs = 500;
+              while (Date.now() - start < waitMs) {
+                try {
+                  process.kill(pid, 0);
+                  // still alive
+                  // short sleep
+                  await new Promise((r) => setTimeout(r, 30));
+                } catch {
+                  alive = false;
+                  break;
+                }
+              }
+
+              if (alive) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                  appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
+                } catch (_e) {
+                  appendLog(`globalTeardown: SIGKILL failed for ${pid}: ${_e && _e.message}`);
+                }
+              }
+            } catch (_e) {
+              void _e;
+            }
+          }
+        } catch (_e) {
+          void _e;
+        }
+      }
+    } catch (_e) {
+      void _e;
+    }
+  } catch (_e) {
+    appendLog(`globalTeardown: orphan-child-sweep error: ${_e && _e.message}`);
+  }
+
+  // Extra conservative step: attempt platform-specific forced kills for
+  // common orphan test servers that may not have been tracked or that
+  // ignored earlier kill attempts. This helps CI where a reparented or
+  // stubborn child process can keep the job alive despite prior cleanup.
+  try {
+    appendLog(
+      'globalTeardown: attempting platform-specific pkill/taskkill for common orphan servers'
+    );
+    if (process.platform !== 'win32') {
+      try {
+        // try to terminate any child process started via server-runner
+        spawnSync('pkill', ['-TERM', '-f', 'server-runner'], { stdio: 'ignore' });
+        appendLog('globalTeardown: pkill server-runner invoked');
+      } catch (_) {}
+      try {
+        // try to terminate any node process running the webhook server file
+        spawnSync('pkill', ['-TERM', '-f', 'novain-platform/webhook/server.js'], {
+          stdio: 'ignore',
+        });
+        appendLog('globalTeardown: pkill webhook server.js invoked');
+      } catch (_) {}
+      try {
+        // catch variants named server-runner.js or similar
+        spawnSync('pkill', ['-TERM', '-f', 'server-runner.js'], { stdio: 'ignore' });
+      } catch (_) {}
+    } else {
+      try {
+        // On Windows: avoid killing all node.exe processes (too aggressive).
+        // Instead use PowerShell to find node processes whose command line
+        // mentions our test-server runner or the webhook server file and
+        // then taskkill those PIDs specifically.
+        try {
+          spawnSync(
+            'powershell',
+            [
+              '-NoProfile',
+              '-Command',
+              "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like '*server-runner*' -or $_.CommandLine -like '*novain-platform\\webhook\\server.js*') } | Select-Object -ExpandProperty ProcessId | ForEach-Object { taskkill /PID $_ /T /F }",
+            ],
+            { stdio: 'ignore' }
+          );
+          appendLog('globalTeardown: targeted taskkill via PowerShell invoked');
+        } catch (_) {}
+      } catch (_) {}
+    }
+
+    // Give the OS a short moment to clean up reparented processes
+    try {
+      await new Promise((r) => setTimeout(r, 200));
+    } catch (_) {}
+
+    // Re-scan active handles/requests and perform a second best-effort
+    // ChildProcess kill sweep to catch any remaining orphaned children.
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              if (!pid) continue;
+              appendLog(
+                `globalTeardown: re-check found child handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+              try {
+                process.kill(pid, 'SIGTERM');
+                appendLog(`globalTeardown: re-sent SIGTERM to ${pid}`);
+              } catch (_) {}
+
+              const start = Date.now();
+              let alive = true;
+              const waitMs = 300;
+              while (Date.now() - start < waitMs) {
+                try {
+                  process.kill(pid, 0);
+                } catch {
+                  alive = false;
+                  break;
+                }
+              }
+
+              if (alive) {
+                try {
+                  process.kill(pid, 'SIGKILL');
+                  appendLog(`globalTeardown: re-sent SIGKILL to ${pid}`);
+                } catch (_) {
+                  try {
+                    if (process.platform === 'win32')
+                      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+                  } catch (_) {}
+                }
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: platform-specific kill attempts error: ${e && e.message}`);
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: platform kill outer error: ${e && e.message}`);
+  }
+
   // Final aggressive sweep (diagnostic only)
   try {
     forceDestroyRemainingSockets();
     appendLog('globalTeardown: forceDestroyRemainingSockets invoked');
   } catch (e) {
     appendLog(`globalTeardown: final force destroy error: ${e && e.message}`);
+  }
+
+  // Extra: synchronously drain http/https globalAgents to ensure any
+  // agent-created sockets are destroyed before process exit. Doing this
+  // synchronously (not in nextTick) increases the chance native handles
+  // are freed prior to Jest detectOpenHandles checks.
+  try {
+    const drainAgentSync = (agent) => {
+      if (!agent) return;
+      try {
+        const iter = (obj) => {
+          if (!obj) return;
+          try {
+            Object.values(obj).forEach((arr) => {
+              try {
+                if (Array.isArray(arr)) {
+                  arr.forEach((s) => {
+                    try {
+                      if (s && typeof s.destroy === 'function') s.destroy();
+                    } catch {}
+                  });
+                }
+              } catch {}
+            });
+          } catch {}
+        };
+        iter(agent.sockets);
+        iter(agent.freeSockets);
+        if (typeof agent.destroy === 'function') {
+          try {
+            agent.destroy();
+            appendLog('globalTeardown: agent.destroy() invoked');
+          } catch (_e) {
+            appendLog(`globalTeardown: agent.destroy() error: ${_e && _e.message}`);
+          }
+        }
+      } catch {}
+    };
+
+    try {
+      const http = require('http');
+      drainAgentSync(http && http.globalAgent);
+    } catch (_e) {
+      appendLog(`globalTeardown: http agent drain error: ${_e && _e.message}`);
+    }
+    try {
+      const https = require('https');
+      drainAgentSync(https && https.globalAgent);
+    } catch (_e) {
+      appendLog(`globalTeardown: https agent drain error: ${_e && _e.message}`);
+    }
+  } catch (_e) {
+    appendLog(`globalTeardown: agent drain outer error: ${_e && _e.message}`);
+  }
+
+  // Enhanced diagnostic: enumerate active handles and capture extra
+  // metadata for ChildProcess-like objects (pid, /proc cmdline on Linux)
+  try {
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      appendLog(`globalTeardown: pre-finish activeHandles.count=${handles.length}`);
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              appendLog(
+                `globalTeardown: diag child-handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+              // Try to read /proc/<pid>/cmdline on Linux to capture the exact
+              // command line that created the process (useful in CI).
+              try {
+                if (pid && process.platform !== 'win32') {
+                  const procPath = `/proc/${pid}/cmdline`;
+                  const fs = require('fs');
+                  if (fs.existsSync(procPath)) {
+                    try {
+                      const cmd = fs.readFileSync(procPath, 'utf8').replace(/\0/g, ' ').trim();
+                      appendLog(`globalTeardown: diag child-cmdline pid=${pid} cmd="${cmd}"`);
+                    } catch (_e) {
+                      appendLog(
+                        `globalTeardown: diag proc read error pid=${pid} err=${_e && _e.message}`
+                      );
+                    }
+                  }
+                }
+              } catch (_e) {
+                appendLog(`globalTeardown: diag proc read outer error: ${_e && _e.message}`);
+              }
+            } catch (_e) {
+              appendLog(
+                `globalTeardown: diag child-handle read error idx=${i} err=${_e && _e.message}`
+              );
+            }
+          } else {
+            // Log socket-created stacks where available to help trace origin
+            try {
+              if (h && typeof h._createdStack === 'string') {
+                const preview = String(h._createdStack).split('\n').slice(0, 6).join(' | ');
+                appendLog(
+                  `globalTeardown: diag handle idx=${i} name=${String(name)} createdStack=${preview}`
+                );
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: diag enumeration error: ${e && e.message}`);
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: enhanced diag outer error: ${e && e.message}`);
   }
 
   appendLog('globalTeardown: finished');

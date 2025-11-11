@@ -28,6 +28,11 @@ jobs:
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+      # Stabilize socket and random handles during smoke tests
+      FORCE_PER_REQUEST_AGENT: '1'
+      FORCE_DETERMINISTIC_IDS: '1'
+      # Patch AsyncResource in tests to avoid raw-body creating persistent native handles
+      TEST_PATCH_RAW_BODY: '1'
       # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
       # dispatch can enable verbose diagnostics without changing other workflows.
       DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
@@ -169,7 +174,7 @@ jobs:
             # netblock file first so nock allowlist is established before other
             # setup files run; then preload the instrumentation file to capture
             # socket creation stacks as early as possible.
-            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"

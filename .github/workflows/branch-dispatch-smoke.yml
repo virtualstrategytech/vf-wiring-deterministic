@@ -48,7 +48,7 @@ jobs:
           BASE=${WEBHOOK_BASE%/}
           echo "Normalized base: $BASE"
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
-            export NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/jest.netblock.js --require $GITHUB_WORKSPACE/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS set for debug: $NODE_OPTIONS"
           fi
           npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000 || EXIT_CODE=$?

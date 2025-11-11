@@ -33,6 +33,10 @@ jobs:
     strategy:
       matrix:
         node-version: [18.x]
+    env:
+      # Guard defaults: do not enable debug piping or debug tests in CI by default.
+      DEBUG_TESTS: '0'
+      FORCE_CHILD_PIPES: '0'
 
     steps:
       - name: Checkout
@@ -63,6 +67,9 @@ jobs:
       - name: Run tests (captured)
         env:
           CI: 'true'
+          # DEBUG_TESTS enabled for a one-off CI debug run to collect handle dumps
+          DEBUG_TESTS: ${{ env.DEBUG_TESTS }}
+          DEBUG_TESTS_LEVEL: '3'
           SKIP_SYNC_SECRET: 'true'
           SKIP_BODY_PARSER: '1'
           SKIP_SMOKE: 'true'
@@ -81,7 +88,7 @@ jobs:
           # during module init.
           # Use an absolute path so child processes spawned by tests can
           # also preload the instrumentation regardless of their CWD.
-          NODE_OPTIONS: '--require $GITHUB_WORKSPACE/tests/jest.instrumentation.js'
+          NODE_OPTIONS: '--require ${{ github.workspace }}/tests/jest.instrumentation.js'
         # Run the CI wrapper which records env + runs jest in verbose mode
         run: |
           chmod +x ./scripts/ci_run_jest.sh || true

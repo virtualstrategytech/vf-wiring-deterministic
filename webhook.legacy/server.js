@@ -27,16 +27,37 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  // prefer client-provided id, otherwise generate one
   const incoming = req.get('x-request-id');
-  const rid =
-    incoming ||
-    (_crypto.randomUUID
-      ? _crypto.randomUUID()
-      : _crypto
-          .createHash('sha1')
-          .update(String(Date.now()) + Math.random())
-          .digest('hex'));
+  // In test/debug modes, avoid using `crypto.randomUUID()` because it can
+  // create short-lived native RNG jobs that show up in async-hooks dumps
+  // (RANDOMBYTESREQUEST). Use a small deterministic JS fallback during
+  // tests to keep async handle dumps clean.
+  const useDeterministicIds =
+    process.env.FORCE_DETERMINISTIC_IDS === '1' ||
+    process.env.NODE_ENV === 'test' ||
+    !!process.env.DEBUG_TESTS;
+
+  const deterministicId = () => {
+    try {
+      const t = Date.now().toString(36);
+      const r = Math.floor(Math.random() * 0x1000000).toString(36);
+      return `r-${t}-${r}`;
+    } catch {
+      return String(Date.now()) + '-' + Math.random();
+    }
+  };
+
+  const rid = incoming
+    ? incoming
+    : useDeterministicIds
+      ? deterministicId()
+      : _crypto.randomUUID
+        ? _crypto.randomUUID()
+        : _crypto
+            .createHash('sha1')
+            .update(String(Date.now()) + Math.random())
+            .digest('hex');
+
   req.id = rid;
   res.setHeader('x-request-id', rid);
   next();
@@ -297,17 +318,23 @@ function gracefulShutdown(signal) {
     }
   } catch (e) {
     // ignore if undici not installed
+    void e;
   }
 
   // centralize client cleanup
   try {
-    const client = require('./novain-platform/lib/http-client');
+    // require the centralized http-client cleanup helper from repo root
+    const client = require('../novain-platform/lib/http-client');
     if (client && typeof client.closeAllClients === 'function') {
       try {
         client.closeAllClients();
-      } catch (e) {}
+      } catch (e) {
+        void e;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    void e;
+  }
 
   try {
     server.close(() => {

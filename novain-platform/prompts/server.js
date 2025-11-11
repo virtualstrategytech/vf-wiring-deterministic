@@ -157,14 +157,18 @@ function gracefulShutdown(signal) {
   try {
     const client = require('../lib/http-client');
     if (client && typeof client.closeAllClients === 'function') client.closeAllClients();
-  } catch (e) {}
+  } catch (e) {
+    void e;
+  }
   try {
     server.close(() => {
       try {
         process.exit(0);
       } catch {}
     });
-  } catch (e) {}
+  } catch (e) {
+    void e;
+  }
   setTimeout(() => {
     try {
       process.exit(1);

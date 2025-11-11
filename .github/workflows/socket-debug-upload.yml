@@ -35,6 +35,9 @@ jobs:
           NODE_DEBUG: net,tls
           NODE_OPTIONS: '--enable-source-maps --trace-warnings'
           DEBUG_TESTS: '1'
+          FORCE_PER_REQUEST_AGENT: '1'
+          FORCE_DETERMINISTIC_IDS: '1'
+          TEST_PATCH_RAW_BODY: '1'
         run: |
           set -euo pipefail
           mkdir -p /tmp

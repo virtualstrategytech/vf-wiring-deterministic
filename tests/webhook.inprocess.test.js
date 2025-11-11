@@ -193,10 +193,11 @@ describe('Webhook (in-process)', () => {
   test('POST /webhook ping responds with reply', async () => {
     const app = getApp();
     const body = { action: 'ping', question: 'hello', name: 'Tester', tenantId: 'default' };
+    const API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
     const res = await dispatch(app, {
       method: 'POST',
       path: '/webhook',
-      headers: { 'x-api-key': 'test123', 'content-type': 'application/json' },
+      headers: { 'x-api-key': API_KEY, 'content-type': 'application/json' },
       body,
     });
     expect(res.status).toBe(200);

@@ -1,5 +1,6 @@
 // Ensure env is set before requiring the server so module-level flags are evaluated correctly
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
+const { resolveApiKey } = require('./helpers/api-key');
+resolveApiKey();
 process.env.NODE_ENV = 'development';
 process.env.DEBUG_WEBHOOK = 'true';
 process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
@@ -84,7 +85,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
         https.globalAgent.destroy();
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => process.nextTick(resolve));
     } catch {}
   });
 

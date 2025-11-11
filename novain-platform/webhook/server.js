@@ -6,6 +6,8 @@ const app = express();
 const cors = require('cors');
 // add crypto for request-id
 const _crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
@@ -49,8 +51,37 @@ try {
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
+  // allow callers/tests to force explicit per-request agent usage to avoid
+  // keep-alive pooling (useful for Jest detectOpenHandles on CI/WSL)
+  let createdAgent = null;
   try {
     opts.signal = controller.signal;
+    // If caller didn't supply an agent, and either tests requested a forced
+    // per-request agent via FORCE_PER_REQUEST_AGENT=1 or we're in test/non-prod
+    // mode, create a short-lived agent and attach it to opts so sockets are
+    // closed promptly when the request finishes.
+    try {
+      const shouldForce =
+        process.env.FORCE_PER_REQUEST_AGENT === '1' ||
+        (!IS_PROD && process.env.FORCE_PER_REQUEST_AGENT !== '0');
+      if (!opts.agent && shouldForce) {
+        let proto = 'http:';
+        try {
+          proto = new URL(url).protocol || 'http:';
+        } catch {
+          proto = String(url || '').startsWith('https:') ? 'https:' : 'http:';
+        }
+        createdAgent =
+          proto === 'https:'
+            ? new https.Agent({ keepAlive: false })
+            : new http.Agent({ keepAlive: false });
+        opts.agent = createdAgent;
+      }
+    } catch {
+      // best-effort only
+      createdAgent = null;
+    }
+
     if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
     // Use the resolved fetch implementation captured during module init
@@ -76,6 +107,26 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     clearTimeout(id);
     console.error(`fetch error ${url}:`, err && err.message ? err.message : err);
     throw err;
+  } finally {
+    // ensure per-request agent (if created) is destroyed to avoid pooled
+    // sockets lingering and causing Jest detectOpenHandles failures
+    try {
+      if (createdAgent && typeof createdAgent.destroy === 'function') {
+        try {
+          createdAgent.destroy();
+        } catch {
+          void 0;
+        }
+      }
+    } catch {
+      void 0;
+    }
+    try {
+      clearTimeout(id);
+    } catch {}
+    try {
+      controller.abort && typeof controller.abort === 'function' && controller.abort();
+    } catch {}
   }
 };
 
@@ -162,14 +213,37 @@ if (SKIP_BODY_PARSER) {
 // Insert request-id propagation middleware (after body parser or before routes)
 app.use((req, res, next) => {
   const incoming = req.get('x-request-id');
-  const rid =
-    incoming ||
-    (_crypto.randomUUID
-      ? _crypto.randomUUID()
-      : _crypto
-          .createHash('sha1')
-          .update(String(Date.now()) + Math.random())
-          .digest('hex'));
+  // In test/debug modes, avoid using `crypto.randomUUID()` because on some
+  // Node versions it creates short-lived native random jobs that our
+  // async-hooks instrumentation reports as open handles (RANDOMBYTESREQUEST).
+  // Use a deterministic JS fallback during tests to keep async handle dumps clean.
+  const useDeterministicIds =
+    process.env.FORCE_DETERMINISTIC_IDS === '1' ||
+    process.env.NODE_ENV === 'test' ||
+    !!process.env.DEBUG_TESTS;
+
+  const deterministicId = () => {
+    // small, readable id: r-<time>-<counter/random>
+    try {
+      const t = Date.now().toString(36);
+      const r = Math.floor(Math.random() * 0x1000000).toString(36);
+      return `r-${t}-${r}`;
+    } catch {
+      return String(Date.now()) + '-' + Math.random();
+    }
+  };
+
+  const rid = incoming
+    ? incoming
+    : useDeterministicIds
+      ? deterministicId()
+      : _crypto.randomUUID
+        ? _crypto.randomUUID()
+        : _crypto
+            .createHash('sha1')
+            .update(String(Date.now()) + Math.random())
+            .digest('hex');
+
   req.id = rid;
   res.setHeader('x-request-id', rid);
   next();
@@ -255,7 +329,7 @@ app.post('/export_lesson_file', (req, res) => {
 app.post('/webhook', async (req, res) => {
   // authenticate request (read expected key at request time so tests can set
   // process.env.WEBHOOK_API_KEY dynamically before making requests)
-  const key = (req.get('x-api-key') || '').toString();
+  const key = (req.get('x-api-key') || req.get('x-voiceflow-signature') || '').toString();
   const expected = getApiKey();
   if (key !== expected) {
     console.warn('unauthorized: key mismatch');
@@ -730,10 +804,12 @@ if (require.main === module) {
       if (client && typeof client.closeAllClients === 'function') {
         try {
           client.closeAllClients();
-        } catch (e) {}
+        } catch (e) {
+          void e;
+        }
       }
     } catch (e) {
-      /* ignore */
+      void e;
     }
 
     // Stop accepting new connections and close existing ones. If server

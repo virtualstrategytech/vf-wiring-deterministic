@@ -59,7 +59,108 @@ try {
   process.on('message', (m) => {
     if (m === 'shutdown') {
       try {
-        server.close(() => process.exit(0));
+        try {
+          clearInterval(_parentWatcher);
+        } catch {}
+
+        // When shutting down, first close the server, then write the
+        // child-active handle dump (if requested) and exit. Writing the
+        // dump after close reduces the chance the dump shows the server
+        // still accepting connections. A small timeout ensures we still
+        // produce a dump if close hangs.
+        const doExit = (code = 0) => {
+          try {
+            process.exit(code);
+          } catch {}
+        };
+
+        const writeChildDump = () => {
+          if (process.env.DEBUG_CHILD_DUMP === '1') {
+            try {
+              const fs = require('fs');
+              const path = require('path');
+              const artefactsDir = path.resolve(__dirname, '..', 'artifacts');
+              try {
+                fs.mkdirSync(artefactsDir, { recursive: true });
+              } catch {}
+
+              function summarizeHandle(h) {
+                try {
+                  const ctor =
+                    h && h.constructor && h.constructor.name ? h.constructor.name : '<unknown>';
+                  const fd = h && (h.fd || (h._handle && h._handle.fd) || null);
+                  const destroyed = Boolean(h && h.destroyed);
+                  const info = { type: ctor, fd: fd, destroyed };
+                  try {
+                    info.readable = Boolean(h.readable);
+                  } catch {}
+                  try {
+                    info.writable = Boolean(h.writable);
+                  } catch {}
+                  try {
+                    info.pending = Boolean(h.pending);
+                  } catch {}
+                  return info;
+                } catch (e) {
+                  return { type: '<error>', error: String(e) };
+                }
+              }
+
+              let handles = [];
+              try {
+                const raw = process._getActiveHandles ? process._getActiveHandles() : [];
+                handles = raw.map(summarizeHandle);
+              } catch {}
+
+              const out = {
+                ts: Date.now(),
+                pid: process.pid,
+                handles,
+              };
+              const fn = path.join(artefactsDir, `child_active_handles_${Date.now()}.json`);
+              try {
+                fs.writeFileSync(fn, JSON.stringify(out, null, 2));
+                try {
+                  console.info(`server-runner: wrote child_active_handles -> ${fn}`);
+                } catch {}
+              } catch (e) {}
+            } catch {}
+          }
+        };
+
+        let closed = false;
+        const closeTimeout = setTimeout(() => {
+          try {
+            if (!closed) {
+              // Fallback: write dump even if close didn't finish to aid debugging
+              try {
+                writeChildDump();
+              } catch {}
+              doExit(0);
+            }
+          } catch {}
+        }, 2000);
+
+        try {
+          server.close(() => {
+            closed = true;
+            try {
+              clearTimeout(closeTimeout);
+            } catch {}
+            try {
+              writeChildDump();
+            } catch {}
+            doExit(0);
+          });
+        } catch (e) {
+          try {
+            // If server.close throws synchronously, still attempt dump and exit
+            try {
+              writeChildDump();
+            } catch {}
+            doExit(0);
+          } catch {}
+        }
       } catch {
         try {
           process.exit(0);
@@ -68,12 +169,16 @@ try {
     }
   });
 
-  // Ensure we exit if parent dies (best-effort)
-  setInterval(() => {
+  // Ensure we exit if parent dies (best-effort). Keep a reference so tests
+  // can clear it on shutdown and we don't leave interval handles open.
+  const _parentWatcher = setInterval(() => {
     try {
       // noop - if parent is gone, forked process will still run; this is best-effort
     } catch {}
-  }, 1000).unref();
+  }, 1000);
+  try {
+    if (typeof _parentWatcher.unref === 'function') _parentWatcher.unref();
+  } catch {}
 } catch (err) {
   // If the runner fails to start, surface the error to the parent
   try {

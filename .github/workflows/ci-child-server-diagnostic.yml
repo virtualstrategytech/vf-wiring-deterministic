@@ -16,6 +16,12 @@ jobs:
       # Enable our test diagnostics; keep default verbosity low (DEBUG_TESTS_LEVEL=1)
       DEBUG_TESTS: '1'
       DEBUG_TESTS_LEVEL: '1'
+      # Ensure tests use per-request agents and deterministic request ids
+      # to avoid pooled socket handles and RANDOMBYTESREQUEST entries in async dumps
+      FORCE_PER_REQUEST_AGENT: '1'
+      FORCE_DETERMINISTIC_IDS: '1'
+      # Ensure AsyncResource shim is enabled during tests to avoid raw-body async handles
+      TEST_PATCH_RAW_BODY: '1'
       # NODE_DEBUG is noisy (net,tls) — keep enabled for this diagnostic workflow
       NODE_DEBUG: 'net,tls'
     steps:
