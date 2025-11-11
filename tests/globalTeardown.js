@@ -508,5 +508,119 @@ module.exports = async () => {
     appendLog(`globalTeardown: final force destroy error: ${e && e.message}`);
   }
 
+  // Extra: synchronously drain http/https globalAgents to ensure any
+  // agent-created sockets are destroyed before process exit. Doing this
+  // synchronously (not in nextTick) increases the chance native handles
+  // are freed prior to Jest detectOpenHandles checks.
+  try {
+    const drainAgentSync = (agent) => {
+      if (!agent) return;
+      try {
+        const iter = (obj) => {
+          if (!obj) return;
+          try {
+            Object.values(obj).forEach((arr) => {
+              try {
+                if (Array.isArray(arr)) {
+                  arr.forEach((s) => {
+                    try {
+                      if (s && typeof s.destroy === 'function') s.destroy();
+                    } catch {}
+                  });
+                }
+              } catch {}
+            });
+          } catch {}
+        };
+        iter(agent.sockets);
+        iter(agent.freeSockets);
+        if (typeof agent.destroy === 'function') {
+          try {
+            agent.destroy();
+            appendLog('globalTeardown: agent.destroy() invoked');
+          } catch (_e) {
+            appendLog(`globalTeardown: agent.destroy() error: ${_e && _e.message}`);
+          }
+        }
+      } catch {}
+    };
+
+    try {
+      const http = require('http');
+      drainAgentSync(http && http.globalAgent);
+    } catch (_e) {
+      appendLog(`globalTeardown: http agent drain error: ${_e && _e.message}`);
+    }
+    try {
+      const https = require('https');
+      drainAgentSync(https && https.globalAgent);
+    } catch (_e) {
+      appendLog(`globalTeardown: https agent drain error: ${_e && _e.message}`);
+    }
+  } catch (_e) {
+    appendLog(`globalTeardown: agent drain outer error: ${_e && _e.message}`);
+  }
+
+  // Enhanced diagnostic: enumerate active handles and capture extra
+  // metadata for ChildProcess-like objects (pid, /proc cmdline on Linux)
+  try {
+    try {
+      const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+      appendLog(`globalTeardown: pre-finish activeHandles.count=${handles.length}`);
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (String(name) === 'ChildProcess' || (h && typeof h.pid === 'number')) {
+            try {
+              const pid = h.pid;
+              appendLog(
+                `globalTeardown: diag child-handle idx=${i} pid=${pid} name=${String(name)}`
+              );
+              // Try to read /proc/<pid>/cmdline on Linux to capture the exact
+              // command line that created the process (useful in CI).
+              try {
+                if (pid && process.platform !== 'win32') {
+                  const procPath = `/proc/${pid}/cmdline`;
+                  const fs = require('fs');
+                  if (fs.existsSync(procPath)) {
+                    try {
+                      const cmd = fs.readFileSync(procPath, 'utf8').replace(/\0/g, ' ').trim();
+                      appendLog(`globalTeardown: diag child-cmdline pid=${pid} cmd="${cmd}"`);
+                    } catch (_e) {
+                      appendLog(
+                        `globalTeardown: diag proc read error pid=${pid} err=${_e && _e.message}`
+                      );
+                    }
+                  }
+                }
+              } catch (_e) {
+                appendLog(`globalTeardown: diag proc read outer error: ${_e && _e.message}`);
+              }
+            } catch (_e) {
+              appendLog(
+                `globalTeardown: diag child-handle read error idx=${i} err=${_e && _e.message}`
+              );
+            }
+          } else {
+            // Log socket-created stacks where available to help trace origin
+            try {
+              if (h && typeof h._createdStack === 'string') {
+                const preview = String(h._createdStack).split('\n').slice(0, 6).join(' | ');
+                appendLog(
+                  `globalTeardown: diag handle idx=${i} name=${String(name)} createdStack=${preview}`
+                );
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch (e) {
+      appendLog(`globalTeardown: diag enumeration error: ${e && e.message}`);
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: enhanced diag outer error: ${e && e.message}`);
+  }
+
   appendLog('globalTeardown: finished');
 };
