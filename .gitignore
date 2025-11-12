@@ -246,3 +246,20 @@ ci-artifacts*/
 run_*.log
 local-debug*
 tests/local-jest-output.txt
+# Ignore generated test dumps
+tests/listener_dump.json
+
+# ignore generated test artifact
+tests/listener_dump.json
+
+# ignore generated test artifact
+tests/handle_dump.json
+
+# ignore generated test artifact
+tests/dump_handles_preload.js
+
+# ignore generated test artifact
+tests/trace_connect_preload.js
+
+# ignore generated test artifact
+.github_artifacts/

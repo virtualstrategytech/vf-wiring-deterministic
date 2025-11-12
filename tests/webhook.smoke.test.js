@@ -4,9 +4,16 @@ const fs = require('fs');
 const path = require('path');
 
 const secretFile = path.resolve(__dirname, 'webhook.secret');
-const key =
-  process.env.WEBHOOK_API_KEY ||
-  (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
+function getKey() {
+  try {
+    return (
+      process.env.WEBHOOK_API_KEY ||
+      (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123')
+    );
+  } catch {
+    return process.env.WEBHOOK_API_KEY || 'test123';
+  }
+}
 
 const rawBase = (process.env.WEBHOOK_BASE || '').trim();
 // Defensive normalization: strip trailing slashes so joining paths like
@@ -250,7 +257,7 @@ describe('webhook smoke', () => {
     const resp = await postJson(
       `${base}/webhook`,
       body,
-      { 'x-api-key': String(key) },
+      { 'x-api-key': String(getKey()) },
       PING_TIMEOUT
     );
     expect(resp.status).toBeGreaterThanOrEqual(200);
@@ -263,7 +270,7 @@ describe('webhook smoke', () => {
     const resp = await postJson(
       `${base}/webhook`,
       body,
-      { 'x-api-key': String(key) },
+      { 'x-api-key': String(getKey()) },
       GENERATE_TIMEOUT
     );
 
@@ -289,7 +296,7 @@ describe('webhook smoke', () => {
     const resp = await postJson(
       `${base}/webhook`,
       body,
-      { 'x-api-key': String(key) },
+      { 'x-api-key': String(getKey()) },
       GENERATE_TIMEOUT
     );
 

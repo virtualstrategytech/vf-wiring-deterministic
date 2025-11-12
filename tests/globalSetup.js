@@ -21,21 +21,38 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
       (function tryConnect() {
         const sock = new net.Socket();
         sock.setTimeout(500);
-        sock.on('connect', () => {
-          sock.destroy();
+        // Use `once` to ensure listeners are removed when the socket
+        // is destroyed; this prevents accumulating listeners across
+        // repeated probe attempts which can trigger MaxListeners warnings.
+        sock.once('connect', () => {
+          try {
+            sock.destroy();
+          } catch {}
           resolve();
         });
-        sock.on('error', () => {
-          sock.destroy();
+        sock.once('error', () => {
+          try {
+            sock.destroy();
+          } catch {}
           if (Date.now() - start > timeout) return reject(new Error('timeout'));
           setTimeout(tryConnect, 200);
         });
-        sock.on('timeout', () => {
-          sock.destroy();
+        sock.once('timeout', () => {
+          try {
+            sock.destroy();
+          } catch {}
           if (Date.now() - start > timeout) return reject(new Error('timeout'));
           setTimeout(tryConnect, 200);
         });
-        sock.connect(port, '127.0.0.1');
+        try {
+          sock.connect(port, '127.0.0.1');
+        } catch (e) {
+          try {
+            sock.destroy();
+          } catch {}
+          if (Date.now() - start > timeout) return reject(new Error('timeout'));
+          setTimeout(tryConnect, 200);
+        }
       })();
     });
   }
@@ -48,7 +65,10 @@ if (process.env.CI === 'true' || process.env.SKIP_SYNC_SECRET === 'true') {
     function logLine(...parts) {
       const line = `[${new Date().toISOString()}] ${parts.join(' ')}\n`;
       try {
-        logStream.write(line);
+        // Guard against writing after the stream has been closed/destroyed.
+        if (logStream && !logStream.destroyed && !logStream.writableEnded) {
+          logStream.write(line);
+        }
       } catch {
         // ignore write failures in constrained environments
       }
