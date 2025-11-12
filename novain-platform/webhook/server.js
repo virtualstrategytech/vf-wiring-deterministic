@@ -12,7 +12,7 @@ const https = require('https');
 let httpClient = null;
 try {
   httpClient = require('../lib/http-client');
-} catch (e) {
+} catch (_) {
   // best-effort only; lib may not be present in some packaging scenarios
   httpClient = null;
 }
