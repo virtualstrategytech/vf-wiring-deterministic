@@ -231,28 +231,12 @@ async function requestApp(
   } else {
     client = supertest(app);
   }
-  // Construct the supertest Test directly. Patching AsyncResource around
-  // Test construction produced a persistent 'bound-anonymous-fn' open-handle
-  // in some environments. Create the Test normally and run diagnostics
-  // afterwards. Listener dumps are still gated by DEBUG_TESTS.
-  let req;
-  // Try a very short-lived AsyncResource shim that is restored synchronously
-  // immediately after Test construction. This attempts to prevent async-hooks
-  // from capturing transient internal resources without leaving the shim
-  // active across ticks (which previously made the warning persist).
-  try {
-    const __localRestore = __req_patchAsyncResourceNoop();
-    try {
-      req = client[method](path);
-    } finally {
-      try {
-        if (typeof __localRestore === 'function') __localRestore();
-      } catch {}
-    }
-  } catch (e) {
-    // Fall back to direct construction on unexpected errors
-    req = client[method](path);
-  }
+  // Construct the supertest Test directly. Previously we experimented with
+  // temporarily patching async_hooks.AsyncResource around Test construction
+  // to try to reduce false-positive open-handle detection. That shim itself
+  // proved unreliable in some environments, so use the direct construction
+  // path and rely on conservative cleanup below to close any native handles.
+  let req = client[method](path);
 
   // Diagnostic hook: if a preload collected async handles, dump them
   // immediately after Test construction so we capture creation stacks
