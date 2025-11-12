@@ -2,6 +2,15 @@
 
 Set-StrictMode -Version Latest
 
+# Ensure `.gitignore` contains our local generated-test ignores to avoid
+# interactive one-liners accidentally piping FileInfo objects into Select-String.
+try {
+  $ensureScript = Join-Path $PSScriptRoot 'ensure-gitignore.ps1'
+  if (Test-Path $ensureScript) { & $ensureScript } else { Write-Verbose "ensure-gitignore.ps1 not found; skipping" }
+} catch {
+  Write-Warning "ensure-gitignore.ps1 failed: $_"   # non-fatal
+}
+
 $repoRoot = (Resolve-Path .).Path
 $webhookDir = Join-Path $repoRoot 'novain-platform\webhook'
 $envFile = Join-Path $repoRoot '.env'
@@ -19,7 +28,7 @@ if (Test-Path $envFile) {
   Move-Item -Path $envFile -Destination $bk -Force
   Write-Output ".env found and moved to $bk"
 }
-if (Test-Path -Path $envFile -PathType Any -ErrorAction SilentlyContinue -eq $false) {
+if (-not (Test-Path -Path $envFile -PathType Any -ErrorAction SilentlyContinue)) {
   if (Test-Path $envExample) {
     Copy-Item -Path $envExample -Destination $envFile -Force
     Write-Output ".env created from .env.example - edit $envFile with real values before pushing"
@@ -30,16 +39,22 @@ if (Test-Path -Path $envFile -PathType Any -ErrorAction SilentlyContinue -eq $fa
 
 # 2) Parse .env into a hashtable (simple KEY=VALUE parser)
 $envMap = @{}
-Get-Content $envFile | ForEach-Object {
-  $line = $_.Trim()
-  if ($line -and ($line.StartsWith('#') -eq $false)) {
-    $parts = $line -split '=', 2
-    if ($parts.Length -eq 2) {
-      $k = $parts[0].Trim()
-      $v = $parts[1].Trim()
-      $envMap[$k] = $v
+# Only attempt to read the file if it exists — previous logic may have
+# skipped creating a .env (no .env.example present). Guard to avoid errors.
+if (Test-Path -Path $envFile -PathType Leaf -ErrorAction SilentlyContinue) {
+  Get-Content $envFile | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and ($line.StartsWith('#') -eq $false)) {
+      $parts = $line -split '=', 2
+      if ($parts.Length -eq 2) {
+        $k = $parts[0].Trim()
+        $v = $parts[1].Trim()
+        $envMap[$k] = $v
+      }
     }
   }
+} else {
+  Write-Output ".env not found; proceeding with empty env map."
 }
 
 # Determine port (default 3000)

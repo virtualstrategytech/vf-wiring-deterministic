@@ -9,6 +9,12 @@ if ($null -eq (Get-Module -ListAvailable -Name Microsoft.PowerShell.SecretManage
   exit 0
 }
 
+# Allow local override to skip secret sync entirely
+if ($env:SKIP_SECRET_SYNC) {
+  Write-Output "SKIP_SECRET_SYNC set; skipping vault sync."
+  exit 0
+}
+
 # Path to secret file (repo-root\tests\webhook.secret)
 $secretFile = Resolve-Path -Path (Join-Path $PSScriptRoot '..\tests\webhook.secret') -ErrorAction SilentlyContinue
 if ($null -eq $secretFile) {
@@ -20,10 +26,23 @@ if ($null -eq $secretFile) {
 # Try to read from the vault, but fall back to env var or an existing file.
 try {
   Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop
-  $sec = Get-Secret -Name WEBHOOK_API_KEY -Vault MyLocalVault -ErrorAction Stop
-  $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-  $plain = ($plain -replace '[^\u0020-\u007E]','').Trim()
-  Write-Output "Read secret from MyLocalVault (sanitized length=$(($plain).Length))."
+  # Try several likely secret names to be tolerant of local vs env naming
+  $secretNames = @('WEBHOOK_API_KEY','webhook-api-key')
+  $sec = $null
+  $usedName = $null
+  foreach ($n in $secretNames) {
+    try {
+      $candidate = Get-Secret -Name $n -Vault MyLocalVault -ErrorAction Stop
+      if ($candidate) { $sec = $candidate; $usedName = $n; break }
+    } catch { continue }
+  }
+  if ($sec -ne $null) {
+    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+    $plain = ($plain -replace '[^\u0020-\u007E]','').Trim()
+    Write-Output "Read secret '$usedName' from MyLocalVault (sanitized length=$(($plain).Length))."
+  } else {
+    throw "Vault secret not found"
+  }
   } catch {
   Write-Warning "Could not read from MyLocalVault: $_"
   # Try environment variable

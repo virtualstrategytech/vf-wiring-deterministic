@@ -7,6 +7,12 @@ if (process.env.CI) {
   process.exit(0);
 }
 
+// Honor explicit local override to skip secret sync (useful for quick local runs)
+if (process.env.SKIP_SECRET_SYNC) {
+  console.log('pretest: SKIP_SECRET_SYNC set; skipping sync_secret');
+  process.exit(0);
+}
+
 // Only run the PowerShell sync on Windows (PowerShell may not be present on runners)
 if (process.platform !== 'win32') {
   console.log('pretest: non-Windows platform, skipping sync_secret');

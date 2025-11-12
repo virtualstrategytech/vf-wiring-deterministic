@@ -6,6 +6,15 @@ const https = require('https');
 const net = require('net');
 const tls = require('tls');
 
+// Increase EventEmitter listener limit in tests to avoid noisy
+// MaxListenersExceededWarning from benign repeated short-lived
+// 'connect' listener attachments during test orchestration. This
+// is a pragmatic, low-risk diagnostic easing change; we still
+// want to investigate and remove any real leaks.
+try {
+  require('events').EventEmitter.defaultMaxListeners = 20;
+} catch {}
+
 // Defensive shim: make console.warn safe during aggressive debug sweeps.
 // Some test cleanup paths attempt to write to stdio pipes that may have
 // been closed (child-process teardown). Wrapping console.warn here keeps
@@ -181,7 +190,9 @@ try {
             // Unref short-lived client sockets so they don't keep the
             // Node event loop alive during teardown in CI.
             if (sock && typeof sock.unref === 'function') {
-              try { sock.unref(); } catch {}
+              try {
+                sock.unref();
+              } catch {}
             }
           } catch {}
           return sock;
@@ -210,7 +221,9 @@ try {
             try {
               sock._createdStack = new Error('agent-proto-socket-created').stack;
               if (sock && typeof sock.unref === 'function') {
-                try { sock.unref(); } catch {}
+                try {
+                  sock.unref();
+                } catch {}
               }
             } catch {}
             return sock;
@@ -235,7 +248,9 @@ try {
         try {
           sock._createdStack = new Error('net-createConnection-created').stack;
           if (sock && typeof sock.unref === 'function') {
-            try { sock.unref(); } catch {}
+            try {
+              sock.unref();
+            } catch {}
           }
         } catch {}
         return sock;
@@ -286,7 +301,9 @@ try {
         try {
           this._createdStack = new Error('net-socket-proto-connect').stack;
           if (this && typeof this.unref === 'function') {
-            try { this.unref(); } catch {}
+            try {
+              this.unref();
+            } catch {}
           }
         } catch {}
         return origProtoConnect.apply(this, args);
@@ -306,7 +323,9 @@ try {
         if (sock && typeof sock === 'object') {
           sock._createdStack = new Error('tls-connect-created').stack;
           if (typeof sock.unref === 'function') {
-            try { sock.unref(); } catch {}
+            try {
+              sock.unref();
+            } catch {}
           }
         }
       } catch {}

@@ -8,6 +8,14 @@ const cors = require('cors');
 const _crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+// shared helper to close undici / global agents when tests or processes exit
+let httpClient = null;
+try {
+  httpClient = require('../lib/http-client');
+} catch (e) {
+  // best-effort only; lib may not be present in some packaging scenarios
+  httpClient = null;
+}
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
@@ -862,4 +870,31 @@ try {
 }
 
 // Export the app for in-process tests and programmatic use.
+// Attach close helper from shared http-client so tests can call it directly.
+try {
+  if (httpClient && typeof httpClient.closeAllClients === 'function') {
+    Object.defineProperty(app, 'closeAllClients', {
+      value: httpClient.closeAllClients,
+      writable: false,
+      enumerable: false,
+    });
+  }
+} catch {}
+
+// Best-effort: ensure http/undici clients are cleaned up on process shutdown
+try {
+  if (httpClient && typeof httpClient.closeAllClients === 'function') {
+    // beforeExit is called when Node's event loop is empty but before exit
+    process.on('beforeExit', () => {
+      try {
+        httpClient.closeAllClients();
+      } catch {}
+    });
+    process.on('exit', () => {
+      try {
+        httpClient.closeAllClients();
+      } catch {}
+    });
+  }
+} catch {}
 module.exports = app;
