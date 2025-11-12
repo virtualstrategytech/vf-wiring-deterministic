@@ -246,3 +246,5 @@ ci-artifacts*/
 run_*.log
 local-debug*
 tests/local-jest-output.txt
+# Ignore generated test dumps
+tests/listener_dump.json
