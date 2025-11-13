@@ -22,6 +22,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Start webhook server in background
+        # Start the server so smoke tests that expect 127.0.0.1:3000 succeed in CI.
+        # The server listens only when run directly, so this starts it for the job.
+        run: |
+          nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+          # give the server a moment to bind
+          sleep 1
+
       - name: Run lint
         run: npm run lint
 
