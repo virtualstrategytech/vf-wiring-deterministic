@@ -1,7 +1,4 @@
 ﻿name: CI
-permissions:
-  contents: read
-  actions: read
 
 on: [push, pull_request]
 
@@ -23,20 +20,73 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm ci
+
+      - name: Ensure webhook server is running
+        # Idempotent: if a server is already listening on 127.0.0.1:3000, do nothing.
+        # Otherwise start the webhook and let it bind. This avoids races where
+        # the runner and workflow both try to start the server.
+        run: |
+          set -euo pipefail
+          PORT=3000
+          # Ensure an explicit unhandled-rejections log path so CI can collect
+          # any top-level unhandled/uncaught traces emitted by the server.
+          UNHANDLED_REJECTIONS_LOG="${RUNNER_TEMP:-/tmp}/vf_unhandled_rejections.log"
+          export UNHANDLED_REJECTIONS_LOG
+          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}" >> $GITHUB_ENV || true
+
+          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+          if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
+            echo "Webhook already listening on ${PORT}, skipping start"
+          else
+            echo "Starting webhook server"
+            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+            # give the server a moment to bind; poll the health endpoint
+            for i in {1..90}; do
+              if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
+                echo "Webhook server is ready"
+                break
+              fi
+              sleep 1
+            done
+          fi
 
       - name: Run lint
         run: npm run lint
+
+      - name: Upload server.log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-lint
+          path: server.log
+
+      - name: Upload unhandled-rejections log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unhandled-rejections-lint
+          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
+
+      - name: Upload server.log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-lint-success
+          path: server.log
+
+      - name: Upload unhandled-rejections log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unhandled-rejections-lint-success
+          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
 
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [18.x]
-    env:
-      # Guard defaults: do not enable debug piping or debug tests in CI by default.
-      DEBUG_TESTS: '0'
-      FORCE_CHILD_PIPES: '0'
 
     steps:
       - name: Checkout
@@ -49,56 +99,76 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm ci
 
       # Inject the secret into the runner environment only for pushes or same-repo PRs.
       # Avoids evaluating secrets for fork PRs while still making the secret available
       # to the subsequent Run tests step when allowed.
       - name: Inject WEBHOOK_API_KEY for same-repo runs
         if: ${{ github.event_name != 'pull_request' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
-        env:
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Ensure webhook server is running (idempotent)
+        # Make the test job robust to timing by waiting longer and only starting
+        # the server when needed. This step keeps behavior stable for both
+        # same-repo PRs and fork PRs where secrets may not be available.
         run: |
-          if [ -n "$WEBHOOK_API_KEY" ]; then
-            echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV
+          set -euo pipefail
+          PORT=${PORT:-3000}
+          # Ensure an explicit unhandled-rejections log path so CI can collect
+          # any top-level unhandled/uncaught traces emitted by the server.
+          UNHANDLED_REJECTIONS_LOG="${RUNNER_TEMP:-/tmp}/vf_unhandled_rejections.log"
+          export UNHANDLED_REJECTIONS_LOG
+          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}" >> $GITHUB_ENV || true
+
+          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+          if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
+            echo "Webhook already listening on ${PORT}, skipping start"
+          else
+            echo "Starting webhook server"
+            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+            echo "Waiting for webhook server to be ready on 127.0.0.1:${PORT}..."
+            # wait up to 90s
+            for i in {1..90}; do
+              if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
+                echo "Webhook server is ready"
+                break
+              fi
+              sleep 1
+            done
           fi
         shell: bash
 
-      - name: Run tests (captured)
+      - name: Run tests
         env:
           CI: 'true'
-          # DEBUG_TESTS enabled for a one-off CI debug run to collect handle dumps
-          DEBUG_TESTS: ${{ env.DEBUG_TESTS }}
-          DEBUG_TESTS_LEVEL: '3'
-          SKIP_SYNC_SECRET: 'true'
-          SKIP_BODY_PARSER: '1'
-          SKIP_SMOKE: 'true'
-          PROMPT_URL: ''
-          RETRIEVAL_URL: ''
-          BUSINESS_URL: ''
-          # Run tests in-process for now and avoid `--detectOpenHandles` in CI
-          # because it can produce false-positive failures. We'll migrate to
-          # the child-process server mode after tests are updated to use
-          # in-test HTTP stubs (nock) instead of mocking globalThis.fetch.
-          # Prefer child-process isolation in CI to isolate native handles.
-          USE_CHILD_PROCESS_SERVER: '1'
-          # Pre-load the test instrumentation as early as possible by
-          # requiring the instrumentation module via NODE_OPTIONS. This
-          # helps capture creation stacks for sockets that may be created
-          # during module init.
-          # Use an absolute path so child processes spawned by tests can
-          # also preload the instrumentation regardless of their CWD.
-          NODE_OPTIONS: '--require ${{ github.workspace }}/tests/jest.instrumentation.js'
-        # Run the CI wrapper which records env + runs jest in verbose mode
-        run: |
-          chmod +x ./scripts/ci_run_jest.sh || true
-          ./scripts/ci_run_jest.sh
+        run: npm test --silent
 
-      - name: Upload logs on failure
+      - name: Upload server.log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs
-          path: |
-            tests/globalSetup.log
-            tests/jest-output.txt
+          name: server-log-test
+          path: server.log
+
+      - name: Upload unhandled-rejections log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unhandled-rejections-test
+          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
+
+      - name: Upload server.log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-test-success
+          path: server.log
+
+      - name: Upload unhandled-rejections log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unhandled-rejections-test-success
+          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}

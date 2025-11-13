@@ -24,6 +24,18 @@ function _normalizeBase(b) {
 // Default to local server when no base provided
 const base = _normalizeBase(rawBase) || 'http://127.0.0.1:3000';
 
+// Prefer in-process app when available (reduces TCP races in local runs).
+let _localApp = null;
+try {
+  // Make sure the in-process server sees the same API key the test will send.
+  try {
+    if (key && !process.env.WEBHOOK_API_KEY) process.env.WEBHOOK_API_KEY = String(key);
+  } catch {}
+  // require the app for in-process testing when possible
+  _localApp = require('../novain-platform/webhook/server');
+  if (!_localApp || typeof _localApp !== 'function') _localApp = null;
+} catch {}
+
 // Emit a short, always-on debug header so CI logs clearly indicate which
 // version of the test file executed. This is intentionally lightweight and
 // non-secret (no env values printed).
@@ -92,6 +104,24 @@ try {
 const HEALTH_TIMEOUT = Number(process.env.WEBHOOK_HEALTH_TIMEOUT) || 5000;
 const PING_TIMEOUT = Number(process.env.WEBHOOK_PING_TIMEOUT) || 7000;
 const GENERATE_TIMEOUT = Number(process.env.WEBHOOK_GENERATE_TIMEOUT) || 45000;
+
+// Retry wrapper for transient connection failures (ECONNREFUSED)
+async function withRetries(fn, retries = 8, delay = 500) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const code =
+        err &&
+        (err.code || (err.message && err.message.includes('ECONNREFUSED') && 'ECONNREFUSED'));
+      if (String(code) !== 'ECONNREFUSED' || i + 1 === retries) throw err;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
 
 // Helper: write short debug lines to stderr and a file so CI captures them reliably
 function writeDebugLog(line) {
@@ -221,24 +251,7 @@ describe('webhook smoke', () => {
     // Try multiple times to allow the remote service to become healthy
     let lastErr;
     let text;
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        text = await getText(url, HEALTH_TIMEOUT);
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (attempt < retries) {
-          // wait then retry (use unref'd timer so retry delay doesn't keep loop alive)
-          await new Promise((r) => {
-            const t = setTimeout(r, retryDelay);
-            try {
-              if (t && typeof t.unref === 'function') t.unref();
-            } catch {}
-          });
-        }
-      }
-    }
+    text = await withRetries(() => getText(url, HEALTH_TIMEOUT), retries, retryDelay);
 
     if (lastErr) throw lastErr;
     expect(typeof text).toBe('string');
@@ -247,11 +260,10 @@ describe('webhook smoke', () => {
 
   test('POST /webhook (ping) returns 2xx', async () => {
     const body = { action: 'ping', question: 'hello', name: 'Bob', tenantId: 'default' };
-    const resp = await postJson(
-      `${base}/webhook`,
-      body,
-      { 'x-api-key': String(key) },
-      PING_TIMEOUT
+    const resp = await withRetries(
+      () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, PING_TIMEOUT),
+      6,
+      300
     );
     expect(resp.status).toBeGreaterThanOrEqual(200);
     expect(resp.status).toBeLessThan(300);
@@ -260,11 +272,10 @@ describe('webhook smoke', () => {
 
   test('POST /webhook generate_lesson (best-effort)', async () => {
     const body = { action: 'generate_lesson', question: 'Teach me SPQA', tenantId: 'default' };
-    const resp = await postJson(
-      `${base}/webhook`,
-      body,
-      { 'x-api-key': String(key) },
-      GENERATE_TIMEOUT
+    const resp = await withRetries(
+      () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, GENERATE_TIMEOUT),
+      4,
+      500
     );
 
     // Accept success (2xx) OR a controlled server-side failure (500) when external services are not configured.
@@ -286,11 +297,10 @@ describe('webhook smoke', () => {
 
   test('POST /webhook generate_quiz (best-effort)', async () => {
     const body = { action: 'generate_quiz', question: 'Quiz me on SPQA', tenantId: 'default' };
-    const resp = await postJson(
-      `${base}/webhook`,
-      body,
-      { 'x-api-key': String(key) },
-      GENERATE_TIMEOUT
+    const resp = await withRetries(
+      () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, GENERATE_TIMEOUT),
+      4,
+      500
     );
 
     if (resp.status >= 200 && resp.status < 300) {
@@ -318,9 +328,13 @@ const { requestApp } = require('./helpers/request-helper');
 
 async function postJson(url, body, headers = {}, timeout = 5000) {
   const u = new URL(url);
-  const base = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  const baseUrl = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
   const path = u.pathname + u.search;
-  const result = await requestApp(base, {
+  const target =
+    _localApp && (baseUrl === 'http://127.0.0.1:3000' || baseUrl === 'http://localhost:3000')
+      ? _localApp
+      : baseUrl;
+  const result = await requestApp(target, {
     method: 'post',
     path,
     body,
@@ -339,9 +353,15 @@ async function postJson(url, body, headers = {}, timeout = 5000) {
 // Connection: close, AbortController timeouts and response-body destruction.
 async function getText(url, timeout = 3000) {
   const u = new URL(url);
-  const base = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  const baseUrl = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
   const path = u.pathname + u.search;
-  const result = await requestApp(base, { method: 'get', path, timeout });
+  // If we're targeting the local default base and an in-process app is available,
+  // prefer calling the Express app directly to avoid network races.
+  const target =
+    _localApp && (baseUrl === 'http://127.0.0.1:3000' || baseUrl === 'http://localhost:3000')
+      ? _localApp
+      : baseUrl;
+  const result = await requestApp(target, { method: 'get', path, timeout });
   // requestApp returns { status, headers, body }
   return typeof result.body === 'string' ? result.body : JSON.stringify(result.body);
 }

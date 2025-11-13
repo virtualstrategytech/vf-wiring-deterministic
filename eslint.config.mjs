@@ -1,13 +1,19 @@
 // Flat ESLint config. We avoid importing `eslint/config` to prevent runtime
 // errors when the installed ESLint package doesn't export that subpath.
 import globals from 'globals';
+import { createRequire } from 'module';
 
-// plugin modules / parser
-import tsPlugin from '@typescript-eslint/eslint-plugin';
-import tsParser from '@typescript-eslint/parser';
-import reactPlugin from 'eslint-plugin-react';
-import reactHooksPlugin from 'eslint-plugin-react-hooks';
-import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
+// Some ESLint plugins are published as CommonJS. When this file is loaded
+// as an ES module (eslint.config.mjs) using static `import` Node might fail
+// to resolve them. Use createRequire to load CommonJS plugins reliably.
+const require = createRequire(import.meta.url);
+
+// plugin modules / parser (load with require to avoid ERR_MODULE_NOT_FOUND)
+const tsPlugin = require('@typescript-eslint/eslint-plugin');
+const tsParser = require('@typescript-eslint/parser');
+const reactPlugin = require('eslint-plugin-react');
+const reactHooksPlugin = require('eslint-plugin-react-hooks');
+const jsxA11yPlugin = require('eslint-plugin-jsx-a11y');
 
 export default [
   {

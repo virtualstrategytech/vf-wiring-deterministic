@@ -1,10 +1,25 @@
 // Global Jest setup/teardown helpers to reduce open-handle warnings.
 // Called after each test file via setupFilesAfterEnv.
-/* eslint-disable @typescript-eslint/no-unused-vars */
+
 const http = require('http');
 const https = require('https');
 const net = require('net');
 const tls = require('tls');
+
+// Temporary: increase EventEmitter defaultMaxListeners in CI/test runs to
+// reduce spurious Node MaxListeners warnings while we triage the source of
+// repeated `connect` listeners. This is a pragmatic guard and will be
+// removed once the root cause is fixed.
+try {
+  const events = require('events');
+  if (events && events.EventEmitter) {
+    try {
+      if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
+        events.EventEmitter.defaultMaxListeners = 50;
+      }
+    } catch {}
+  }
+} catch {}
 
 // Defensive shim: make console.warn safe during aggressive debug sweeps.
 // Some test cleanup paths attempt to write to stdio pipes that may have
@@ -181,7 +196,9 @@ try {
             // Unref short-lived client sockets so they don't keep the
             // Node event loop alive during teardown in CI.
             if (sock && typeof sock.unref === 'function') {
-              try { sock.unref(); } catch {}
+              try {
+                sock.unref();
+              } catch {}
             }
           } catch {}
           return sock;
@@ -210,7 +227,9 @@ try {
             try {
               sock._createdStack = new Error('agent-proto-socket-created').stack;
               if (sock && typeof sock.unref === 'function') {
-                try { sock.unref(); } catch {}
+                try {
+                  sock.unref();
+                } catch {}
               }
             } catch {}
             return sock;
@@ -235,7 +254,9 @@ try {
         try {
           sock._createdStack = new Error('net-createConnection-created').stack;
           if (sock && typeof sock.unref === 'function') {
-            try { sock.unref(); } catch {}
+            try {
+              sock.unref();
+            } catch {}
           }
         } catch {}
         return sock;
@@ -286,7 +307,9 @@ try {
         try {
           this._createdStack = new Error('net-socket-proto-connect').stack;
           if (this && typeof this.unref === 'function') {
-            try { this.unref(); } catch {}
+            try {
+              this.unref();
+            } catch {}
           }
         } catch {}
         return origProtoConnect.apply(this, args);
@@ -306,7 +329,9 @@ try {
         if (sock && typeof sock === 'object') {
           sock._createdStack = new Error('tls-connect-created').stack;
           if (typeof sock.unref === 'function') {
-            try { sock.unref(); } catch {}
+            try {
+              sock.unref();
+            } catch {}
           }
         }
       } catch {}

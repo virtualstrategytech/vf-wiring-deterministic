@@ -52,7 +52,7 @@ try {
           /* ignore */
         }
         // also emit to console for immediate developer visibility
-        // eslint-disable-next-line no-console
+
         console.log('jest.netblock: set nock allowlist ->', combined);
       } catch {
         // swallow errors to avoid blocking tests
@@ -85,13 +85,40 @@ try {
     // if nock internals throw here, ignore — the primary protection is
     // nock.disableNetConnect() which is already in place.
   }
-  // helpful debug hint when tests attempt to reach external hosts
-  process.on('unhandledRejection', () => {});
+  // Helpful debug hint when tests attempt to reach external hosts.
+  // Previously this silenced all unhandled rejections which can obscure
+  // real test failures. Instead, log the rejection (and stack when
+  // available) and rethrow on the next tick so Jest fails fast and the
+  // root cause is visible in CI logs. We also append to a local file
+  // (`/tmp/unhandled_rejections.log`) when possible for artifact upload.
+  process.on('unhandledRejection', (err) => {
+    try {
+      const msg =
+        (err && (err.stack || err.message || String(err))) || 'unhandledRejection (no error)';
+      try {
+        // best-effort: write to /tmp for CI artifact collection
+        require('fs').appendFileSync(
+          '/tmp/unhandled_rejections.log',
+          `${new Date().toISOString()} ${msg}\n\n`
+        );
+      } catch {}
+      try {
+        console.error('UnhandledPromiseRejection in tests:', msg);
+      } catch {}
+      // Re-throw on next tick to make the process fail loudly (so CI shows the error)
+      setImmediate(() => {
+        throw err;
+      });
+    } catch (e) {
+      try {
+        console.error('Error in unhandledRejection handler:', e && e.stack ? e.stack : e);
+      } catch {}
+    }
+  });
 } catch {
   // If nock is not installed, fail loudly so CI/devs add the dependency.
   // But in case of a tooling quirk, log a warning and continue.
   try {
-    // eslint-disable-next-line no-console
     console.warn(
       'tests/jest.netblock.js: nock not available, external network requests will not be blocked'
     );

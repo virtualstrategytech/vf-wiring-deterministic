@@ -31,6 +31,6 @@ app.post("/v1/retrieve", (req, res) => {
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 10000;
 app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
+   
   console.log(`vf-retrieval-service listening on ${PORT}`);
 });

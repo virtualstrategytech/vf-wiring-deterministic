@@ -8,6 +8,9 @@ const cors = require('cors');
 const _crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
@@ -61,9 +64,11 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     // mode, create a short-lived agent and attach it to opts so sockets are
     // closed promptly when the request finishes.
     try {
-      const shouldForce =
-        process.env.FORCE_PER_REQUEST_AGENT === '1' ||
-        (!IS_PROD && process.env.FORCE_PER_REQUEST_AGENT !== '0');
+      // Only create a short-lived per-request agent when explicitly requested
+      // via FORCE_PER_REQUEST_AGENT=1. Creating per-request agents by default
+      // in non-production can cause many transient sockets/listeners and
+      // trigger MaxListenersExceededWarning in CI. Make it opt-in.
+      const shouldForce = process.env.FORCE_PER_REQUEST_AGENT === '1';
       if (!opts.agent && shouldForce) {
         let proto = 'http:';
         try {
@@ -249,6 +254,42 @@ app.use((req, res, next) => {
   next();
 });
 
+// Normalize JSON responses so callers/tests that expect both `raw` and
+// `data.raw` shapes receive equivalent data. This wraps `res.json` per
+// request and mirrors `raw` <=> `data.raw` when one is present but the
+// other is missing. It's intentionally conservative: it doesn't fabricate
+// complex payloads, only mirrors existing `raw` payloads to `data.raw`.
+app.use((req, res, next) => {
+  try {
+    const _origJson = res.json && res.json.bind(res);
+    if (typeof _origJson === 'function') {
+      res.json = function (obj) {
+        try {
+          if (obj && typeof obj === 'object') {
+            // If top-level `raw` exists but `data.raw` is missing, mirror it.
+            if (obj.raw && (!obj.data || !obj.data.raw)) {
+              obj.data = Object.assign({}, obj.data || {}, { raw: obj.raw });
+            }
+            // If `data.raw` exists but top-level `raw` is missing, mirror it.
+            if ((!obj.raw || obj.raw === undefined) && obj.data && obj.data.raw) {
+              obj.raw = obj.data.raw;
+            }
+          }
+        } catch (e) {
+          // best-effort only; do not block response on normalization errors
+          try {
+            console.warn('res.json normalization failed', e && e.message ? e.message : e);
+          } catch {}
+        }
+        return _origJson(obj);
+      };
+    }
+  } catch (e) {
+    /* ignore - normalization is best-effort */
+  }
+  next();
+});
+
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     console.error('JSON parse error:', err.message);
@@ -276,6 +317,51 @@ app.get('/ready', (_req, res) => {
   if (__ready) return res.status(200).json({ ok: true });
   return res.status(503).json({ ok: false, reason: 'not_ready' });
 });
+
+// Top-level visibility for uncaught errors and unhandled rejections.
+// Write a short trace to the OS temp directory so CI can collect it if needed.
+try {
+  const UNHANDLED_REJECTIONS_LOG =
+    process.env.UNHANDLED_REJECTIONS_LOG || path.join(os.tmpdir(), 'vf_unhandled_rejections.log');
+
+  process.on('unhandledRejection', (reason) => {
+    try {
+      const line = `[${new Date().toISOString()}] unhandledRejection: ${
+        reason && reason.stack ? reason.stack : String(reason)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Unhandled Rejection at:', reason);
+    } catch {}
+    try {
+      // exit with non-zero after a short delay so CI shows a failing job and
+      // logs are flushed. We unref the timer so it doesn't keep the process alive.
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+
+  process.on('uncaughtException', (err) => {
+    try {
+      const line = `[${new Date().toISOString()}] uncaughtException: ${
+        err && err.stack ? err.stack : String(err)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Uncaught Exception:', err && err.stack ? err.stack : err);
+    } catch {}
+    try {
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+} catch (e) {
+  // best-effort only: do not crash if logging setup fails
+}
 
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;

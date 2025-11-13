@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+ 
 // Lightweight server helper for tests: start an Express app on an ephemeral
 // port while tracking sockets so we can aggressively destroy them in tests.
 const http = require('http');
