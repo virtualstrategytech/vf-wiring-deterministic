@@ -9,18 +9,23 @@ describe('in-process webhook app (refactored)', () => {
   jest.setTimeout(20000);
 
   it('returns llm_elicit stub with source "stub"', async () => {
-    const resp = await supertest(app)
-      .post('/webhook')
-      .set('x-api-key', process.env.WEBHOOK_API_KEY)
-      .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-      .timeout({ deadline: 5000 });
+    const server = app.listen();
+    try {
+      const resp = await supertest(server)
+        .post('/webhook')
+        .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
+        .timeout({ deadline: 5000 });
 
-    expect(resp.status).toBe(200);
+      expect(resp.status).toBe(200);
 
-    const body = resp.body || {};
-    const rawSource =
-      (body && body.raw && body.raw.source) ||
-      (body && body.data && body.data.raw && body.data.raw.source);
-    expect(rawSource).toBe('stub');
+      const body = resp.body || {};
+      const rawSource =
+        (body && body.raw && body.raw.source) ||
+        (body && body.data && body.data.raw && body.data.raw.source);
+      expect(rawSource).toBe('stub');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
