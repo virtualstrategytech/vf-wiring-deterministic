@@ -233,3 +233,14 @@ logs/
 tests/webhook.secret
 # ignore temporary markdown outputs
 tmp.md
+
+# CI / smoke artifacts (ignore heavy generated files)
+artifacts/
+artifacts-*/
+ci-artifacts-*/
+ci-artifacts*/
+.github/actions-artifacts/
+.github/pr-artifacts/
+novain-platform/smoke-artifacts/
+smoke-artifacts/
+tests/artifacts/
