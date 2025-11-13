@@ -44,59 +44,33 @@ async function captureConsoleAsync(action) {
 
 describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
-  let server;
-  beforeAll(() => {
-    server = app.listen();
-    if (server && typeof server.unref === 'function') {
-      try {
-        server.unref();
-      } catch {}
-    }
-    server._sockets = new Set();
-    server.on('connection', (s) => {
-      server._sockets.add(s);
-      s.on('close', () => server._sockets.delete(s));
-    });
-  });
-
-  afterAll(async () => {
-    try {
-      if (server && typeof server.close === 'function') {
-        await new Promise((r) => server.close(r));
-      }
-      try {
-        if (server && server._sockets) {
-          for (const s of server._sockets) {
-            try {
-              s.destroy();
-            } catch {}
-          }
-        }
-      } catch {}
-      try {
-        const http = require('http');
-        const https = require('https');
-        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
-          http.globalAgent.destroy();
-        }
-        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
-          https.globalAgent.destroy();
-        }
-      } catch {}
-      await new Promise((resolve) => setImmediate(resolve));
-    } catch {}
-  });
+  // Use the express app directly with supertest to avoid creating a real
+  // listening server in tests. This prevents Jest "open handle" warnings.
+  // Supertest accepts an Express app instance and runs requests in-process.
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const resp = await request(server)
-        .post('/webhook')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
-        .timeout({ deadline: 5000 });
+      const server = app.listen();
+      try {
+        const resp = await request(server)
+          .post('/webhook')
+          .set('x-api-key', process.env.WEBHOOK_API_KEY)
+          .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
+          .timeout({ deadline: 5000 });
 
-      expect(resp.status).toBeGreaterThanOrEqual(200);
-      expect(resp.status).toBeLessThan(300);
+        expect(resp.status).toBeGreaterThanOrEqual(200);
+        expect(resp.status).toBeLessThan(300);
+      } finally {
+        await new Promise((r) => server.close(r));
+        try {
+          const http = require('http');
+          const https = require('https');
+          if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+            http.globalAgent.destroy();
+          if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+            https.globalAgent.destroy();
+        } catch {}
+      }
     });
 
     const combined = logs.out.join('\n') + '\n' + logs.err.join('\n');
