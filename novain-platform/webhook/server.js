@@ -249,6 +249,42 @@ app.use((req, res, next) => {
   next();
 });
 
+// Normalize JSON responses so callers/tests that expect both `raw` and
+// `data.raw` shapes receive equivalent data. This wraps `res.json` per
+// request and mirrors `raw` <=> `data.raw` when one is present but the
+// other is missing. It's intentionally conservative: it doesn't fabricate
+// complex payloads, only mirrors existing `raw` payloads to `data.raw`.
+app.use((req, res, next) => {
+  try {
+    const _origJson = res.json && res.json.bind(res);
+    if (typeof _origJson === 'function') {
+      res.json = function (obj) {
+        try {
+          if (obj && typeof obj === 'object') {
+            // If top-level `raw` exists but `data.raw` is missing, mirror it.
+            if (obj.raw && (!obj.data || !obj.data.raw)) {
+              obj.data = Object.assign({}, obj.data || {}, { raw: obj.raw });
+            }
+            // If `data.raw` exists but top-level `raw` is missing, mirror it.
+            if ((!obj.raw || obj.raw === undefined) && obj.data && obj.data.raw) {
+              obj.raw = obj.data.raw;
+            }
+          }
+        } catch (e) {
+          // best-effort only; do not block response on normalization errors
+          try {
+            console.warn('res.json normalization failed', e && e.message ? e.message : e);
+          } catch {}
+        }
+        return _origJson(obj);
+      };
+    }
+  } catch (e) {
+    /* ignore - normalization is best-effort */
+  }
+  next();
+});
+
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     console.error('JSON parse error:', err.message);
