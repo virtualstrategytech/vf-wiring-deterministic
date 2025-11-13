@@ -6,8 +6,16 @@ const request = require('supertest');
 const app = require('../novain-platform/webhook/server');
 
 describe('regression: raw/data.raw mirror', () => {
+  let server;
+  beforeAll(() => {
+    server = app.listen();
+  });
+
   afterAll(async () => {
     try {
+      if (server && typeof server.close === 'function') {
+        await new Promise((r) => server.close(r));
+      }
       const http = require('http');
       const https = require('https');
       if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
@@ -20,7 +28,7 @@ describe('regression: raw/data.raw mirror', () => {
     } catch {}
   });
   it('llm_elicit returns raw and data.raw with same payload', async () => {
-    const resp = await request(app)
+    const resp = await request(server)
       .post('/webhook')
       .set('x-api-key', process.env.WEBHOOK_API_KEY)
       .send({ action: 'llm_elicit', question: 'Test', tenantId: 't' })
@@ -35,7 +43,7 @@ describe('regression: raw/data.raw mirror', () => {
   });
 
   it('invoke_component returns raw and data.raw with same payload', async () => {
-    const resp = await request(app)
+    const resp = await request(server)
       .post('/webhook')
       .set('x-api-key', process.env.WEBHOOK_API_KEY)
       .send({
