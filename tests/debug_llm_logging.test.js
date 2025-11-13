@@ -22,6 +22,7 @@ globalThis.fetch = async () => {
 };
 
 const request = require('supertest');
+const http = require('http');
 const app = require('../novain-platform/webhook/server');
 
 async function captureConsoleAsync(action) {
@@ -48,13 +49,36 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   // listening server in tests. This prevents Jest "open handle" warnings.
   // Supertest accepts an Express app instance and runs requests in-process.
 
+  let server;
+  let base;
+
+  beforeAll(async () => {
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, resolve));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterAll(async () => {
+    try {
+      await new Promise((resolve) => server.close(resolve));
+    } catch (e) {}
+    try {
+      const https = require('https');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+        http.globalAgent.destroy();
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+        https.globalAgent.destroy();
+    } catch (e) {}
+  });
+
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const req = request(app)
+      const req = request(base)
         .post('/webhook')
         .set('x-api-key', process.env.WEBHOOK_API_KEY)
         .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
       const resp = await req;
+
       try {
         if (req && req._server && typeof req._server.close === 'function') req._server.close();
       } catch (e) {}
