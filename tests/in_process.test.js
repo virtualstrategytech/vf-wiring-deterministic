@@ -7,40 +7,33 @@ const app = require('../novain-platform/webhook/server');
 
 describe('in-process webhook app (refactored)', () => {
   jest.setTimeout(20000);
-
-  it('returns llm_elicit stub with source "stub"', async () => {
-    const server = app.listen();
+  let server;
+  beforeAll(() => {
+    server = app.listen();
     if (server && typeof server.unref === 'function') {
       try {
         server.unref();
       } catch {}
     }
-    const sockets = new Set();
+    server._sockets = new Set();
     server.on('connection', (s) => {
-      sockets.add(s);
-      s.on('close', () => sockets.delete(s));
+      server._sockets.add(s);
+      s.on('close', () => server._sockets.delete(s));
     });
+  });
+
+  afterAll(async () => {
     try {
-      const resp = await supertest(server)
-        .post('/webhook')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-        .timeout({ deadline: 5000 });
-
-      expect(resp.status).toBe(200);
-
-      const body = resp.body || {};
-      const rawSource =
-        (body && body.raw && body.raw.source) ||
-        (body && body.data && body.data.raw && body.data.raw.source);
-      expect(rawSource).toBe('stub');
-    } finally {
-      await new Promise((resolve) => server.close(resolve));
+      if (server && typeof server.close === 'function') {
+        await new Promise((r) => server.close(r));
+      }
       try {
-        for (const s of sockets) {
-          try {
-            s.destroy();
-          } catch {}
+        if (server && server._sockets) {
+          for (const s of server._sockets) {
+            try {
+              s.destroy();
+            } catch {}
+          }
         }
       } catch {}
       try {
@@ -53,6 +46,22 @@ describe('in-process webhook app (refactored)', () => {
           https.globalAgent.destroy();
         }
       } catch {}
-    }
+    } catch {}
+  });
+
+  it('returns llm_elicit stub with source "stub"', async () => {
+    const resp = await supertest(server)
+      .post('/webhook')
+      .set('x-api-key', process.env.WEBHOOK_API_KEY)
+      .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
+      .timeout({ deadline: 5000 });
+
+    expect(resp.status).toBe(200);
+
+    const body = resp.body || {};
+    const rawSource =
+      (body && body.raw && body.raw.source) ||
+      (body && body.data && body.data.raw && body.data.raw.source);
+    expect(rawSource).toBe('stub');
   });
 });
