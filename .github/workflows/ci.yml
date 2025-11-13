@@ -22,13 +22,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Start webhook server in background
-        # Start the server so smoke tests that expect 127.0.0.1:3000 succeed in CI.
-        # The server listens only when run directly, so this starts it for the job.
+      - name: Ensure webhook server is running
+        # Idempotent: if a server is already listening on 127.0.0.1:3000, do nothing.
+        # Otherwise start the webhook and let it bind. This avoids races where
+        # the runner and workflow both try to start the server.
         run: |
-          nohup node novain-platform/webhook/server.js > server.log 2>&1 &
-          # give the server a moment to bind
-          sleep 1
+          set -euo pipefail
+          PORT=3000
+          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+          if curl -sS --fail "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+            echo "Webhook already listening on ${PORT}, skipping start"
+          else
+            echo "Starting webhook server"
+            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+            # give the server a moment to bind; poll the health endpoint
+            for i in {1..30}; do
+              if curl -sS --fail "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+                echo "Webhook server is ready"
+                break
+              fi
+              sleep 1
+            done
+          fi
 
       - name: Run lint
         run: npm run lint
@@ -60,19 +75,29 @@ jobs:
         run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
         shell: bash
 
-      - name: Start webhook server in background
-        # Start the server so smoke tests that expect 127.0.0.1:3000 succeed in the test job.
-        # Use a small readiness loop that polls the health endpoint until it responds.
+      - name: Ensure webhook server is running (idempotent)
+        # Make the test job robust to timing by waiting longer and only starting
+        # the server when needed. This step keeps behavior stable for both
+        # same-repo PRs and fork PRs where secrets may not be available.
         run: |
-          nohup node novain-platform/webhook/server.js > server.log 2>&1 &
-          echo "Waiting for webhook server to be ready on 127.0.0.1:3000..."
-          for i in {1..30}; do
-            if curl -sS --fail http://127.0.0.1:3000/health >/dev/null 2>&1; then
-              echo "Webhook server is ready"
-              break
-            fi
-            sleep 1
-          done
+          set -euo pipefail
+          PORT=${PORT:-3000}
+          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+          if curl -sS --fail "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+            echo "Webhook already listening on ${PORT}, skipping start"
+          else
+            echo "Starting webhook server"
+            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+            echo "Waiting for webhook server to be ready on 127.0.0.1:${PORT}..."
+            # wait up to 60s
+            for i in {1..60}; do
+              if curl -sS --fail "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+                echo "Webhook server is ready"
+                break
+              fi
+              sleep 1
+            done
+          fi
         shell: bash
 
       - name: Run tests
