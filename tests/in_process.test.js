@@ -17,21 +17,33 @@ const supertest = require('supertest');
 describe('in-process webhook app (refactored)', () => {
   jest.setTimeout(20000);
 
-  // Use the global server started by tests/globalSetup.js. globalSetup starts
-  // the webhook on process.env.PORT (default 3000). Tests should use that
-  // server to avoid creating additional listeners which can trigger Jest
-  // detectOpenHandles.
+  // Prefer in-process app to avoid TCP races. If `WEBHOOK_BASE` is set we
+  // target that external URL (used for deployed smoke tests). Otherwise
+  // require the app and use supertest(app).
   const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
+  let requester;
+  if (process.env.WEBHOOK_BASE) {
+    requester = supertest(base);
+  } else {
+    try {
+       
+      const app = require('../novain-platform/webhook/server');
+      requester = supertest(app);
+    } catch (e) {
+      requester = supertest(base);
+    }
+  }
 
   it('returns llm_elicit stub with source "stub"', async () => {
     // Use a small retry wrapper to avoid transient ECONNREFUSED flakes in CI
-    async function postWithRetry(baseUrl, path, body, headers = {}, retries = 5) {
+    async function postWithRetry(_baseUrl, path, body, headers = {}, retries = 5) {
       for (let i = 0; i < retries; i++) {
         try {
-          const resp = await supertest(baseUrl).post(path).set(headers).send(body);
+          const resp = await requester.post(path).set(headers).send(body);
           return resp;
         } catch (err) {
-          const isConnRefused = err && err.code === 'ECONNREFUSED';
+          const isConnRefused =
+            err && (err.code === 'ECONNREFUSED' || err.errno === 'ECONNREFUSED');
           if (!isConnRefused || i + 1 === retries) throw err;
           await new Promise((r) => setTimeout(r, 150 * (i + 1)));
         }

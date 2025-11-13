@@ -13,18 +13,47 @@ process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 
 const request = require('supertest');
+const { requestApp } = require('./helpers/request-helper');
 
-// Use the global server started by tests/globalSetup.js
+// Use in-process `app` when possible to avoid network races. If `WEBHOOK_BASE`
+// is set explicitly we will target that external base instead (useful for
+// deployed smoke tests). Otherwise prefer `require('../novain-platform/webhook/server')`.
+let requester;
 const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
+let useRequestAppForRemote = false;
+try {
+  // Prefer in-process Express app when available
+   
+  const app = require('../novain-platform/webhook/server');
+  requester = request(app);
+} catch (e) {
+  // Fall back to using the shared request helper which creates and
+  // tears down remote connections safely (sets Connection: close, destroys
+  // ephemeral servers, and forces socket cleanup).
+  requester = null;
+  useRequestAppForRemote = true;
+}
 
 // Helper: POST with a few retries on ECONNREFUSED to reduce CI flakiness.
 async function postWithRetry(baseUrl, path, body, headers = {}, retries = 5) {
   for (let i = 0; i < retries; i++) {
     try {
-      const resp = await request(baseUrl).post(path).set(headers).send(body);
+      if (useRequestAppForRemote) {
+        // Use the request helper which properly closes sockets for remote bases
+        const out = await requestApp(base, {
+          method: 'post',
+          path,
+          body,
+          headers,
+          timeout: 10000,
+        });
+        // Normalize to supertest-like shape for assertions in the tests
+        return { status: out.status || 0, body: out.body };
+      }
+      const resp = await requester.post(path).set(headers).send(body);
       return resp;
     } catch (err) {
-      const isConnRefused = err && err.code === 'ECONNREFUSED';
+      const isConnRefused = err && (err.code === 'ECONNREFUSED' || err.errno === 'ECONNREFUSED');
       if (!isConnRefused || i + 1 === retries) throw err;
       // backoff
       await new Promise((r) => setTimeout(r, 150 * (i + 1)));

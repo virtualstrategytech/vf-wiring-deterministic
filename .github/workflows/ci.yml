@@ -55,6 +55,13 @@ jobs:
           name: server-log-lint
           path: server.log
 
+      - name: Upload server.log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-lint-success
+          path: server.log
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -117,4 +124,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-log-test
+          path: server.log
+
+      - name: Upload server.log on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-test-success
           path: server.log
