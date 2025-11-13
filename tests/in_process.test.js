@@ -10,6 +10,11 @@ describe('in-process webhook app (refactored)', () => {
 
   it('returns llm_elicit stub with source "stub"', async () => {
     const server = app.listen();
+    if (server && typeof server.unref === 'function') {
+      try {
+        server.unref();
+      } catch {}
+    }
     const sockets = new Set();
     server.on('connection', (s) => {
       sockets.add(s);

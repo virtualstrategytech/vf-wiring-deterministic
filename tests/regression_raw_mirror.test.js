@@ -9,6 +9,11 @@ describe('regression: raw/data.raw mirror', () => {
   let server;
   beforeAll(() => {
     server = app.listen();
+    if (server && typeof server.unref === 'function') {
+      try {
+        server.unref();
+      } catch {}
+    }
     server._sockets = new Set();
     server.on('connection', (s) => {
       server._sockets.add(s);

@@ -62,6 +62,11 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
       const server = app.listen();
+      if (server && typeof server.unref === 'function') {
+        try {
+          server.unref();
+        } catch {}
+      }
       const sockets = new Set();
       server.on('connection', (s) => {
         sockets.add(s);
