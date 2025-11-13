@@ -106,6 +106,29 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: unexpected error: ${e && e.message}`);
   }
+  // Ensure Node http/https global agents are destroyed to avoid lingering sockets
+  try {
+    const http = require('http');
+    const https = require('https');
+    if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+      try {
+        http.globalAgent.destroy();
+        appendLog('globalTeardown: http.globalAgent.destroy() called');
+      } catch (e) {
+        appendLog(`globalTeardown: http.globalAgent.destroy failed: ${e && e.message}`);
+      }
+    }
+    if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+      try {
+        https.globalAgent.destroy();
+        appendLog('globalTeardown: https.globalAgent.destroy() called');
+      } catch (e) {
+        appendLog(`globalTeardown: https.globalAgent.destroy failed: ${e && e.message}`);
+      }
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: agent destroy error: ${e && e.message}`);
+  }
 
   // Append final marker
   appendLog('globalTeardown: finished');
