@@ -1,0 +1,149 @@
+  console.log
+    RETRIEVAL_URL set: false
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:94:11)
+
+  console.info
+    PROMPT_URL set: false BUSINESS_URL set: false
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:95:11)
+
+  console.info
+    WEBHOOK_API_KEY present: true
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:97:11)
+
+  console.log
+    [2025-11-01T18:50:57.098Z] POST /webhook rid=no-request-id
+
+      at novain-platform/webhook/server.js:189:11
+
+  console.log
+    webhook: action=llm_elicit name=Guest tenantId=default
+
+      at novain-platform/webhook/server.js:280:11
+
+  console.log
+    DEBUG resp.body: {"ok":true,"summary":"Please clarify X?","needs_clarify":false,"followup_question":"","raw":{"source":"stub"},"data":{"raw":{"source":"stub"}}}
+
+      at Object.<anonymous> (tests/in_process.test.js:25:17)
+
+  console.warn
+    CI diagnostic: active handles after test cleanup (non-WriteStream): 3
+
+    [0m [90m 325 |[39m             [36mreturn[39m[33m;[39m
+     [90m 326 |[39m           }
+    [31m[1m>[22m[39m[90m 327 |[39m           console[33m.[39mwarn(
+     [90m     |[39m                   [31m[1m^[22m[39m
+     [90m 328 |[39m             [32m'CI diagnostic: active handles after test cleanup (non-WriteStream):'[39m[33m,[39m
+     [90m 329 |[39m             meaningful[33m.[39mlength
+     [90m 330 |[39m           )[33m;[39m[0m
+
+      at tests/jest.setup.js:327:19
+
+  console.warn
+      handle[0] type=Socket
+
+    [0m [90m 333 |[39m               [36mtry[39m {
+     [90m 334 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+    [31m[1m>[22m[39m[90m 335 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+     [90m     |[39m                         [31m[1m^[22m[39m
+     [90m 336 |[39m                 [36mtry[39m {
+     [90m 337 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+     [90m 338 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+
+      at forEach (tests/jest.setup.js:335:25)
+          at Array.forEach (<anonymous>)
+      at tests/jest.setup.js:332:24
+
+  console.warn
+        socket-info: {"destroyed":false,"pending":false}
+
+    [0m [90m 354 |[39m                       pending[33m:[39m h[33m.[39mpending[33m,[39m
+     [90m 355 |[39m                     }[33m;[39m
+    [31m[1m>[22m[39m[90m 356 |[39m                     console[33m.[39mwarn([32m`    socket-info: ${JSON.stringify(info)}`[39m)[33m;[39m
+     [90m     |[39m                             [31m[1m^[22m[39m
+     [90m 357 |[39m                   }
+     [90m 358 |[39m                 } [36mcatch[39m {}
+     [90m 359 |[39m               } [36mcatch[39m {}[0m
+
+      at forEach (tests/jest.setup.js:356:29)
+          at Array.forEach (<anonymous>)
+      at tests/jest.setup.js:332:24
+
+  console.warn
+      handle[1] type=Socket
+
+    [0m [90m 333 |[39m               [36mtry[39m {
+     [90m 334 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+    [31m[1m>[22m[39m[90m 335 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+     [90m     |[39m                         [31m[1m^[22m[39m
+     [90m 336 |[39m                 [36mtry[39m {
+     [90m 337 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+     [90m 338 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+
+      at forEach (tests/jest.setup.js:335:25)
+          at Array.forEach (<anonymous>)
+      at tests/jest.setup.js:332:24
+
+  console.warn
+        socket-info: {"destroyed":false,"pending":false}
+
+    [0m [90m 354 |[39m                       pending[33m:[39m h[33m.[39mpending[33m,[39m
+     [90m 355 |[39m                     }[33m;[39m
+    [31m[1m>[22m[39m[90m 356 |[39m                     console[33m.[39mwarn([32m`    socket-info: ${JSON.stringify(info)}`[39m)[33m;[39m
+     [90m     |[39m                             [31m[1m^[22m[39m
+     [90m 357 |[39m                   }
+     [90m 358 |[39m                 } [36mcatch[39m {}
+     [90m 359 |[39m               } [36mcatch[39m {}[0m
+
+      at forEach (tests/jest.setup.js:356:29)
+          at Array.forEach (<anonymous>)
+      at tests/jest.setup.js:332:24
+
+  console.warn
+      handle[2] type=ReadStream
+
+    [0m [90m 333 |[39m               [36mtry[39m {
+     [90m 334 |[39m                 [36mconst[39m name [33m=[39m h [33m&&[39m h[33m.[39mconstructor [33m&&[39m h[33m.[39mconstructor[33m.[39mname[33m;[39m
+    [31m[1m>[22m[39m[90m 335 |[39m                 console[33m.[39mwarn([32m`  handle[${i}] type=${String(name)}`[39m)[33m;[39m
+     [90m     |[39m                         [31m[1m^[22m[39m
+     [90m 336 |[39m                 [36mtry[39m {
+     [90m 337 |[39m                   [36mif[39m (h [33m&&[39m [36mtypeof[39m h[33m.[39m_createdStack [33m===[39m [32m'string'[39m) {
+     [90m 338 |[39m                     [36mconst[39m lines [33m=[39m h[33m.[39m_createdStack[0m
+
+      at forEach (tests/jest.setup.js:335:25)
+          at Array.forEach (<anonymous>)
+      at tests/jest.setup.js:332:24
+
+PASS tests/in_process.test.js
+  in-process webhook app (refactored)
+    ΓêÜ returns llm_elicit stub with source "stub" (431 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       1 passed, 1 total
+Snapshots:   0 total
+Time:        1.857 s
+Ran all test suites matching /tests\\in_process.test.js/i.
+
+Jest has detected the following 1 open handle potentially keeping Jest from exiting:
+
+  ΓùÅ  bound-anonymous-fn
+
+      304 |
+      305 |     try {
+    > 306 |       server.listen(0, '127.0.0.1');
+          |              ^
+      307 |       server.once('listening', onListen);
+      308 |     } catch (_e) {
+      309 |       try {
+
+      at tests/helpers/server-helper.js:306:14
+      at Object.startTestServer (tests/helpers/server-helper.js:81:10)
+      at requestApp (tests/helpers/request-helper.js:280:40)
+      at Object.<anonymous> (tests/in_process.test.js:13:26)
+      at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+      at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+      at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+      at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+

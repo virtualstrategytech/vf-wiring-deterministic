@@ -1,0 +1,7 @@
+
+RuleName                            Severity     ScriptName Line  Message
+--------                            --------     ---------- ----  -------
+PSUseDeclaredVarsMoreThanAssignment Warning      verify-git 60    The variable 'respDeny' is assigned but never used.
+s                                                hub-token.
+                                                 ps1
+

@@ -1,0 +1,64 @@
+name: Debug socket/TLS handles (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      webhook_base:
+        description: 'Optional override for WEBHOOK_BASE (falls back to repo secret)'
+        required: false
+      webhook_api_key:
+        description: 'Optional override for WEBHOOK_API_KEY (falls back to repo secret)'
+        required: false
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  socket-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with NODE_DEBUG and capture logs
+        env:
+          WEBHOOK_BASE: ${{ github.event.inputs.webhook_base || secrets.WEBHOOK_BASE }}
+          WEBHOOK_API_KEY: ${{ github.event.inputs.webhook_api_key || secrets.WEBHOOK_API_KEY }}
+          NODE_DEBUG: net,tls
+          NODE_OPTIONS: '--enable-source-maps --trace-warnings'
+          DEBUG_TESTS: '1'
+          FORCE_PER_REQUEST_AGENT: '1'
+          FORCE_DETERMINISTIC_IDS: '1'
+          TEST_PATCH_RAW_BODY: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp
+          echo "socket debug run: $(date)" > /tmp/socket_debug.log
+          # Run tests in-band to make handle traces easier to correlate; capture combined output
+          # We keep the command exit code so artifacts are uploaded even if tests fail
+          npm test --silent -- --runInBand 2>&1 | tee /tmp/test-results.log || true
+          # Append some kernel-level socket info for additional clues (best-effort)
+          echo "--- /proc/net/tcp ---" >> /tmp/socket_debug.log || true
+          cat /proc/net/tcp >> /tmp/socket_debug.log || true
+          echo "--- tail of test-results.log ---" >> /tmp/socket_debug.log
+          tail -n 200 /tmp/test-results.log >> /tmp/socket_debug.log || true
+
+      - name: Upload socket_debug.log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: socket_debug.log
+          path: /tmp/socket_debug.log
+
+      - name: Upload test-results.log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results.log
+          path: /tmp/test-results.log

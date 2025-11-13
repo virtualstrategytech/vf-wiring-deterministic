@@ -6,12 +6,20 @@ const app = express();
 const cors = require('cors');
 // add crypto for request-id
 const _crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
 const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
 // ---- Config (env vars)
-const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+// Note: some tests set `process.env.WEBHOOK_API_KEY` after this module is loaded.
+// To ensure tests and CI can update the API key at runtime (without requiring
+// the server module to be reloaded), read the API key per-request instead of
+// capturing it once at module init.
+function getApiKey() {
+  return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+}
 const PORT = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
@@ -29,15 +37,59 @@ if (!fetchFn) {
   }
 }
 
+// Debug: when running tests with DEBUG_TESTS, print what fetch implementation
+// was captured at module init so we can diagnose mocking issues.
+try {
+  if (process.env.DEBUG_TESTS) {
+    try {
+      console.info('DEBUG_TESTS: fetchFn present at module init?', typeof fetchFn === 'function');
+    } catch {}
+  }
+} catch {}
+
 // add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
+  // allow callers/tests to force explicit per-request agent usage to avoid
+  // keep-alive pooling (useful for Jest detectOpenHandles on CI/WSL)
+  let createdAgent = null;
   try {
     opts.signal = controller.signal;
+    // If caller didn't supply an agent, and either tests requested a forced
+    // per-request agent via FORCE_PER_REQUEST_AGENT=1 or we're in test/non-prod
+    // mode, create a short-lived agent and attach it to opts so sockets are
+    // closed promptly when the request finishes.
+    try {
+      const shouldForce =
+        process.env.FORCE_PER_REQUEST_AGENT === '1' ||
+        (!IS_PROD && process.env.FORCE_PER_REQUEST_AGENT !== '0');
+      if (!opts.agent && shouldForce) {
+        let proto = 'http:';
+        try {
+          proto = new URL(url).protocol || 'http:';
+        } catch {
+          proto = String(url || '').startsWith('https:') ? 'https:' : 'http:';
+        }
+        createdAgent =
+          proto === 'https:'
+            ? new https.Agent({ keepAlive: false })
+            : new http.Agent({ keepAlive: false });
+        opts.agent = createdAgent;
+      }
+    } catch {
+      // best-effort only
+      createdAgent = null;
+    }
+
     if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
-    const r = await fetch(url, opts);
+    // Use the resolved fetch implementation captured during module init
+    // (`fetchFn`) where possible so tests that override `globalThis.fetch`
+    // before requiring this module reliably get invoked. Fall back to
+    // globalThis.fetch if needed.
+    const _fetch = typeof fetchFn === 'function' ? fetchFn : globalThis.fetch;
+    const r = await _fetch(url, opts);
     const elapsed = Date.now() - start;
     let bodyText = '';
     try {
@@ -55,11 +107,33 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     clearTimeout(id);
     console.error(`fetch error ${url}:`, err && err.message ? err.message : err);
     throw err;
+  } finally {
+    // ensure per-request agent (if created) is destroyed to avoid pooled
+    // sockets lingering and causing Jest detectOpenHandles failures
+    try {
+      if (createdAgent && typeof createdAgent.destroy === 'function') {
+        try {
+          createdAgent.destroy();
+        } catch {
+          void 0;
+        }
+      }
+    } catch {
+      void 0;
+    }
+    try {
+      clearTimeout(id);
+    } catch {}
+    try {
+      controller.abort && typeof controller.abort === 'function' && controller.abort();
+    } catch {}
   }
 };
 
 // Minimal runtime safety notice (no secret printed)
-if (!API_KEY && !IS_PROD) {
+// Use getApiKey() here so the value is resolved at runtime rather than
+// referencing a possibly undefined module-scope variable.
+if (!getApiKey() && !IS_PROD) {
   console.warn(
     'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
   );
@@ -71,33 +145,105 @@ if (!IS_PROD && DEBUG_WEBHOOK) {
   console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
   console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
   // log presence only (true/false) — never print the actual key value
-  console.info('WEBHOOK_API_KEY present:', !!API_KEY);
+  console.info('WEBHOOK_API_KEY present:', !!getApiKey());
 }
 
 // CORS (optional; enable if browser/iframe clients will call the webhook)
 app.use(cors());
 
 // ---- Middleware (body parser + JSON error handler)
-app.use(
-  express.json({
-    limit: '1mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
+// Allow tests to disable the body parser to avoid loading raw-body/body-parser
+// which can create closures detected as "bound-anonymous-fn" by Jest detectOpenHandles.
+const SKIP_BODY_PARSER =
+  process.env.SKIP_BODY_PARSER === '1' || process.env.SKIP_BODY_PARSER === 'true';
+if (SKIP_BODY_PARSER) {
+  console.info('SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)');
+  // Lightweight per-request JSON parser used only in test-mode when the
+  // full express.json/body-parser is disabled. This avoids pulling in the
+  // heavy raw-body closure that can be reported as an open handle by Jest
+  // while still allowing tests that send JSON (supertest) to be parsed.
+  app.use((req, res, next) => {
+    try {
+      const ct =
+        (req.headers && (req.headers['content-type'] || req.headers['Content-Type'])) || '';
+      if (!String(ct).toLowerCase().includes('application/json')) return next();
+
+      let raw = '';
+      if (typeof req.setEncoding === 'function') {
+        try {
+          req.setEncoding('utf8');
+        } catch {}
+      }
+      req.on('data', (chunk) => {
+        try {
+          raw += chunk;
+        } catch {}
+      });
+      req.on('end', () => {
+        try {
+          // emulate express.json verify behavior by saving a Buffer
+          req.rawBody = Buffer.from(raw || '', 'utf8');
+          try {
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch {
+            req.body = {};
+          }
+        } catch {}
+        next();
+      });
+      req.on('error', () => next());
+    } catch {
+      // best-effort: fall through to next middleware on error
+      try {
+        next();
+      } catch {}
+    }
+  });
+} else {
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
+}
 
 // Insert request-id propagation middleware (after body parser or before routes)
 app.use((req, res, next) => {
   const incoming = req.get('x-request-id');
-  const rid =
-    incoming ||
-    (_crypto.randomUUID
-      ? _crypto.randomUUID()
-      : _crypto
-          .createHash('sha1')
-          .update(String(Date.now()) + Math.random())
-          .digest('hex'));
+  // In test/debug modes, avoid using `crypto.randomUUID()` because on some
+  // Node versions it creates short-lived native random jobs that our
+  // async-hooks instrumentation reports as open handles (RANDOMBYTESREQUEST).
+  // Use a deterministic JS fallback during tests to keep async handle dumps clean.
+  const useDeterministicIds =
+    process.env.FORCE_DETERMINISTIC_IDS === '1' ||
+    process.env.NODE_ENV === 'test' ||
+    !!process.env.DEBUG_TESTS;
+
+  const deterministicId = () => {
+    // small, readable id: r-<time>-<counter/random>
+    try {
+      const t = Date.now().toString(36);
+      const r = Math.floor(Math.random() * 0x1000000).toString(36);
+      return `r-${t}-${r}`;
+    } catch {
+      return String(Date.now()) + '-' + Math.random();
+    }
+  };
+
+  const rid = incoming
+    ? incoming
+    : useDeterministicIds
+      ? deterministicId()
+      : _crypto.randomUUID
+        ? _crypto.randomUUID()
+        : _crypto
+            .createHash('sha1')
+            .update(String(Date.now()) + Math.random())
+            .digest('hex');
+
   req.id = rid;
   res.setHeader('x-request-id', rid);
   next();
@@ -119,7 +265,17 @@ app.use((req, _res, next) => {
 });
 
 // ---- Health
+// Immediate lightweight health check used by external load balancers.
 app.get('/health', (_req, res) => res.status(200).send('ok'));
+
+// Readiness: returns 200 only once the HTTP server has actually bound and
+// startup logs have been emitted. This is useful for CI or scripts that want
+// to wait until the service is actually ready to serve heavier traffic.
+let __ready = false;
+app.get('/ready', (_req, res) => {
+  if (__ready) return res.status(200).json({ ok: true });
+  return res.status(503).json({ ok: false, reason: 'not_ready' });
+});
 
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;
@@ -171,9 +327,11 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
-  // authenticate request
-  const key = (req.get('x-api-key') || '').toString();
-  if (key !== API_KEY) {
+  // authenticate request (read expected key at request time so tests can set
+  // process.env.WEBHOOK_API_KEY dynamically before making requests)
+  const key = (req.get('x-api-key') || req.get('x-voiceflow-signature') || '').toString();
+  const expected = getApiKey();
+  if (key !== expected) {
     console.warn('unauthorized: key mismatch');
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
@@ -414,18 +572,68 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: PROMPT_URL present:', !!PROMPT_URL);
+              console.info('DEBUG_TESTS: llm_elicit: fetchFn type:', typeof fetchFn);
+              try {
+                // best-effort show whether globalThis.fetch === fetchFn
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: fetch equality:',
+                  globalThis.fetch === fetchFn
+                );
+              } catch {}
+            } catch {}
+          }
+
           const r = await fetchWithTimeout(PROMPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),
           });
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: fetched status:', r && r.status);
+              try {
+                const ct =
+                  r.headers &&
+                  (r.headers.get ? r.headers.get('content-type') : r.headers['content-type']);
+                console.info('DEBUG_TESTS: llm_elicit: content-type:', ct);
+              } catch {}
+            } catch {}
+          }
+
           if (!r.ok) {
             const text = await r.text().catch(() => '');
             console.error('prompt service error:', r.status, text);
             return res.status(502).json({ ok: false, reply: 'prompt_service_failed' });
           }
 
-          const payload = await r.json().catch(() => ({}));
+          // Prefer explicit try/catch for JSON parsing so we can log parse failures
+          let payload = {};
+          try {
+            payload = await r.json();
+          } catch (pj) {
+            if (process.env.DEBUG_TESTS) {
+              try {
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: JSON parse failed:',
+                  pj && pj.message ? pj.message : pj
+                );
+                const txt = await r
+                  .clone()
+                  .text()
+                  .catch(() => '');
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: response body (on parse fail):',
+                  String(txt).slice(0, 4000)
+                );
+              } catch {}
+            }
+            payload = {};
+          }
+
           // Mirror payload into both `raw` and `data.raw` so callers/tests that
           // expect either shape will receive the same information.
           const rawPayload = payload || {};
@@ -435,6 +643,15 @@ app.post('/webhook', async (req, res) => {
           if (!IS_PROD && DEBUG_WEBHOOK) {
             try {
               console.info('llm payload snippet:', JSON.stringify(payload).slice(0, 2000));
+            } catch {}
+          }
+
+          if (process.env.DEBUG_TESTS) {
+            try {
+              console.info(
+                'DEBUG_TESTS: llm_elicit: payload snippet:',
+                JSON.stringify(payload).slice(0, 2000)
+              );
             } catch {}
           }
 
@@ -557,9 +774,91 @@ app.use((err, _req, res, _next) => {
 
 // ---- Start when run directly
 if (require.main === module) {
-  app.listen(PORT, () => {
+  // Log runtime info early for Render / cloud logs troubleshooting.
+  try {
+    console.log('Starting webhook server', { node: process.version, pid: process.pid });
+  } catch {
+    // ignore logging failures
+  }
+
+  // Save server so we can close it cleanly on shutdown and attempt to
+  // close any persistent HTTP/undici resources that may keep sockets alive.
+  const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    // Mark readiness once the server has actually bound the port.
+    __ready = true;
   });
+
+  // Graceful shutdown helper: close undici global dispatcher (if present),
+  // destroy http/https global agents, and close the server. This reduces
+  // the chance of lingering TLSSocket/TCPWRAP handles after process exit.
+  const gracefulShutdown = (signal) => {
+    try {
+      console.log(`Received ${signal}; performing graceful shutdown`);
+    } catch {}
+    __ready = false;
+
+    // Use centralized cleanup for HTTP/undici resources.
+    try {
+      const client = require('../lib/http-client');
+      if (client && typeof client.closeAllClients === 'function') {
+        try {
+          client.closeAllClients();
+        } catch (e) {
+          void e;
+        }
+      }
+    } catch (e) {
+      void e;
+    }
+
+    // Stop accepting new connections and close existing ones. If server
+    // close hangs, force exit after a short timeout to avoid stalls in CI.
+    try {
+      server.close(() => {
+        try {
+          console.log('gracefulShutdown: HTTP server closed');
+        } catch {}
+        // allow process to exit normally
+        try {
+          process.exit(0);
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch (e) {
+      try {
+        console.error('gracefulShutdown: server.close failed', e && e.stack ? e.stack : e);
+      } catch {}
+    }
+
+    // Force exit after 5s if graceful close did not complete.
+    setTimeout(() => {
+      try {
+        console.error('gracefulShutdown: forcing process exit');
+      } catch {}
+      try {
+        process.exit(1);
+      } catch {}
+    }, 5000).unref();
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+}
+
+// Attach a helper to create a raw http.Server for tests that need explicit
+// start/stop control. Keep the default export as the Express `app` for
+// backward compatibility with existing code that requires the app directly.
+try {
+  const _http = require('http');
+  Object.defineProperty(app, 'createServer', {
+    value: () => _http.createServer(app),
+    writable: false,
+    enumerable: false,
+  });
+} catch {
+  // ignore in constrained environments
 }
 
 // Export the app for in-process tests and programmatic use.

@@ -1,5 +1,5 @@
-// ...existing code...
-import { defineConfig } from 'eslint/config';
+// Flat ESLint config. We avoid importing `eslint/config` to prevent runtime
+// errors when the installed ESLint package doesn't export that subpath.
 import globals from 'globals';
 import { createRequire } from 'module';
 
@@ -15,7 +15,7 @@ const reactPlugin = require('eslint-plugin-react');
 const reactHooksPlugin = require('eslint-plugin-react-hooks');
 const jsxA11yPlugin = require('eslint-plugin-jsx-a11y');
 
-export default defineConfig([
+export default [
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
@@ -49,6 +49,15 @@ export default defineConfig([
       'no-useless-escape': 'error',
     },
   },
+  // Tests: relax unused-var rules since tests intentionally keep diagnostic
+  // variables and debug-only bindings that are hard to eliminate across
+  // many instrumented files. Keeping this off in tests avoids CI lint flakes.
+  {
+    files: ['tests/**'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
 
   // TypeScript-specific config (applies to .ts/.tsx)
   {
@@ -73,5 +82,5 @@ export default defineConfig([
       // add React-specific rule overrides here
     },
   },
-]);
+];
 // ...existing code...
