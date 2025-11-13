@@ -8,6 +8,9 @@ const cors = require('cors');
 const _crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
@@ -61,9 +64,11 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     // mode, create a short-lived agent and attach it to opts so sockets are
     // closed promptly when the request finishes.
     try {
-      const shouldForce =
-        process.env.FORCE_PER_REQUEST_AGENT === '1' ||
-        (!IS_PROD && process.env.FORCE_PER_REQUEST_AGENT !== '0');
+      // Only create a short-lived per-request agent when explicitly requested
+      // via FORCE_PER_REQUEST_AGENT=1. Creating per-request agents by default
+      // in non-production can cause many transient sockets/listeners and
+      // trigger MaxListenersExceededWarning in CI. Make it opt-in.
+      const shouldForce = process.env.FORCE_PER_REQUEST_AGENT === '1';
       if (!opts.agent && shouldForce) {
         let proto = 'http:';
         try {
@@ -312,6 +317,51 @@ app.get('/ready', (_req, res) => {
   if (__ready) return res.status(200).json({ ok: true });
   return res.status(503).json({ ok: false, reason: 'not_ready' });
 });
+
+// Top-level visibility for uncaught errors and unhandled rejections.
+// Write a short trace to the OS temp directory so CI can collect it if needed.
+try {
+  const UNHANDLED_REJECTIONS_LOG =
+    process.env.UNHANDLED_REJECTIONS_LOG || path.join(os.tmpdir(), 'vf_unhandled_rejections.log');
+
+  process.on('unhandledRejection', (reason) => {
+    try {
+      const line = `[${new Date().toISOString()}] unhandledRejection: ${
+        reason && reason.stack ? reason.stack : String(reason)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Unhandled Rejection at:', reason);
+    } catch {}
+    try {
+      // exit with non-zero after a short delay so CI shows a failing job and
+      // logs are flushed. We unref the timer so it doesn't keep the process alive.
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+
+  process.on('uncaughtException', (err) => {
+    try {
+      const line = `[${new Date().toISOString()}] uncaughtException: ${
+        err && err.stack ? err.stack : String(err)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Uncaught Exception:', err && err.stack ? err.stack : err);
+    } catch {}
+    try {
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+} catch (e) {
+  // best-effort only: do not crash if logging setup fails
+}
 
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;

@@ -1,6 +1,7 @@
 ﻿const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
+const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -33,6 +34,43 @@ function waitForPort(port, timeout = 30000) {
     })();
   });
 }
+// Wait for the webhook readiness endpoint (/ready) to return 200.
+function waitForReady(port, timeout = 30000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    (function tryReq() {
+      const opts = {
+        hostname: '127.0.0.1',
+        port: port,
+        path: '/ready',
+        method: 'GET',
+        timeout: 1000,
+      };
+      const req = http.request(opts, (res) => {
+        if (res.statusCode === 200) {
+          res.destroy();
+          return resolve();
+        }
+        // consume and retry
+        res.on('data', () => {});
+        res.on('end', () => {
+          if (Date.now() - start > timeout) return reject(new Error('timeout'));
+          setTimeout(tryReq, 200);
+        });
+      });
+      req.on('error', () => {
+        if (Date.now() - start > timeout) return reject(new Error('timeout'));
+        setTimeout(tryReq, 200);
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        if (Date.now() - start > timeout) return reject(new Error('timeout'));
+        setTimeout(tryReq, 200);
+      });
+      req.end();
+    })();
+  });
+}
 module.exports = async () => {
   const repoRoot = path.resolve(__dirname, '..');
   const webhookDir = path.join(repoRoot, 'novain-platform', 'webhook');
@@ -55,10 +93,19 @@ module.exports = async () => {
   if (process.env.GITHUB_ACTIONS === 'true') {
     const actionPort = Number(process.env.PORT || 3000);
     try {
-      await waitForPort(actionPort, 20000);
-      logLine('globalSetup: running on GitHub Actions; server detected on port', actionPort);
+      await waitForReady(actionPort, 20000);
+      logLine('globalSetup: running on GitHub Actions; server ready on port', actionPort);
     } catch (e) {
-      logLine('globalSetup: running on GitHub Actions but no server detected on port', actionPort);
+      // fallback to raw port check if readiness endpoint isn't present or reachable
+      try {
+        await waitForPort(actionPort, 20000);
+        logLine('globalSetup: running on GitHub Actions; port open on', actionPort);
+      } catch (e2) {
+        logLine(
+          'globalSetup: running on GitHub Actions but no server detected on port',
+          actionPort
+        );
+      }
     }
     try {
       logStream.end();
@@ -90,14 +137,24 @@ module.exports = async () => {
   // CI-like settings (SKIP_SYNC_SECRET=true).
   const port = Number(process.env.PORT || 3000);
   try {
-    await waitForPort(port, 5000);
-    logLine('globalSetup: remote server already listening on port', port);
+    await waitForReady(port, 5000);
+    logLine('globalSetup: remote server already ready on port', port);
     try {
       logStream.end();
     } catch {}
     return;
   } catch (e) {
-    logLine('globalSetup: no server on port', port, '- will spawn local child');
+    // fallback to raw TCP port check
+    try {
+      await waitForPort(port, 5000);
+      logLine('globalSetup: remote server accepting TCP on port', port);
+      try {
+        logStream.end();
+      } catch {}
+      return;
+    } catch (e2) {
+      logLine('globalSetup: no server on port', port, '- will spawn local child');
+    }
   }
 
   // Proceed to spawn server locally (without interactive secret sync)
@@ -146,8 +203,14 @@ module.exports = async () => {
       try {
         if (typeof child.unref === 'function') child.unref();
       } catch {}
-      await waitForPort(port, 20000);
-      logLine('globalSetup: spawned child server is accepting connections on', port);
+      try {
+        await waitForReady(port, 20000);
+        logLine('globalSetup: spawned child server is ready on', port);
+      } catch (e) {
+        // fallback to raw TCP port detection
+        await waitForPort(port, 20000);
+        logLine('globalSetup: spawned child server is accepting connections on', port);
+      }
     } catch (err) {
       logLine('globalSetup: spawned child did not open port in time:', err && err.message);
       // if server didn't start, attempt to kill child and fail
