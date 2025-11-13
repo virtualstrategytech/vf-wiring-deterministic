@@ -1,0 +1,15 @@
+### Voiceflow API Block config (copy values)
+POST {WEBHOOK_URL}
+Content-Type: application/json
+x-api-key: {WEBHOOK_API_KEY}
+
+{
+  "action": "retrieve",
+  "question": "{user_message}",
+  "tenantId": "{tenantId}",
+  "topK": 6
+}
+
+# Capture mapping:
+# reply    → API_Response
+# hitCount → API_Hits

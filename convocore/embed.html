@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Convocore Embed</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #0b1220;
+        color: #e6f0ff;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      iframe {
+        width: 100%;
+        min-height: 720px;
+        border: 0;
+        border-radius: 14px;
+        background: #0f172a;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      }
+      .bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      label {
+        font: 600 14px/1.4 ui-sans-serif, system-ui;
+        opacity: 0.9;
+      }
+      input,
+      select {
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid #334155;
+        background: #0b1220;
+        color: #cbd5e1;
+        font: 13px ui-sans-serif, system-ui;
+      }
+      button {
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 0;
+        background: #2563eb;
+        color: white;
+        font: 600 13px ui-sans-serif, system-ui;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="bar">
+        <label>Tenant</label>
+        <input id="tenant" value="default" />
+        <label>User</label>
+        <input id="user" value="demo@virtualstrategytech.com" />
+        <button id="reload">Load</button>
+      </div>
+
+      <!-- TODO: set this to your hosted Convocore app URL -->
+      <iframe
+        id="cc"
+        src=""
+        allow="clipboard-write *; clipboard-read *"
+      ></iframe>
+    </div>
+
+    <script>
+      // === CONFIG ===
+      const CONVOCORE_ORIGIN = "https://app.convocore.yourdomain"; // TODO
+      const CONVOCORE_URL = `${CONVOCORE_ORIGIN}/dashboard`; // TODO
+
+      // === Simple loader with query params (tenant, user) ===
+      const makeSrc = (tenant, user) => {
+        const u = new URL(CONVOCORE_URL);
+        u.searchParams.set("tenant", tenant || "default");
+        u.searchParams.set("user", user || "");
+        return u.toString();
+      };
+
+      const iframe = document.getElementById("cc");
+      const t = document.getElementById("tenant");
+      const u = document.getElementById("user");
+      const btn = document.getElementById("reload");
+
+      const load = () => {
+        iframe.src = makeSrc(t.value, u.value);
+      };
+      btn.addEventListener("click", load);
+      load();
+
+      // === postMessage bridge (Convocore -> Host) ===
+      window.addEventListener("message", (evt) => {
+        if (evt.origin !== CONVOCORE_ORIGIN) return; // hard origin check
+        const { type, payload } = evt.data || {};
+        switch (type) {
+          case "vf:lesson:ready":
+            console.info("[Convocore] Lesson ready:", payload);
+            break;
+          case "vf:quiz:ready":
+            console.info("[Convocore] Quiz ready:", payload);
+            break;
+          case "vf:export:url":
+            console.info("[Convocore] Export URL:", payload?.url);
+            if (payload?.url) window.open(payload.url, "_blank");
+            break;
+          case "vf:cal:open":
+            console.info("[Convocore] Open Cal.com:", payload);
+            break;
+          case "vf:error":
+            console.error("[Convocore] Error:", payload);
+            break;
+        }
+      });
+
+      // Host -> Convocore example (optional)
+      const sendCommand = (type, payload) => {
+        iframe.contentWindow?.postMessage({ type, payload }, CONVOCORE_ORIGIN);
+      };
+      // sendCommand('host:context', { plan: 'pro', flags: { reduceMotion: true } });
+    </script>
+  </body>
+</html>

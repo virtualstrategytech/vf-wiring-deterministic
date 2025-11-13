@@ -1,0 +1,40 @@
+﻿### Point at Render database
+
+### Health
+GET http://localhost:3000/health
+
+### Ping
+POST http://localhost:3000/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{ "action":"ping", "question":"hello" }
+
+### Retrieve
+POST http://localhost:3000/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{ "action":"retrieve", "question":"How do I reduce churn?", "tenantId":"default", "topK":6 }
+
+### Generate lesson
+POST http://localhost:3000/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{ "action":"generate_lesson", "question":"Teach me SPQA", "tenantId":"default" }
+
+### Generate quiz
+POST http://localhost:3000/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{ "action":"generate_quiz", "question":"Quiz me on SPQA", "tenantId":"default" }
+
+### Export lesson (data URL)
+POST http://localhost:3000/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{ "action":"export_lesson", "title":"SPQA", "lesson":{ "content":"Sample" } }
+

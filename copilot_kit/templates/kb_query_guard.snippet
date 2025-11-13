@@ -1,0 +1,8 @@
+# After C_KB_Retrieve
+IF Number(API_Hits) > 0:
+  Speak: "{API_Response}"
+  Choice: "Turn this into a short lesson?" → C_GenerateLesson
+ELSE:
+  Speak: "I didn’t find confident sources. Want me to generate a short lesson instead?"
+  Choice: "Yes, generate a lesson" → C_GenerateLesson
+  Choice: "No, go back" → Menu

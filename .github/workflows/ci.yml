@@ -1,0 +1,88 @@
+﻿name: CI
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start webhook server in background
+        # Start the server so smoke tests that expect 127.0.0.1:3000 succeed in CI.
+        # The server listens only when run directly, so this starts it for the job.
+        run: |
+          nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+          # give the server a moment to bind
+          sleep 1
+
+      - name: Run lint
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Inject the secret into the runner environment only for pushes or same-repo PRs.
+      # Avoids evaluating secrets for fork PRs while still making the secret available
+      # to the subsequent Run tests step when allowed.
+      - name: Inject WEBHOOK_API_KEY for same-repo runs
+        if: ${{ github.event_name != 'pull_request' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
+        run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Start webhook server in background
+        # Start the server so smoke tests that expect 127.0.0.1:3000 succeed in the test job.
+        # Use a small readiness loop that polls the health endpoint until it responds.
+        run: |
+          nohup node novain-platform/webhook/server.js > server.log 2>&1 &
+          echo "Waiting for webhook server to be ready on 127.0.0.1:3000..."
+          for i in {1..30}; do
+            if curl -sS --fail http://127.0.0.1:3000/health >/dev/null 2>&1; then
+              echo "Webhook server is ready"
+              break
+            fi
+            sleep 1
+          done
+        shell: bash
+
+      - name: Run tests
+        env:
+          CI: 'true'
+        run: npm test --silent
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: tests/globalSetup.log

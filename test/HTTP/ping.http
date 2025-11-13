@@ -1,0 +1,10 @@
+﻿POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{
+  "action":"ping",
+  "question":"hi",
+  "name":"Tester"
+}
+

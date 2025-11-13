@@ -1,0 +1,25 @@
+{
+  "VF: Lowercase+Trim Email": {
+    "prefix": "vf-email-lc",
+    "body": [
+      "Set customer_email_lc = String(customer_email || \"\").toLowerCase().trim()"
+    ]
+  },
+  "VF: Valid Business Email Condition": {
+    "prefix": "vf-email-biz",
+    "body": [
+      "Boolean(",
+      "  /^[a-z0-9._%+\\-]+@([a-z0-9\\-]+\\.)+[a-z]{2,}$/i.test(customer_email_lc) &&",
+      "  !/(^|\\.)((gmail|yahoo|hotmail|outlook|live|icloud|aol|proton|me|msn)\\.com)$/i.test(customer_email_lc)",
+      ")"
+    ]
+  },
+  "VF: Reset Quiz Counts": {
+    "prefix": "vf-reset-quiz",
+    "body": [
+      "Set API_MCQ = \"0\"",
+      "Set API_TF  = \"0\"",
+      "Set API_OPEN= \"0\""
+    ]
+  }
+}

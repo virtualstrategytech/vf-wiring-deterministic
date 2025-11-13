@@ -1,0 +1,59 @@
+{
+  "name": "vf-wiring-deterministic",
+  "version": "1.0.0",
+  "description": "A project to determine wiring configurations.",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "pretest": "node ./scripts/pretest.js",
+    "test": "jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js",
+    "lint": "eslint . --ext .js,.ts,.tsx",
+    "lint:fix": "eslint . --ext .js,.ts,.tsx --fix",
+    "prepare": "husky install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "axios": "^1.12.2",
+    "eslint": "^9.37.0",
+    "eslint-plugin-react": "^7.37.5",
+  "eslint-plugin-react-hooks": "^7.0.1",
+  "eslint-plugin-jsx-a11y": "^6.10.2",
+    "husky": "^8.0.3",
+    "jest": "^27.5.1",
+    "lint-staged": "^13.3.0",
+    "supertest": "^6.3.3"
+  },
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/virtualstrategytech/vf-wiring-deterministic.git"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-fetch": "^2.6.7"
+  },
+  "bugs": {
+    "url": "https://github.com/virtualstrategytech/vf-wiring-deterministic/issues"
+  },
+  "homepage": "https://github.com/virtualstrategytech/vf-wiring-deterministic#readme",
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "git add"
+    ]
+  },
+  "overrides": {
+    "micromatch": "^4.0.8"
+  }
+}

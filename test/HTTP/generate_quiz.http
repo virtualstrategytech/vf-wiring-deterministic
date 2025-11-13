@@ -1,0 +1,10 @@
+﻿POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{
+  "action":"generate_quiz",
+  "question":"Quiz me on SPQA",
+  "tenantId":"default"
+}
+

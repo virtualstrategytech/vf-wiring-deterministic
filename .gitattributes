@@ -1,0 +1,2 @@
+# ensure secret file uses LF and is not normalized to CRLF on Windows
+tests/webhook.secret text eol=lf

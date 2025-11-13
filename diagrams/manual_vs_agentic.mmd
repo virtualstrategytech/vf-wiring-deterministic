@@ -1,0 +1,20 @@
+flowchart TD
+  Start[[Welcome]]
+  Ensure[/"Collect Name + Email\n(C_CollectNameEmail)"/]
+  AskQ[/"Capture Question\n(C_CaptureQuestion)"/]
+  OptQ["Optimize (C_OptimizeQuestion)"]
+  Menu{Choose Path}
+
+  KB["Query KB\n(C_KB_Retrieve)"]
+  TQ["Teach & Quiz\n(C_TeachAndQuiz_Orchestrator)"]
+  Book["Book Consult\n(C_BookConsult_Cal)"]
+  Ticket["Submit Ticket"]
+
+  Agentic["Agent Orchestrator\n(C_AgentDecide loop)"]
+
+  Start --> Ensure --> AskQ --> OptQ --> Menu
+  Menu -->|Ask the KB| KB --> C1["C_AgentTurn"] --> Menu
+  Menu -->|Teach & Quiz| TQ --> C2["C_AgentTurn"] --> Menu
+  Menu -->|Book a Consult| Book --> C3["C_AgentTurn"] --> Menu
+  Menu -->|Submit a Ticket| Ticket --> C4["C_AgentTurn"] --> Menu
+  Menu -->|Switch to Autopilot| Agentic

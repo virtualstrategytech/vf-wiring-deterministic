@@ -1,0 +1,18 @@
+﻿POST https://vf-webhook-service.onrender.com/webhook
+Content-Type: application/json
+x-api-key: {WEBHOOK_KEY}
+
+{
+  "action":"export_lesson",
+  "format":"markdown",
+  "tenantId":"default",
+  "title":"SPQA Lesson",
+  "lesson":{
+    "meta":{"question":"Churn is upâ€”what should we do?"},
+    "objectives":["Separate symptoms from root problems","Define precise success criteria","Prioritize decisions & risks"],
+    "content":"Use SPQA: Situation -> Problem -> Questions -> Actions...",
+    "keyTakeaways":["Answer the right questions","Tie actions to metrics","Take a 48h step"],
+    "references":[{"label":"VST Playbook: Discovery","url":"https://example.com"}]
+  }
+}
+

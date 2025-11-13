@@ -1,0 +1,15 @@
+POST {WEBHOOK_URL}
+Content-Type: application/json
+x-api-key: {WEBHOOK_API_KEY}
+
+{
+  "action": "generate_lesson",
+  "question": "{user_message}",
+  "tenantId": "{tenantId}"
+}
+
+# Capture:
+# reply       → API_Response
+# lessonTitle → API_LessonTitle
+# bulletCount → API_BulletCount
+# lesson      → API_Lesson_JSON   (optional)

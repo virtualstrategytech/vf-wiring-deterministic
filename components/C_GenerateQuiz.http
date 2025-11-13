@@ -1,0 +1,17 @@
+POST {WEBHOOK_URL}
+Content-Type: application/json
+x-api-key: {WEBHOOK_API_KEY}
+
+{
+  "action": "generate_quiz",
+  "question": "{user_message}",
+  "tenantId": "{tenantId}"
+}
+
+# Capture:
+# reply       → API_Response
+# lessonTitle → API_LessonTitle
+# mcqCount    → API_MCQ
+# tfCount     → API_TF
+# openCount   → API_OPEN
+# quiz        → API_Quiz_JSON (optional)
