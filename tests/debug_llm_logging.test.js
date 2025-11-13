@@ -73,6 +73,16 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         expect(resp.status).toBeLessThan(300);
       } finally {
         await new Promise((resolve) => server.close(resolve));
+        try {
+          const http = require('http');
+          const https = require('https');
+          if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+            http.globalAgent.destroy();
+          }
+          if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+            https.globalAgent.destroy();
+          }
+        } catch {}
       }
     });
 
