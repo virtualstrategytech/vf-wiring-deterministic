@@ -10,6 +10,11 @@ describe('in-process webhook app (refactored)', () => {
 
   it('returns llm_elicit stub with source "stub"', async () => {
     const server = app.listen();
+    const sockets = new Set();
+    server.on('connection', (s) => {
+      sockets.add(s);
+      s.on('close', () => sockets.delete(s));
+    });
     try {
       const resp = await supertest(server)
         .post('/webhook')
@@ -26,6 +31,13 @@ describe('in-process webhook app (refactored)', () => {
       expect(rawSource).toBe('stub');
     } finally {
       await new Promise((resolve) => server.close(resolve));
+      try {
+        for (const s of sockets) {
+          try {
+            s.destroy();
+          } catch {}
+        }
+      } catch {}
       try {
         const http = require('http');
         const https = require('https');

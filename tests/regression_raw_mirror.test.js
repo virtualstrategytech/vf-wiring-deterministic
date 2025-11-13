@@ -9,6 +9,11 @@ describe('regression: raw/data.raw mirror', () => {
   let server;
   beforeAll(() => {
     server = app.listen();
+    server._sockets = new Set();
+    server.on('connection', (s) => {
+      server._sockets.add(s);
+      s.on('close', () => server._sockets.delete(s));
+    });
   });
 
   afterAll(async () => {
@@ -16,6 +21,15 @@ describe('regression: raw/data.raw mirror', () => {
       if (server && typeof server.close === 'function') {
         await new Promise((r) => server.close(r));
       }
+      try {
+        if (server && server._sockets) {
+          for (const s of server._sockets) {
+            try {
+              s.destroy();
+            } catch {}
+          }
+        }
+      } catch {}
       const http = require('http');
       const https = require('https');
       if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {

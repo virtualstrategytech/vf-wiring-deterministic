@@ -62,6 +62,11 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
       const server = app.listen();
+      const sockets = new Set();
+      server.on('connection', (s) => {
+        sockets.add(s);
+        s.on('close', () => sockets.delete(s));
+      });
       try {
         const resp = await request(server)
           .post('/webhook')
@@ -73,6 +78,13 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         expect(resp.status).toBeLessThan(300);
       } finally {
         await new Promise((resolve) => server.close(resolve));
+        try {
+          for (const s of sockets) {
+            try {
+              s.destroy();
+            } catch {}
+          }
+        } catch {}
         try {
           const http = require('http');
           const https = require('https');
