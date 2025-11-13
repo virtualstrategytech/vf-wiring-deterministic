@@ -24,19 +24,26 @@ describe('in-process webhook app (refactored)', () => {
   const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
 
   it('returns llm_elicit stub with source "stub"', async () => {
-    const resp = await supertest(base)
-      .post('/webhook')
-      .set('x-api-key', process.env.WEBHOOK_API_KEY)
-      .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' });
+    // Use a small retry wrapper to avoid transient ECONNREFUSED flakes in CI
+    async function postWithRetry(baseUrl, path, body, headers = {}, retries = 5) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const resp = await supertest(baseUrl).post(path).set(headers).send(body);
+          return resp;
+        } catch (err) {
+          const isConnRefused = err && err.code === 'ECONNREFUSED';
+          if (!isConnRefused || i + 1 === retries) throw err;
+          await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+        }
+      }
+    }
 
-    // DEBUG: print full response to help diagnose missing fields during test runs
-    // (left as temporary; will be removed once test expectation is fixed)
-
-    console.log('DEBUG in_process resp:', {
-      status: resp && resp.status,
-      body: resp && resp.body,
-      text: resp && resp.text,
-    });
+    const resp = await postWithRetry(
+      base,
+      '/webhook',
+      { action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' },
+      { 'x-api-key': process.env.WEBHOOK_API_KEY }
+    );
 
     const body = resp.body || {};
     const rawSource =
