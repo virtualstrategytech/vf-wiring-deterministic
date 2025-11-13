@@ -16,7 +16,7 @@ describe('server-helper', () => {
 
     const { base, close } = await startTestServer(app);
     // sanity check the server responds
-    const resp = await supertest(base).get('/').timeout({ deadline: 2000 });
+    const resp = await supertest(base).get('/');
     expect(resp.status).toBe(200);
     expect(resp.text).toBe('ok');
 

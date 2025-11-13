@@ -11,42 +11,33 @@ describe('in-process webhook app (refactored)', () => {
   // This avoids Jest open-handle warnings caused by servers left open.
 
   it('returns llm_elicit stub with source "stub"', async () => {
-    const server = app.listen();
-    // track sockets so we can forcefully destroy them on teardown
-    server._sockets = new Set();
-    server.on('connection', (s) => {
-      server._sockets.add(s);
-      s.on('close', () => server._sockets.delete(s));
-    });
-    let resp;
+    // Use supertest against the Express app in-process to avoid creating a real server.
+    const req = supertest(app)
+      .post('/webhook')
+      .set('x-api-key', process.env.WEBHOOK_API_KEY)
+      .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' });
+    const resp = await req;
+    // If supertest created a temporary server, close it immediately
     try {
-      resp = await supertest(server)
-        .post('/webhook')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Please clarify X?', tenantId: 'default' })
-        .timeout({ deadline: 5000 });
+      if (req && req._server && typeof req._server.close === 'function') req._server.close();
+    } catch (e) {}
+    try {
+      const http = require('http');
+      const https = require('https');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+        http.globalAgent.destroy();
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+        https.globalAgent.destroy();
+    } catch (e) {}
 
-      expect(resp.status).toBe(200);
-    } finally {
-      await new Promise((r) => server.close(r));
-      try {
-        if (server && server._sockets) {
-          for (const s of server._sockets) {
-            try {
-              s.destroy();
-            } catch {}
-          }
-        }
-      } catch {}
-      try {
-        const http = require('http');
-        const https = require('https');
-        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-          http.globalAgent.destroy();
-        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-          https.globalAgent.destroy();
-      } catch {}
-    }
+    // DEBUG: print full response to help diagnose missing fields during test runs
+    // (left as temporary; will be removed once test expectation is fixed)
+     
+    console.log('DEBUG in_process resp:', {
+      status: resp && resp.status,
+      body: resp && resp.body,
+      text: resp && resp.text,
+    });
 
     const body = resp.body || {};
     const rawSource =

@@ -50,27 +50,25 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const server = app.listen();
+      const req = request(app)
+        .post('/webhook')
+        .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
+      const resp = await req;
       try {
-        const resp = await request(server)
-          .post('/webhook')
-          .set('x-api-key', process.env.WEBHOOK_API_KEY)
-          .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
-          .timeout({ deadline: 5000 });
+        if (req && req._server && typeof req._server.close === 'function') req._server.close();
+      } catch (e) {}
+      try {
+        const http = require('http');
+        const https = require('https');
+        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+          http.globalAgent.destroy();
+        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+          https.globalAgent.destroy();
+      } catch (e) {}
 
-        expect(resp.status).toBeGreaterThanOrEqual(200);
-        expect(resp.status).toBeLessThan(300);
-      } finally {
-        await new Promise((r) => server.close(r));
-        try {
-          const http = require('http');
-          const https = require('https');
-          if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-            http.globalAgent.destroy();
-          if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-            https.globalAgent.destroy();
-        } catch {}
-      }
+      expect(resp.status).toBeGreaterThanOrEqual(200);
+      expect(resp.status).toBeLessThan(300);
     });
 
     const combined = logs.out.join('\n') + '\n' + logs.err.join('\n');

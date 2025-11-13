@@ -10,42 +10,24 @@ describe('regression: raw/data.raw mirror', () => {
   // creating/listening on a real server in tests. This prevents lingering
   // open handles that make Jest warn.
   it('llm_elicit returns raw and data.raw with same payload', async () => {
-    const server = app.listen();
-    // track sockets and destroy them on teardown to avoid open handles
-    server._sockets = new Set();
-    server.on('connection', (s) => {
-      server._sockets.add(s);
-      s.on('close', () => server._sockets.delete(s));
-    });
-    let resp;
+    const req = request(app)
+      .post('/webhook')
+      .set('x-api-key', process.env.WEBHOOK_API_KEY)
+      .send({ action: 'llm_elicit', question: 'Test', tenantId: 't' });
+    const resp = await req;
     try {
-      resp = await request(server)
-        .post('/webhook')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Test', tenantId: 't' })
-        .timeout({ deadline: 5000 });
+      if (req && req._server && typeof req._server.close === 'function') req._server.close();
+    } catch (e) {}
+    try {
+      const http = require('http');
+      const https = require('https');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+        http.globalAgent.destroy();
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+        https.globalAgent.destroy();
+    } catch (e) {}
 
-      expect(resp.status).toBe(200);
-    } finally {
-      await new Promise((r) => server.close(r));
-      try {
-        if (server && server._sockets) {
-          for (const s of server._sockets) {
-            try {
-              s.destroy();
-            } catch {}
-          }
-        }
-      } catch {}
-      try {
-        const http = require('http');
-        const https = require('https');
-        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-          http.globalAgent.destroy();
-        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-          https.globalAgent.destroy();
-      } catch {}
-    }
+    expect(resp.status).toBe(200);
     const body = resp.body || {};
     expect(body.raw).toBeDefined();
     expect(body.data).toBeDefined();
@@ -54,46 +36,26 @@ describe('regression: raw/data.raw mirror', () => {
   });
 
   it('invoke_component returns raw and data.raw with same payload', async () => {
-    const server = app.listen();
-    server._sockets = new Set();
-    server.on('connection', (s) => {
-      server._sockets.add(s);
-      s.on('close', () => server._sockets.delete(s));
+    const req = request(app).post('/webhook').set('x-api-key', process.env.WEBHOOK_API_KEY).send({
+      action: 'invoke_component',
+      component: 'C_CaptureQuestion',
+      question: 'Q',
+      tenantId: 't',
     });
-    let resp;
+    const resp = await req;
     try {
-      resp = await request(server)
-        .post('/webhook')
-        .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({
-          action: 'invoke_component',
-          component: 'C_CaptureQuestion',
-          question: 'Q',
-          tenantId: 't',
-        })
-        .timeout({ deadline: 5000 });
+      if (req && req._server && typeof req._server.close === 'function') req._server.close();
+    } catch (e) {}
+    try {
+      const http = require('http');
+      const https = require('https');
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
+        http.globalAgent.destroy();
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
+        https.globalAgent.destroy();
+    } catch (e) {}
 
-      expect(resp.status).toBe(200);
-    } finally {
-      await new Promise((r) => server.close(r));
-      try {
-        if (server && server._sockets) {
-          for (const s of server._sockets) {
-            try {
-              s.destroy();
-            } catch {}
-          }
-        }
-      } catch {}
-      try {
-        const http = require('http');
-        const https = require('https');
-        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-          http.globalAgent.destroy();
-        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-          https.globalAgent.destroy();
-      } catch {}
-    }
+    expect(resp.status).toBe(200);
     const body = resp.body || {};
     expect(body.raw).toBeDefined();
     expect(body.data).toBeDefined();
