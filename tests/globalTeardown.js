@@ -131,5 +131,14 @@ module.exports = async () => {
   }
 
   // Append final marker
+  try {
+    // Log active handles count and types for CI debugging
+    const handles = (process._getActiveHandles && process._getActiveHandles()) || [];
+    const summary = handles.map((h) => h && h.constructor && h.constructor.name).filter(Boolean);
+    appendLog(`globalTeardown: activeHandles=${handles.length} types=${summary.join(',')}`);
+  } catch (e) {
+    appendLog(`globalTeardown: failed listing handles: ${e && e.message}`);
+  }
+
   appendLog('globalTeardown: finished');
 };

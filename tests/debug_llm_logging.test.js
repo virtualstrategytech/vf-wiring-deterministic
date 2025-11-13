@@ -1,4 +1,14 @@
 // Ensure env is set before requiring the server so module-level flags are evaluated correctly
+const fs = require('fs');
+const path = require('path');
+const secretFile = path.resolve(__dirname, 'webhook.secret');
+if (!process.env.WEBHOOK_API_KEY && fs.existsSync(secretFile)) {
+  try {
+    process.env.WEBHOOK_API_KEY = fs.readFileSync(secretFile, 'utf8').trim();
+  } catch {
+    // ignore
+  }
+}
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = 'development';
 process.env.DEBUG_WEBHOOK = 'true';
@@ -22,7 +32,6 @@ globalThis.fetch = async () => {
 };
 
 const request = require('supertest');
-const http = require('http');
 const app = require('../novain-platform/webhook/server');
 
 async function captureConsoleAsync(action) {
@@ -45,30 +54,39 @@ async function captureConsoleAsync(action) {
 
 describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
-  // Use the express app directly with supertest to avoid creating a real
-  // listening server in tests. This prevents Jest "open handle" warnings.
-  // Supertest accepts an Express app instance and runs requests in-process.
-
+  // To avoid leaving handles, create a short-lived local HTTP server from the
+  // exported Express `app` instance and target it via its base URL. This lets
+  // the test control server env (DEBUG_WEBHOOK) while still ensuring explicit
+  // shutdown to avoid Jest open-handle warnings.
+  const http = require('http');
   let server;
   let base;
 
   beforeAll(async () => {
     server = http.createServer(app);
+    try {
+      if (typeof server.unref === 'function') server.unref();
+      if (typeof server.setTimeout === 'function') server.setTimeout(0);
+      server.keepAliveTimeout = 0;
+    } catch {}
     await new Promise((resolve) => server.listen(0, resolve));
     base = `http://127.0.0.1:${server.address().port}`;
   });
 
   afterAll(async () => {
     try {
-      await new Promise((resolve) => server.close(resolve));
-    } catch (e) {}
+      if (server && typeof server.close === 'function') {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    } catch {}
     try {
+      const http = require('http');
       const https = require('https');
       if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
         http.globalAgent.destroy();
       if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
         https.globalAgent.destroy();
-    } catch (e) {}
+    } catch {}
   });
 
   it('logs llm payload snippet when enabled', async () => {
@@ -81,7 +99,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
       try {
         if (req && req._server && typeof req._server.close === 'function') req._server.close();
-      } catch (e) {}
+      } catch {}
       try {
         const http = require('http');
         const https = require('https');
@@ -89,7 +107,7 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
           http.globalAgent.destroy();
         if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
           https.globalAgent.destroy();
-      } catch (e) {}
+      } catch {}
 
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);

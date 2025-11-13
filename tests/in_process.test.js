@@ -1,40 +1,27 @@
+const fs = require('fs');
+const path = require('path');
+const secretFile = path.resolve(__dirname, 'webhook.secret');
+if (!process.env.WEBHOOK_API_KEY && fs.existsSync(secretFile)) {
+  try {
+    process.env.WEBHOOK_API_KEY = fs.readFileSync(secretFile, 'utf8').trim();
+  } catch {
+    // ignore
+  }
+}
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
 
 const supertest = require('supertest');
-const http = require('http');
-const app = require('../novain-platform/webhook/server');
 
 describe('in-process webhook app (refactored)', () => {
   jest.setTimeout(20000);
 
-  let server;
-  let base;
-
-  beforeAll(async () => {
-    server = http.createServer(app);
-    try {
-      if (typeof server.unref === 'function') server.unref();
-      if (typeof server.setTimeout === 'function') server.setTimeout(0);
-      server.keepAliveTimeout = 0;
-    } catch (e) {}
-    await new Promise((resolve) => server.listen(0, resolve));
-    base = `http://127.0.0.1:${server.address().port}`;
-  });
-
-  afterAll(async () => {
-    try {
-      await new Promise((resolve) => server.close(resolve));
-    } catch (e) {}
-    try {
-      const https = require('https');
-      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-        http.globalAgent.destroy();
-      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-        https.globalAgent.destroy();
-    } catch (e) {}
-  });
+  // Use the global server started by tests/globalSetup.js. globalSetup starts
+  // the webhook on process.env.PORT (default 3000). Tests should use that
+  // server to avoid creating additional listeners which can trigger Jest
+  // detectOpenHandles.
+  const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
 
   it('returns llm_elicit stub with source "stub"', async () => {
     const resp = await supertest(base)
@@ -44,7 +31,7 @@ describe('in-process webhook app (refactored)', () => {
 
     // DEBUG: print full response to help diagnose missing fields during test runs
     // (left as temporary; will be removed once test expectation is fixed)
-     
+
     console.log('DEBUG in_process resp:', {
       status: resp && resp.status,
       body: resp && resp.body,

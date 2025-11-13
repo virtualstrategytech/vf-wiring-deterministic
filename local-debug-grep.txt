@@ -1,0 +1,73 @@
+
+local-debug_llm_logging-jest.txt:56:      Error: per-request-agent-created
+local-debug_llm_logging-jest.txt:194:    Error: per-request-agent-created
+local-debug_llm_logging-jest.txt:208:    > 314 |                 console.warn(new Error('per-request-agent-created').stack);
+local-debug_llm_logging-jest.txt:225:    Error: socket-created-at
+local-debug_llm_logging-jest.txt:232:    > 21 |           console.warn(new Error('socket-created-at').stack);
+local-debug_llm_logging-jest.txt:305:    DEBUG_TESTS: raw active handles dump (summary):
+local-debug_llm_logging-jest.txt:309:    > 243 |             console.warn('DEBUG_TESTS: raw active handles dump (summary):');
+local-debug_llm_logging-jest.txt:389:        Error: handle-init
+local-debug_llm_logging-jest.txt:492:        Error: handle-init
+local-debug_llm_logging-jest.txt:595:        Error: handle-init
+local-debug_llm_logging-jest.txt:698:        Error: handle-init
+local-debug_llm_logging-jest.txt:801:        Error: handle-init
+local-debug_llm_logging-jest.txt:904:        Error: handle-init
+local-debug_llm_logging-jest.txt:1007:        Error: handle-init
+local-debug_llm_logging-jest.txt:1110:        Error: handle-init
+local-debug_llm_logging-jest.txt:1213:        Error: handle-init
+local-debug_llm_logging-jest.txt:1316:        Error: handle-init
+local-debug_llm_logging-jest.txt:1419:        Error: handle-init
+local-debug_llm_logging-jest.txt:1522:        Error: handle-init
+local-debug_llm_logging-jest.txt:1625:        Error: handle-init
+local-debug_llm_logging-jest.txt:1728:        Error: handle-init
+local-debug_llm_logging-jest.txt:1831:        Error: handle-init
+local-debug_llm_logging-jest.txt:1934:        Error: handle-init
+local-debug_llm_logging-jest.txt:2037:        Error: handle-init
+local-debug_llm_logging-jest.txt:2140:        Error: handle-init
+local-debug_llm_logging-jest.txt:2243:        Error: handle-init
+local-debug_llm_logging-jest.txt:2346:        Error: handle-init
+local-debug_llm_logging-jest.txt:2449:        Error: handle-init
+local-debug_llm_logging-jest.txt:2552:        Error: handle-init
+local-debug_llm_logging-jest.txt:2655:        Error: handle-init
+local-debug_llm_logging-jest.txt:2758:        Error: handle-init
+local-debug_llm_logging-jest.txt:2861:        Error: handle-init
+local-debug_llm_logging-jest.txt:2964:        Error: handle-init
+local-debug_llm_logging-jest.txt:3067:        Error: handle-init
+local-debug_llm_logging-jest.txt:3170:        Error: handle-init
+local-debug_llm_logging-jest.txt:3273:        Error: handle-init
+local-debug_llm_logging-jest.txt:3376:        Error: handle-init
+local-debug_llm_logging-jest.txt:3479:        Error: handle-init
+local-debug_llm_logging-jest.txt:3582:        Error: handle-init
+local-debug_llm_logging-jest.txt:3685:        Error: handle-init
+local-debug_llm_logging-jest.txt:3788:        Error: handle-init
+local-debug_llm_logging-jest.txt:3891:        Error: handle-init
+local-debug_llm_logging-jest.txt:3981:      asyncId=693 type=bound-anonymous-fn
+local-debug_llm_logging-jest.txt:3994:        Error: handle-init
+local-debug_llm_logging-jest.txt:4097:        Error: handle-init
+local-debug_llm_logging-jest.txt:4200:        Error: handle-init
+local-debug_llm_logging-jest.txt:4303:        Error: handle-init
+local-debug_llm_logging-jest.txt:4406:        Error: handle-init
+local-debug_llm_logging-jest.txt:4509:        Error: handle-init
+local-debug_llm_logging-jest.txt:4612:        Error: handle-init
+local-debug_llm_logging-jest.txt:4715:        Error: handle-init
+local-debug_llm_logging-jest.txt:4818:        Error: handle-init
+local-debug_llm_logging-jest.txt:4921:        Error: handle-init
+local-debug_llm_logging-jest.txt:5024:        Error: handle-init
+local-debug_llm_logging-jest.txt:5127:        Error: handle-init
+local-debug_llm_logging-jest.txt:5230:        Error: handle-init
+local-debug_llm_logging-jest.txt:5333:        Error: handle-init
+local-debug_llm_logging-jest.txt:5436:        Error: handle-init
+local-debug_llm_logging-jest.txt:5539:        Error: handle-init
+local-debug_llm_logging-jest.txt:5642:        Error: handle-init
+local-debug_llm_logging-jest.txt:5745:        Error: handle-init
+local-debug_llm_logging-jest.txt:5848:        Error: handle-init
+local-debug_llm_logging-jest.txt:5951:        Error: handle-init
+local-debug_llm_logging-jest.txt:6054:        Error: handle-init
+local-debug_llm_logging-jest.txt:6157:        Error: handle-init
+local-debug_llm_logging-jest.txt:6260:        Error: handle-init
+local-debug_llm_logging-jest.txt:6363:        Error: handle-init
+local-debug_llm_logging-jest.txt:6466:        Error: handle-init
+local-debug_llm_logging-jest.txt:6556:    CI diagnostic: active handles after test cleanup (non-WriteStream): 3
+local-debug_llm_logging-jest.txt:6562:      328 |             'CI diagnostic: active handles after test cleanup (non-WriteStream):',
+local-debug_llm_logging-jest.txt:6655:  ΓùÅ  bound-anonymous-fn
+

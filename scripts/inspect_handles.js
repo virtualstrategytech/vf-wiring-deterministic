@@ -21,12 +21,12 @@ async function sleep(ms) {
     console.log('request status', resp.status);
     const text = await resp.text();
     console.log('resp text', text);
-  } catch (e) {
-    console.error('request error', e);
+  } catch (err) {
+    console.error('request error', err);
   }
   try {
     server.close();
-  } catch (e) {}
+  } catch {}
   await sleep(200);
   const handles = process
     ._getActiveHandles()
@@ -34,7 +34,7 @@ async function sleep(ms) {
   console.log('active handles:', handles);
   // keep process short
   process.exit(0);
-})().catch((e) => {
-  console.error(e);
+})().catch((err) => {
+  console.error(err);
   process.exit(2);
 });
