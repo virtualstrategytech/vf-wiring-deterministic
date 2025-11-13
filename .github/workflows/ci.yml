@@ -48,6 +48,13 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Upload server.log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-lint
+          path: server.log
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -105,9 +112,9 @@ jobs:
           CI: 'true'
         run: npm test --silent
 
-      - name: Upload logs on failure
+      - name: Upload server.log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs
-          path: tests/globalSetup.log
+          name: server-log-test
+          path: server.log
