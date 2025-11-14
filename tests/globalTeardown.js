@@ -182,6 +182,24 @@ module.exports = async () => {
     appendLog(`globalTeardown: agent destroy error: ${e && e.message}`);
   }
 
+  // Also attempt to destroy any agent used by 'superagent' / 'supertest' helpers
+  try {
+    const { Agent } = require('http');
+    if (Agent && typeof Agent.prototype.destroy === 'function') {
+      try {
+        // Best effort: destroy globalAgent again to ensure closures
+        if (Agent.globalAgent && typeof Agent.globalAgent.destroy === 'function') {
+          Agent.globalAgent.destroy();
+          appendLog('globalTeardown: Agent.globalAgent.destroy() called');
+        }
+      } catch (e) {
+        appendLog(`globalTeardown: Agent.globalAgent.destroy failed: ${e && e.message}`);
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
   // Append final marker
   try {
     // Log active handles count and types for CI debugging

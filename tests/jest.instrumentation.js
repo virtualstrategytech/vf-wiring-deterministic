@@ -395,7 +395,7 @@ if (process.env.__JEST_INSTRUMENTATION_SKIPPED === '1') {
     if (tls && typeof tls.connect === 'function') {
       const origTlsConnect = tls.connect;
       tls.connect = function tlsConnectWithStack(...args) {
-        const sock = origTlsConnect.apply(tls, args);
+        const sock = origTlsConnect.apply(null, args);
         try {
           if (sock && typeof sock === 'object')
             sock._createdStack = new Error('tls-connect-created').stack;

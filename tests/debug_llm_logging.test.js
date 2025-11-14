@@ -61,9 +61,17 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   const http = require('http');
   let server;
   let base;
+  // track connections so we can destroy them on teardown to avoid lingering
+  // keep-alive sockets that prevent the server from fully closing
+  let connections = new Set();
 
   beforeAll(async () => {
     server = http.createServer(app);
+    // Track sockets so we can force-close them in afterAll
+    server.on('connection', (socket) => {
+      connections.add(socket);
+      socket.on('close', () => connections.delete(socket));
+    });
     try {
       if (typeof server.unref === 'function') server.unref();
       if (typeof server.setTimeout === 'function') server.setTimeout(0);
@@ -75,6 +83,15 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   afterAll(async () => {
     try {
+      // Destroy any active sockets to ensure server.close() can complete
+      try {
+        for (const s of Array.from(connections)) {
+          try {
+            s.destroy();
+          } catch {}
+        }
+      } catch {}
+
       if (server && typeof server.close === 'function') {
         await new Promise((resolve) => server.close(resolve));
       }
@@ -100,23 +117,14 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
+      // Ensure the client closes the socket after the request to avoid server
+      // keep-alive connections that can keep the HTTP server handle open.
       const req = request(base)
         .post('/webhook')
         .set('x-api-key', process.env.WEBHOOK_API_KEY)
+        .set('Connection', 'close')
         .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
       const resp = await req;
-
-      try {
-        if (req && req._server && typeof req._server.close === 'function') req._server.close();
-      } catch {}
-      try {
-        const http = require('http');
-        const https = require('https');
-        if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
-          http.globalAgent.destroy();
-        if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
-          https.globalAgent.destroy();
-      } catch {}
 
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);

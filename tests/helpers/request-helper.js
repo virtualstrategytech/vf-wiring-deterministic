@@ -73,6 +73,14 @@ function __req_patchAsyncResourceNoop() {
 // globalTeardown to ensure the server is closed at the end of the test run.
 let __req_cachedServer = null;
 let __req_cachedServerOwner = false;
+// Map temporary servers -> their connection sets so global teardown can
+// force-destroy sockets even if a particular request path didn't run its
+// per-request cleanup (best-effort safety net).
+// Map of temporary servers -> their connection sets so we can iterate and
+// force-close them if some request path failed to cleanup. Using a Map
+// (not WeakMap) lets us iterate during process exit to ensure no lingering
+// listen handles remain in CI runs.
+const __req_tmpSocketMap = new Map();
 
 // Lightweight, low-dependency request helper for tests. Uses supertest
 // to call an Express app directly (no ephemeral server/network sockets),
@@ -162,10 +170,13 @@ async function requestApp(
           try {
             parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
           } catch {}
+          try {
+            if (typeof closeServer === 'function') await closeServer();
+          } catch {}
           return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
         } catch (e) {
           // last-resort fallback: use supertest if node request also fails
-          client = supertest.agent(app);
+          client = supertest(app);
         }
       } else {
         const opts = { method: (method || 'post').toUpperCase(), headers: hdrs };
@@ -191,17 +202,15 @@ async function requestApp(
       }
     } catch (e) {
       // fallback to supertest when fetch path fails for any reason
-      client = supertest.agent(app);
+      client = supertest(app);
     }
   } else if (typeof app === 'function') {
-    // For callable Express apps, prefer using supertest(app) which avoids
-    // opening a real network server and therefore doesn't create a
-    // persistent listen handle that can confuse Jest's detectOpenHandles.
-    try {
-      client = supertest.agent(app);
-    } catch (e) {
-      // fallback to other strategies below
-    }
+    // For callable Express apps, prefer NOT to rely on supertest here because
+    // supertest may create its own server/listen handles that can be hard to
+    // track. Instead allow the code below to start a short-lived http server
+    // and perform a native Node request which we explicitly close. Set
+    // `client = null` so the later logic takes the temporary-server path.
+    client = null;
   } else if (app && typeof app.createServer === 'function') {
     // Start a short-lived server from the provided app to avoid using
     // supertest which can create internal Test listeners that Jest
@@ -209,6 +218,15 @@ async function requestApp(
     // return the response.
     try {
       const srv = app.createServer();
+      // track sockets for this temporary server so we can destroy them
+      const tmpConnections = new Set();
+      __req_tmpSocketMap.set(srv, tmpConnections);
+      srv.on('connection', (socket) => {
+        try {
+          tmpConnections.add(socket);
+          socket.on('close', () => tmpConnections.delete(socket));
+        } catch {}
+      });
       const __restore = __req_patchAsyncResourceNoop();
       await new Promise((resolve, reject) => {
         try {
@@ -243,6 +261,17 @@ async function requestApp(
               __req_cachedServer = null;
               __req_cachedServerOwner = false;
               try {
+                // destroy tracked sockets first
+                try {
+                  for (const s of Array.from(tmpConnections)) {
+                    try {
+                      s.destroy();
+                    } catch {}
+                  }
+                } catch {}
+                try {
+                  __req_tmpSocketMap.delete(srv);
+                } catch {}
                 srv.close(() => resolve());
               } catch {
                 resolve();
@@ -300,6 +329,9 @@ async function requestApp(
       try {
         parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
       } catch {}
+      try {
+        if (typeof closeServer === 'function') await closeServer();
+      } catch {}
       return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
     } catch (e) {
       // fallback to supertest as a last resort
@@ -313,6 +345,15 @@ async function requestApp(
     if (typeof app === 'function') {
       try {
         const srv = http.createServer(app);
+        // track sockets so we can destroy them before closing
+        const tmpConnections = new Set();
+        __req_tmpSocketMap.set(srv, tmpConnections);
+        srv.on('connection', (socket) => {
+          try {
+            tmpConnections.add(socket);
+            socket.on('close', () => tmpConnections.delete(socket));
+          } catch {}
+        });
         await new Promise((resolve, reject) => {
           try {
             srv.listen(0, () => resolve());
@@ -331,6 +372,16 @@ async function requestApp(
             try {
               try {
                 if (typeof srv.unref === 'function') srv.unref();
+              } catch {}
+              try {
+                for (const s of Array.from(tmpConnections)) {
+                  try {
+                    s.destroy();
+                  } catch {}
+                }
+              } catch {}
+              try {
+                __req_tmpSocketMap.delete(srv);
               } catch {}
               srv.close(() => resolve());
             } catch {
@@ -386,10 +437,13 @@ async function requestApp(
         try {
           parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
         } catch {}
+        try {
+          if (typeof closeServer === 'function') await closeServer();
+        } catch {}
         return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
       } catch (e) {
         // fallback to supertest when attempting the temporary server approach fails
-        client = supertest.agent(app);
+        client = supertest(app);
       }
     } else {
       // As a robust fallback for callable apps, start a short-lived http
@@ -398,11 +452,28 @@ async function requestApp(
       // see a lingering listen handle when running single tests.
       try {
         const srv = http.createServer(app);
+        // track sockets so we can destroy them before closing
+        const tmpConnections = new Set();
+        __req_tmpSocketMap.set(srv, tmpConnections);
+        srv.on('connection', (socket) => {
+          try {
+            tmpConnections.add(socket);
+            socket.on('close', () => tmpConnections.delete(socket));
+          } catch {}
+        });
+
         closeServer = async () =>
           new Promise((resolve) => {
             try {
               try {
                 if (typeof srv.unref === 'function') srv.unref();
+              } catch {}
+              try {
+                for (const s of Array.from(tmpConnections)) {
+                  try {
+                    s.destroy();
+                  } catch {}
+                }
               } catch {}
               srv.close(() => resolve());
             } catch {
@@ -474,9 +545,12 @@ async function requestApp(
         try {
           parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
         } catch {}
+        try {
+          if (typeof closeServer === 'function') await closeServer();
+        } catch {}
         return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
       } catch (e) {
-        client = supertest.agent(app);
+        client = supertest(app);
       }
     }
   }
@@ -576,12 +650,33 @@ async function requestApp(
     // No supertest client: start a temporary server and perform a node http request
     try {
       const srv = http.createServer(app);
+      // track active sockets for this temporary server so we can force-close
+      // them before calling srv.close() to avoid lingering handles on Windows
+      const tmpConnections = new Set();
+      __req_tmpSocketMap.set(srv, tmpConnections);
+      srv.on('connection', (socket) => {
+        try {
+          tmpConnections.add(socket);
+          socket.on('close', () => tmpConnections.delete(socket));
+        } catch {}
+      });
       // ensure closeServer exists immediately so finally can always close it
       closeServer = async () =>
         new Promise((resolve) => {
           try {
             try {
               if (typeof srv.unref === 'function') srv.unref();
+            } catch {}
+            try {
+              // destroy any active sockets first
+              for (const s of Array.from(tmpConnections)) {
+                try {
+                  s.destroy();
+                } catch {}
+              }
+            } catch {}
+            try {
+              __req_tmpSocketMap.delete(srv);
             } catch {}
             srv.close(() => resolve());
           } catch {
@@ -651,6 +746,16 @@ async function requestApp(
       } catch {}
       return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
     } catch (e) {
+      // Ensure temporary server is closed on error to avoid leaving a
+      // listening handle that Jest detects as an open handle.
+      try {
+        if (typeof closeServer === 'function') {
+          try {
+            // await closeServer in case it performs async socket destroys
+            await closeServer();
+          } catch {}
+        }
+      } catch {}
       // last-resort: rethrow so caller sees the failure
       throw e;
     }
@@ -664,11 +769,46 @@ async function closeCachedServer() {
       __req_cachedServer = null;
       __req_cachedServerOwner = false;
       try {
+        try {
+          // destroy any tracked sockets for this server
+          const sset = __req_tmpSocketMap.get(srv);
+          if (sset && typeof sset === 'object') {
+            for (const s of Array.from(sset)) {
+              try {
+                s.destroy();
+              } catch {}
+            }
+          }
+        } catch {}
         await new Promise((resolve) => srv.close(() => resolve()));
       } catch {}
     }
   } catch {}
 }
+
+// Best-effort: on process exit, destroy any tracked temporary server sockets
+// in case some request path failed to cleanup. This is safe and avoids
+// leaving handles open in CI environments that capture process state.
+try {
+  process.on('exit', () => {
+    try {
+      for (const [srv, sset] of __req_tmpSocketMap.entries()) {
+        try {
+          if (sset && typeof sset === 'object') {
+            for (const s of Array.from(sset)) {
+              try {
+                s.destroy();
+              } catch {}
+            }
+          }
+        } catch {}
+        try {
+          srv.close(() => {});
+        } catch {}
+      }
+    } catch {}
+  });
+} catch {}
 
 // Restore and destroy test-scoped shared agents. Call from global teardown
 // to ensure pooled sockets are closed and we don't leak agents across runs.
