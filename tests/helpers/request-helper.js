@@ -85,195 +85,575 @@ async function requestApp(
   let closeServer = null;
   let client;
 
-  // If `app` is a string assume it's a base URL. Otherwise pass the
-  // Express app directly to supertest so we don't need to start an
-  // ephemeral server.
+  // If `app` is a string assume it's a base URL. Use a lightweight
+  // fetch-based client for remote URLs to avoid creating persistent
+  // supertest agents which can leave listeners/sockets open in Jest.
   if (typeof app === 'string') {
-    // Use a persistent agent for string base-URLs so multiple requests
-    // within the test run can reuse sockets rather than creating a new
-    // Agent per request. This reduces socket churn visible to Jest.
     try {
-      client = supertest.agent(app);
-    } catch {
-      client = supertest(app);
-    }
-  } else if (app && typeof app.createServer === 'function') {
-    // Prefer passing the Express app directly to supertest to avoid
-    // starting an ephemeral server (which may create transient native
-    // async handles visible to Jest). Starting a server is only attempted
-    // in specialized scenarios; for typical in-process tests using the
-    // Express app, supertest(app) is sufficient and avoids listen()
-    // related noise.
-    try {
-      client = supertest(app);
-    } catch (e) {
-      // fallback to conservative behavior when supertest doesn't accept app
-      try {
-        // Reuse or create a cached server to avoid repeated listen/close
-        if (__req_cachedServer) {
-          // Reuse a persistent supertest agent against the cached server
-          // so subsequent requests share the same Agent and sockets.
-          try {
-            client = supertest.agent(__req_cachedServer);
-          } catch {
-            client = supertest(__req_cachedServer);
-          }
-        } else {
-          const srv = app.createServer();
-          const __restore = __req_patchAsyncResourceNoop();
-          await new Promise((resolve, reject) => {
+      // Resolve the full URL and perform a fetch. Prefer global fetch
+      // (Node18+); fall back to node-fetch if available.
+      const base = app;
+      const full = new URL(path || '/', base).toString();
+      const hdrs = Object.assign({}, headers || {});
+      if (!Object.keys(hdrs).some((k) => String(k).toLowerCase() === 'connection')) {
+        hdrs['Connection'] = 'close';
+      }
+      if (body && !hdrs['Content-Type'] && !hdrs['content-type']) {
+        hdrs['Content-Type'] = 'application/json';
+      }
+
+      let _fetch = typeof fetch === 'function' ? fetch : globalThis.fetch;
+      if (!_fetch) {
+        try {
+          _fetch = require('node-fetch');
+        } catch {}
+      }
+
+      if (!_fetch) {
+        // If fetch isn't available, perform a minimal http/https request
+        // using Node's core modules to avoid creating supertest agents.
+        const nodeFetch = (url, opts) =>
+          new Promise((resolve, reject) => {
             try {
-              srv.listen(0, () => {
-                try {
-                  if (typeof __restore === 'function') __restore();
-                } catch {}
-                resolve();
+              const u = new URL(url);
+              const isHttps = u.protocol === 'https:';
+              const mod = isHttps ? require('https') : require('http');
+              const hdrsLocal = Object.assign({}, opts.headers || {});
+              try {
+                const hasCT = Object.keys(hdrsLocal || {}).some(
+                  (k) => String(k).toLowerCase() === 'content-type'
+                );
+                if (opts.body && !hasCT) hdrsLocal['Content-Type'] = 'application/json';
+              } catch {}
+              const reqOpts = {
+                method: opts.method || 'GET',
+                hostname: u.hostname,
+                port: u.port || (isHttps ? 443 : 80),
+                path: u.pathname + (u.search || ''),
+                headers: hdrsLocal,
+              };
+              const r = mod.request(reqOpts, (res) => {
+                let data = '';
+                res.setEncoding('utf8');
+                res.on('data', (c) => (data += c));
+                res.on('end', () => {
+                  const headersObj = {};
+                  try {
+                    Object.keys(res.headers || {}).forEach((k) => (headersObj[k] = res.headers[k]));
+                  } catch {}
+                  resolve({ status: res.statusCode || 0, headers: headersObj, text: data });
+                });
               });
-            } catch (err) {
-              try {
-                if (typeof __restore === 'function') __restore();
-              } catch {}
-              try {
-                srv.close(() => {});
-              } catch {}
-              reject(err);
+              r.on('error', (err) => reject(err));
+              if (opts.body) r.write(opts.body);
+              r.end();
+            } catch (e) {
+              reject(e);
             }
           });
 
-          // Keep the server cached for reuse across test invocations.
-          __req_cachedServer = srv;
-          __req_cachedServerOwner = true;
+        try {
+          const r = await nodeFetch(full, {
+            method: (method || 'post').toUpperCase(),
+            headers: hdrs,
+            body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+          });
+          let parsed = r.text;
+          try {
+            parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
+          } catch {}
+          return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
+        } catch (e) {
+          // last-resort fallback: use supertest if node request also fails
+          client = supertest.agent(app);
+        }
+      } else {
+        const opts = { method: (method || 'post').toUpperCase(), headers: hdrs };
+        if (body) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+        const r = await _fetch(full, opts);
+        let text = '';
+        try {
+          text = await r.text();
+        } catch {}
+        const headersObj = {};
+        try {
+          if (r.headers && typeof r.headers.forEach === 'function') {
+            r.headers.forEach((v, k) => (headersObj[k] = v));
+          } else if (r.headers && typeof r.headers === 'object') {
+            Object.assign(headersObj, r.headers);
+          }
+        } catch {}
+        let parsed = text;
+        try {
+          parsed = text && text.length ? JSON.parse(text) : text;
+        } catch {}
+        return { status: r.status || 0, headers: headersObj, body: parsed, text };
+      }
+    } catch (e) {
+      // fallback to supertest when fetch path fails for any reason
+      client = supertest.agent(app);
+    }
+  } else if (typeof app === 'function') {
+    // For callable Express apps, prefer using supertest(app) which avoids
+    // opening a real network server and therefore doesn't create a
+    // persistent listen handle that can confuse Jest's detectOpenHandles.
+    try {
+      client = supertest.agent(app);
+    } catch (e) {
+      // fallback to other strategies below
+    }
+  } else if (app && typeof app.createServer === 'function') {
+    // Start a short-lived server from the provided app to avoid using
+    // supertest which can create internal Test listeners that Jest
+    // surfaces as bound-anonymous-fn. Perform a direct node request and
+    // return the response.
+    try {
+      const srv = app.createServer();
+      const __restore = __req_patchAsyncResourceNoop();
+      await new Promise((resolve, reject) => {
+        try {
+          srv.listen(0, () => {
+            try {
+              if (typeof __restore === 'function') __restore();
+            } catch {}
+            resolve();
+          });
+        } catch (err) {
+          try {
+            if (typeof __restore === 'function') __restore();
+          } catch {}
+          try {
+            srv.close(() => {});
+          } catch {}
+          reject(err);
+        }
+      });
 
-          closeServer = async () =>
-            new Promise((resolve) => {
+      // mark ownership so closeServer will close it if needed
+      __req_cachedServer = srv;
+      __req_cachedServerOwner = true;
+
+      closeServer = async () =>
+        new Promise((resolve) => {
+          try {
+            try {
+              if (typeof srv.unref === 'function') srv.unref();
+            } catch {}
+            if (__req_cachedServer && __req_cachedServer === srv) {
+              __req_cachedServer = null;
+              __req_cachedServerOwner = false;
               try {
-                try {
-                  if (typeof srv.unref === 'function') srv.unref();
-                } catch {}
-                // only close if this helper created and owns the cached server
-                if (__req_cachedServer && __req_cachedServer === srv) {
-                  __req_cachedServer = null;
-                  __req_cachedServerOwner = false;
-                  try {
-                    srv.close(() => resolve());
-                  } catch {
-                    resolve();
-                  }
-                } else {
-                  resolve();
-                }
+                srv.close(() => resolve());
               } catch {
                 resolve();
               }
-            });
-
-          try {
-            client = supertest.agent(srv);
+            } else {
+              resolve();
+            }
           } catch {
-            client = supertest(srv);
+            resolve();
           }
+        });
+
+      // perform node http request directly to the bound port
+      const addr = srv.address();
+      const port = addr && addr.port ? addr.port : 0;
+      const full = `http://127.0.0.1:${port}${path}`;
+      const r = await new Promise((resolve, reject) => {
+        try {
+          const u = new URL(full);
+          const mod = u.protocol === 'https:' ? https : http;
+          const hdrsLocal = Object.assign({}, headers || {});
+          try {
+            const hasCT = Object.keys(hdrsLocal || {}).some(
+              (k) => String(k).toLowerCase() === 'content-type'
+            );
+            if (body && !hasCT) hdrsLocal['Content-Type'] = 'application/json';
+          } catch {}
+          const reqOpts = {
+            method: (method || 'post').toUpperCase(),
+            hostname: u.hostname,
+            port: u.port || (u.protocol === 'https:' ? 443 : 80),
+            path: u.pathname + (u.search || ''),
+            headers: hdrsLocal,
+          };
+          const req2 = mod.request(reqOpts, (res) => {
+            let data = '';
+            res.setEncoding('utf8');
+            res.on('data', (c) => (data += c));
+            res.on('end', () => {
+              const headersObj = {};
+              try {
+                Object.keys(res.headers || {}).forEach((k) => (headersObj[k] = res.headers[k]));
+              } catch {}
+              resolve({ status: res.statusCode || 0, headers: headersObj, text: data });
+            });
+          });
+          req2.on('error', (err) => reject(err));
+          if (body) req2.write(typeof body === 'string' ? body : JSON.stringify(body));
+          req2.end();
+        } catch (e) {
+          reject(e);
         }
-      } catch (e2) {
-        client = supertest(app);
-      }
+      });
+      let parsed = r.text;
+      try {
+        parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
+      } catch {}
+      return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
+    } catch (e) {
+      // fallback to supertest as a last resort
+      client = supertest(app);
     }
   } else {
-    client = supertest(app);
+    // If `app` looks like an Express app (callable function), avoid using
+    // `supertest(app)` which can create internal Test listeners that Jest
+    // reports as bound-anonymous-fn. Instead start a short-lived http
+    // server, perform a direct Node request, and close the server.
+    if (typeof app === 'function') {
+      try {
+        const srv = http.createServer(app);
+        await new Promise((resolve, reject) => {
+          try {
+            srv.listen(0, () => resolve());
+          } catch (e) {
+            try {
+              srv.close(() => {});
+            } catch {}
+            reject(e);
+          }
+        });
+        // mark ownership so closeServer will close it if needed
+        __req_cachedServer = srv;
+        __req_cachedServerOwner = true;
+        closeServer = async () =>
+          new Promise((resolve) => {
+            try {
+              try {
+                if (typeof srv.unref === 'function') srv.unref();
+              } catch {}
+              srv.close(() => resolve());
+            } catch {
+              resolve();
+            }
+          });
+
+        // perform node http request directly to the bound port
+        const addr = srv.address();
+        const port = addr && addr.port ? addr.port : 0;
+        const isHttps = false;
+        const full = `http://127.0.0.1:${port}${path}`;
+        const r = await (async () => {
+          return new Promise((resolve, reject) => {
+            try {
+              const u = new URL(full);
+              const mod = u.protocol === 'https:' ? https : http;
+              const hdrsLocal = Object.assign({}, headers || {});
+              try {
+                const hasCT = Object.keys(hdrsLocal || {}).some(
+                  (k) => String(k).toLowerCase() === 'content-type'
+                );
+                if (body && !hasCT) hdrsLocal['Content-Type'] = 'application/json';
+              } catch {}
+              const reqOpts = {
+                method: (method || 'post').toUpperCase(),
+                hostname: u.hostname,
+                port: u.port || (u.protocol === 'https:' ? 443 : 80),
+                path: u.pathname + (u.search || ''),
+                headers: hdrsLocal,
+              };
+              const req2 = mod.request(reqOpts, (res) => {
+                let data = '';
+                res.setEncoding('utf8');
+                res.on('data', (c) => (data += c));
+                res.on('end', () => {
+                  const headersObj = {};
+                  try {
+                    Object.keys(res.headers || {}).forEach((k) => (headersObj[k] = res.headers[k]));
+                  } catch {}
+                  resolve({ status: res.statusCode || 0, headers: headersObj, text: data });
+                });
+              });
+              req2.on('error', (err) => reject(err));
+              if (body) req2.write(typeof body === 'string' ? body : JSON.stringify(body));
+              req2.end();
+            } catch (e) {
+              reject(e);
+            }
+          });
+        })();
+        let parsed = r.text;
+        try {
+          parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
+        } catch {}
+        return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
+      } catch (e) {
+        // fallback to supertest when attempting the temporary server approach fails
+        client = supertest.agent(app);
+      }
+    } else {
+      // As a robust fallback for callable apps, start a short-lived http
+      // server and request it directly. Assign `closeServer` immediately so
+      // the server is always closed in the finally block and Jest doesn't
+      // see a lingering listen handle when running single tests.
+      try {
+        const srv = http.createServer(app);
+        closeServer = async () =>
+          new Promise((resolve) => {
+            try {
+              try {
+                if (typeof srv.unref === 'function') srv.unref();
+              } catch {}
+              srv.close(() => resolve());
+            } catch {
+              resolve();
+            }
+          });
+
+        await new Promise((resolve, reject) => {
+          try {
+            srv.listen(0, () => resolve());
+          } catch (e) {
+            try {
+              srv.close(() => {});
+            } catch {}
+            reject(e);
+          }
+        });
+
+        __req_cachedServer = srv;
+        __req_cachedServerOwner = true;
+
+        const addr = srv.address();
+        const port = addr && addr.port ? addr.port : 0;
+        const full = `http://127.0.0.1:${port}${path}`;
+        const r = await new Promise((resolve, reject) => {
+          try {
+            const u = new URL(full);
+            const mod = u.protocol === 'https:' ? https : http;
+            const hdrsLocal = Object.assign({}, headers || {});
+            try {
+              const hasCT = Object.keys(hdrsLocal || {}).some(
+                (k) => String(k).toLowerCase() === 'content-type'
+              );
+              if (body && !hasCT) hdrsLocal['Content-Type'] = 'application/json';
+            } catch {}
+            const reqOpts = {
+              method: (method || 'post').toUpperCase(),
+              hostname: u.hostname,
+              port: u.port || (u.protocol === 'https:' ? 443 : 80),
+              path: u.pathname + (u.search || ''),
+              headers: hdrsLocal,
+            };
+            const req2 = mod.request(reqOpts, (res) => {
+              let data = '';
+              res.setEncoding('utf8');
+              res.on('data', (c) => (data += c));
+              res.on('end', () => {
+                const headersObj = {};
+                try {
+                  Object.keys(res.headers || {}).forEach((k) => (headersObj[k] = res.headers[k]));
+                } catch {}
+                resolve({ status: res.statusCode || 0, headers: headersObj, text: data });
+              });
+            });
+            req2.on('error', (err) => reject(err));
+            if (body) req2.write(typeof body === 'string' ? body : JSON.stringify(body));
+            req2.end();
+          } catch (e) {
+            reject(e);
+          }
+        });
+
+        try {
+          if (typeof closeServer === 'function') await closeServer();
+          else await new Promise((resolve) => srv.close(() => resolve()));
+        } catch {}
+
+        let parsed = r.text;
+        try {
+          parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
+        } catch {}
+        return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
+      } catch (e) {
+        client = supertest.agent(app);
+      }
+    }
   }
 
-  const req = client[method](path);
-  // Attach a shared keepAlive agent to outgoing Node requests when possible.
-  // Try to detect the underlying node ClientRequest via the 'request' event
-  // emitted by superagent and set its .agent property. This is defensive and
-  // will quietly noop if the request object doesn't support the event.
-  try {
-    const attachAgent = (r) => {
-      try {
-        // determine protocol from base url when available
-        let agentToUse = null;
+  // If we have a supertest client/agent, use it. Otherwise (client==null)
+  // perform a short-lived http request against a temporary server created
+  // from the provided `app`. This avoids creating a Test listen handle via
+  // supertest when running in certain single-test scenarios.
+  if (client && typeof client[method] === 'function') {
+    const req = client[method](path);
+    // Attach a shared keepAlive agent to outgoing Node requests when possible.
+    try {
+      const attachAgent = (r) => {
         try {
-          if (typeof app === 'string') {
-            const u = new URL(path || '/', app);
-            if (u.protocol === 'https:') agentToUse = __req_sharedHttpsAgent;
-            else agentToUse = __req_sharedHttpAgent;
-          } else if (typeof app === 'object' && app && app.address) {
-            // assume http for local server instances
-            agentToUse = __req_sharedHttpAgent;
+          let agentToUse = null;
+          try {
+            if (typeof app === 'string') {
+              const u = new URL(path || '/', app);
+              if (u.protocol === 'https:') agentToUse = __req_sharedHttpsAgent;
+              else agentToUse = __req_sharedHttpAgent;
+            } else if (typeof app === 'object' && app && app.address) {
+              agentToUse = __req_sharedHttpAgent;
+            }
+          } catch {}
+          if (agentToUse && r && typeof r === 'object') {
+            try {
+              r.agent = agentToUse;
+            } catch {}
           }
         } catch {}
-        if (agentToUse && r && typeof r === 'object') {
+      };
+      try {
+        if (req && typeof req.on === 'function') req.on('request', attachAgent);
+      } catch {}
+    } catch {}
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) req.set(k, v);
+    }
+    try {
+      const hasConnection = Object.keys(headers || {}).some(
+        (k) => String(k).toLowerCase() === 'connection'
+      );
+      if (!hasConnection) req.set('Connection', 'close');
+    } catch {}
+    if (body) req.send(body);
+    if (timeout) req.timeout({ deadline: timeout });
+
+    try {
+      const res = await req;
+      try {
+        const out = {
+          status: res.status || res.statusCode || 0,
+          headers: res.headers || res.header || {},
+          body: res.body,
+          text: typeof res.text === 'string' ? res.text : undefined,
+        };
+        if (
+          out &&
+          out.body &&
+          typeof out.body === 'object' &&
+          Object.keys(out.body || {}).length === 0 &&
+          typeof out.text === 'string'
+        ) {
+          out.body = out.text;
+        }
+        return out;
+      } catch (e) {
+        return res;
+      }
+    } finally {
+      try {
+        if (typeof closeServer === 'function') await closeServer();
+      } catch {}
+      try {
+        if (client && typeof client.close === 'function') {
           try {
-            r.agent = agentToUse;
+            await client.close();
           } catch {}
         }
       } catch {}
-    };
-    try {
-      if (req && typeof req.on === 'function') req.on('request', attachAgent);
-    } catch {}
-  } catch {}
-  if (headers) {
-    for (const [k, v] of Object.entries(headers)) req.set(k, v);
-  }
-  // Prefer explicit Connection: close for remote requests to avoid lingering
-  // keep-alive sockets that can show up as open handles in Jest.
-  try {
-    const hasConnection = Object.keys(headers || {}).some(
-      (k) => String(k).toLowerCase() === 'connection'
-    );
-    if (!hasConnection) req.set('Connection', 'close');
-  } catch {}
-  if (body) req.send(body);
-  if (timeout) req.timeout({ deadline: timeout });
-
-  try {
-    const res = await req;
-    // Normalize response for tests: supertest sometimes leaves `res.body` as
-    // an empty object for plain-text responses; prefer `res.text` when body
-    // is empty so callers that expect string results (eg: /health) receive
-    // the textual payload.
-    try {
-      const out = {
-        status: res.status || res.statusCode || 0,
-        headers: res.headers || res.header || {},
-        body: res.body,
-        text: typeof res.text === 'string' ? res.text : undefined,
-      };
-      if (
-        out &&
-        out.body &&
-        typeof out.body === 'object' &&
-        Object.keys(out.body || {}).length === 0 &&
-        typeof out.text === 'string'
-      ) {
-        out.body = out.text;
-      }
-      return out;
-    } catch (e) {
-      // fallback: return the raw supertest response if normalization fails
-      return res;
+      try {
+        await new Promise((r) => process.nextTick(r));
+        await new Promise((r) => {
+          const t = setTimeout(r, 10);
+          try {
+            if (t && typeof t.unref === 'function') t.unref();
+          } catch {}
+        });
+      } catch {}
+      try {
+        if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
+          serverHelper._forceCloseAllSockets();
+        }
+      } catch {}
     }
-  } finally {
-    // close any server we started
+  } else {
+    // No supertest client: start a temporary server and perform a node http request
     try {
-      if (typeof closeServer === 'function') await closeServer();
-    } catch {}
-    // Small pause to allow native handles to settle after server close.
-    try {
-      await new Promise((r) => process.nextTick(r));
-      await new Promise((r) => {
-        const t = setTimeout(r, 10);
+      const srv = http.createServer(app);
+      // ensure closeServer exists immediately so finally can always close it
+      closeServer = async () =>
+        new Promise((resolve) => {
+          try {
+            try {
+              if (typeof srv.unref === 'function') srv.unref();
+            } catch {}
+            srv.close(() => resolve());
+          } catch {
+            resolve();
+          }
+        });
+
+      await new Promise((resolve, reject) => {
         try {
-          if (t && typeof t.unref === 'function') t.unref();
-        } catch {}
+          srv.listen(0, () => resolve());
+        } catch (e) {
+          try {
+            srv.close(() => {});
+          } catch {}
+          reject(e);
+        }
       });
-    } catch {}
-    // fallback: ensure helper-tracked sockets are destroyed
-    try {
-      if (serverHelper && typeof serverHelper._forceCloseAllSockets === 'function') {
-        serverHelper._forceCloseAllSockets();
-      }
-    } catch {}
+
+      const addr = srv.address();
+      const port = addr && addr.port ? addr.port : 0;
+      const full = `http://127.0.0.1:${port}${path}`;
+      const r = await new Promise((resolve, reject) => {
+        try {
+          const u = new URL(full);
+          const mod = u.protocol === 'https:' ? https : http;
+          const hdrsLocal = Object.assign({}, headers || {});
+          try {
+            const hasCT = Object.keys(hdrsLocal || {}).some(
+              (k) => String(k).toLowerCase() === 'content-type'
+            );
+            if (body && !hasCT) hdrsLocal['Content-Type'] = 'application/json';
+          } catch {}
+          const reqOpts = {
+            method: (method || 'post').toUpperCase(),
+            hostname: u.hostname,
+            port: u.port || (u.protocol === 'https:' ? 443 : 80),
+            path: u.pathname + (u.search || ''),
+            headers: hdrsLocal,
+          };
+          const req2 = mod.request(reqOpts, (res) => {
+            let data = '';
+            res.setEncoding('utf8');
+            res.on('data', (c) => (data += c));
+            res.on('end', () => {
+              const headersObj = {};
+              try {
+                Object.keys(res.headers || {}).forEach((k) => (headersObj[k] = res.headers[k]));
+              } catch {}
+              resolve({ status: res.statusCode || 0, headers: headersObj, text: data });
+            });
+          });
+          req2.on('error', (err) => reject(err));
+          if (body) req2.write(typeof body === 'string' ? body : JSON.stringify(body));
+          req2.end();
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      try {
+        if (typeof closeServer === 'function') await closeServer();
+      } catch {}
+
+      let parsed = r.text;
+      try {
+        parsed = r.text && r.text.length ? JSON.parse(r.text) : r.text;
+      } catch {}
+      return { status: r.status || 0, headers: r.headers || {}, body: parsed, text: r.text };
+    } catch (e) {
+      // last-resort: rethrow so caller sees the failure
+      throw e;
+    }
   }
 }
 
@@ -313,5 +693,3 @@ async function _restoreAndDestroySharedAgents() {
 }
 
 module.exports = { requestApp, closeCachedServer, _restoreAndDestroySharedAgents };
-
-module.exports = { requestApp, closeCachedServer };

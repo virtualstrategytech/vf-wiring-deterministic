@@ -151,9 +151,13 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
 // Use getApiKey() here so the value is resolved at runtime rather than
 // referencing a possibly undefined module-scope variable.
 if (!getApiKey() && !IS_PROD) {
-  console.warn(
-    'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
-  );
+  // Informational only: show this when debugging tests or when explicit
+  // webhook debugging is enabled to avoid noisy CI/dev output.
+  if (DEBUG_TESTS || DEBUG_WEBHOOK) {
+    console.warn(
+      'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
+    );
+  }
 }
 // Gate presence logs behind DEBUG_WEBHOOK in non-production to avoid leaking
 // configuration truthiness in production logs. Developers can enable DEBUG_WEBHOOK=true
@@ -311,7 +315,12 @@ app.use((err, req, res, next) => {
 // Request logger (before routes)
 app.use((req, _res, next) => {
   const rid = req.get('x-request-id') || 'no-request-id';
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} rid=${rid}`);
+  // Only emit request logs during explicit test debugging or when webhook
+  // debug is enabled in non-production. This keeps normal test runs quiet
+  // while allowing verbose diagnostics when troubleshooting.
+  if (DEBUG_TESTS || (!IS_PROD && DEBUG_WEBHOOK)) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} rid=${rid}`);
+  }
   next();
 });
 
@@ -447,7 +456,9 @@ app.post('/webhook', async (req, res) => {
   // Safely coerce question (handles non-strings so .trim() never throws)
   const qRaw = (req.body && (req.body.question ?? req.body.message)) ?? '';
   const question = String(qRaw);
-  console.log(`webhook: action=${action} name=${name} tenantId=${tenantId}`);
+  if (DEBUG_TESTS || (!IS_PROD && DEBUG_WEBHOOK)) {
+    console.log(`webhook: action=${action} name=${name} tenantId=${tenantId}`);
+  }
 
   try {
     // ---- ping
