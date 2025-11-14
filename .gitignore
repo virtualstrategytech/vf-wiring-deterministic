@@ -249,3 +249,4 @@ tests/artifacts/
 # Ignore generated trace summary artifacts from local test runs
 tests/trace_summary*.json
 tests/*.trace_summary*.json
+tests/parse-trace.js
