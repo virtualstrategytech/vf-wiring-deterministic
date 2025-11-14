@@ -17,9 +17,11 @@ try {
   const events = require('events');
   if (events && events.EventEmitter) {
     try {
-      if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-        events.EventEmitter.defaultMaxListeners = 50;
-      }
+      // Increase EventEmitter defaultMaxListeners for test runs to reduce
+      // spurious MaxListenersExceededWarning during parallel socket setup.
+      // This is a pragmatic guard for local and CI test runs; we keep it
+      // high while we triage the underlying listener sources.
+      events.EventEmitter.defaultMaxListeners = 50;
     } catch {}
   }
 } catch {}

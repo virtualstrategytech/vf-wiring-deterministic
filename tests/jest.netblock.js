@@ -53,7 +53,11 @@ try {
         }
         // also emit to console for immediate developer visibility
 
-        console.log('jest.netblock: set nock allowlist ->', combined);
+        try {
+          if (DEBUG_TESTS && console && typeof console.debug === 'function') {
+            console.debug('jest.netblock: set nock allowlist ->', combined);
+          }
+        } catch {}
       } catch {
         // swallow errors to avoid blocking tests
       }
@@ -130,9 +134,11 @@ try {
         );
       } catch {}
       try {
-        console.info(
-          'jest.netblock: nock not installed; external network calls will not be blocked (quiet notice)'
-        );
+        if (DEBUG_TESTS && console && typeof console.debug === 'function') {
+          console.debug(
+            'jest.netblock: nock not installed; external network calls will not be blocked (quiet notice)'
+          );
+        }
       } catch {}
     }
   } catch {}
