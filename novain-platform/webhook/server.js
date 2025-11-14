@@ -235,9 +235,7 @@ app.use((req, res, next) => {
   // async-hooks instrumentation reports as open handles (RANDOMBYTESREQUEST).
   // Use a deterministic JS fallback during tests to keep async handle dumps clean.
   const useDeterministicIds =
-    process.env.FORCE_DETERMINISTIC_IDS === '1' ||
-    process.env.NODE_ENV === 'test' ||
-    !!process.env.DEBUG_TESTS;
+    process.env.FORCE_DETERMINISTIC_IDS === '1' || process.env.NODE_ENV === 'test' || DEBUG_TESTS;
 
   const deterministicId = () => {
     // small, readable id: r-<time>-<counter/random>
@@ -670,7 +668,7 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
-          if (process.env.DEBUG_TESTS) {
+          if (DEBUG_TESTS) {
             try {
               console.info('DEBUG_TESTS: llm_elicit: PROMPT_URL present:', !!PROMPT_URL);
               console.info('DEBUG_TESTS: llm_elicit: fetchFn type:', typeof fetchFn);
@@ -690,7 +688,7 @@ app.post('/webhook', async (req, res) => {
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),
           });
 
-          if (process.env.DEBUG_TESTS) {
+          if (DEBUG_TESTS) {
             try {
               console.info('DEBUG_TESTS: llm_elicit: fetched status:', r && r.status);
               try {
@@ -713,7 +711,7 @@ app.post('/webhook', async (req, res) => {
           try {
             payload = await r.json();
           } catch (pj) {
-            if (process.env.DEBUG_TESTS) {
+            if (DEBUG_TESTS) {
               try {
                 console.info(
                   'DEBUG_TESTS: llm_elicit: JSON parse failed:',
@@ -744,7 +742,7 @@ app.post('/webhook', async (req, res) => {
             } catch {}
           }
 
-          if (process.env.DEBUG_TESTS) {
+          if (DEBUG_TESTS) {
             try {
               console.info(
                 'DEBUG_TESTS: llm_elicit: payload snippet:',
