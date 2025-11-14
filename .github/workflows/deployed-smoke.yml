@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      WEBHOOK_API_KEY: ${{ secrets['WEBHOOK_API_KEY'] }}
+      WEBHOOK_BASE: ${{ secrets['WEBHOOK_BASE'] }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
       # Stabilize socket and random handles during smoke tests
       FORCE_PER_REQUEST_AGENT: '1'

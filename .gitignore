@@ -19,6 +19,7 @@ pnpm-lock.yaml
 # OS / editor
 Thumbs.db
 .vscode/
+!.vscode/settings.json
 .idea/
 # Build / cache
 build/
