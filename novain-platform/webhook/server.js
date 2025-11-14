@@ -975,4 +975,36 @@ try {
 }
 
 // Export the app for in-process tests and programmatic use.
+// Export a helper to clean up shared resources (useful for tests).
+try {
+  Object.defineProperty(app, 'closeResources', {
+    value: () => {
+      try {
+        if (sharedHttpAgent && typeof sharedHttpAgent.destroy === 'function') {
+          try {
+            sharedHttpAgent.destroy();
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (sharedHttpsAgent && typeof sharedHttpsAgent.destroy === 'function') {
+          try {
+            sharedHttpsAgent.destroy();
+          } catch {}
+        }
+      } catch {}
+      try {
+        // If fetch implementation exposes a close method (undici client), try to close it.
+        if (fetchFn && typeof fetchFn === 'object' && typeof fetchFn.close === 'function') {
+          try {
+            fetchFn.close();
+          } catch {}
+        }
+      } catch {}
+    },
+    writable: false,
+    enumerable: false,
+  });
+} catch {}
+
 module.exports = app;
