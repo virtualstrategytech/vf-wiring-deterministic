@@ -13,12 +13,15 @@ let __req_sharedHttpAgent = null;
 let __req_sharedHttpsAgent = null;
 try {
   try {
-    __req_sharedHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 20 });
+    // Use non-keepAlive agents for tests to avoid persistent sockets that
+    // can trigger Jest detectOpenHandles. Per-request agents are cheaper
+    // here because tests are short-lived.
+    __req_sharedHttpAgent = new http.Agent({ keepAlive: false, maxSockets: 20 });
   } catch {
     __req_sharedHttpAgent = null;
   }
   try {
-    __req_sharedHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 20 });
+    __req_sharedHttpsAgent = new https.Agent({ keepAlive: false, maxSockets: 20 });
   } catch {
     __req_sharedHttpsAgent = null;
   }

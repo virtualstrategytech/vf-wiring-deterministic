@@ -11,6 +11,9 @@ if (!process.env.WEBHOOK_API_KEY && fs.existsSync(secretFile)) {
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK || 'false';
+// Use lightweight body parser during tests to avoid the raw-body/body-parser
+// closure which can be reported as an open handle by Jest's detectOpenHandles.
+process.env.SKIP_BODY_PARSER = process.env.SKIP_BODY_PARSER || '1';
 
 const supertest = require('supertest');
 
@@ -28,17 +31,17 @@ describe('in-process webhook app (refactored)', () => {
   } else {
     try {
       _appInstance = require('../novain-platform/webhook/server');
-      // Use an agent when testing an in-process app so we can close it
-      // explicitly in afterAll to avoid lingering handles.
-      requester = supertest.agent(_appInstance);
+      // Use a plain supertest instance (not an agent) to avoid creating a
+      // persistent underlying server handle that sometimes lingers in Jest.
+      requester = supertest(_appInstance);
     } catch (e) {
       requester = supertest(base);
     }
   }
 
-  afterAll(() => {
-    // Best-effort cleanup: destroy shared agents and other resources the app
-    // may have created (keeps sockets from lingering in Jest runs).
+  afterAll(async () => {
+    // Best-effort async cleanup: destroy shared agents and other resources
+    // the app may have created (keeps sockets from lingering in Jest runs).
     try {
       if (_appInstance && typeof _appInstance.closeResources === 'function') {
         try {
@@ -47,9 +50,14 @@ describe('in-process webhook app (refactored)', () => {
       }
       if (requester && typeof requester.close === 'function') {
         try {
-          requester.close();
+          // supertest.agent returns a closeable instance in recent versions
+          await requester.close();
         } catch {}
       }
+    } catch {}
+    // allow a short grace period for any async handles to finish closing
+    try {
+      await new Promise((r) => setTimeout(r, 50));
     } catch {}
   });
 
@@ -80,6 +88,20 @@ describe('in-process webhook app (refactored)', () => {
     const rawSource =
       (body && body.raw && body.raw.source) ||
       (body && body.data && body.data.raw && body.data.raw.source);
+
+    if (!rawSource) {
+      // Add helpful debug output so CI and local runs surface the actual
+      // response shape when the assertion fails.
+      try {
+        // truncate long bodies for readability
+        const asJson = JSON.stringify(body || {}, null, 2).slice(0, 2000);
+         
+        console.error('in-process test: unexpected response body:', asJson);
+      } catch (e) {
+        // ignore logging failures
+      }
+    }
+
     expect(rawSource).toBe('stub');
   });
 });

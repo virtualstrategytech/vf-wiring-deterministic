@@ -80,6 +80,15 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
       }
     } catch {}
     try {
+      // Ensure exported app shared agents are destroyed to avoid lingering
+      // keepAlive sockets that can trigger Jest detectOpenHandles.
+      try {
+        if (app && typeof app.closeResources === 'function') {
+          try {
+            app.closeResources();
+          } catch {}
+        }
+      } catch {}
       const http = require('http');
       const https = require('https');
       if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
