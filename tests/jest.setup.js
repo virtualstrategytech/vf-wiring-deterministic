@@ -5,6 +5,9 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const tls = require('tls');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 // Temporary: increase EventEmitter defaultMaxListeners in CI/test runs to
 // reduce spurious Node MaxListeners warnings while we triage the source of
@@ -20,6 +23,42 @@ try {
     } catch {}
   }
 } catch {}
+
+// Trace connect instrumentation: write stack traces to a temp file when sockets
+// or `connect` listeners are created. Enabled when DEBUG_TESTS or TRACE_CONNECT
+// or in CI. This helps map repeated listener/socket creation back to source.
+const __TRACE_ENABLED = !!(
+  process.env.DEBUG_TESTS ||
+  process.env.TRACE_CONNECT === '1' ||
+  process.env.CI === 'true'
+);
+const __TRACE_FILE = path.join(os.tmpdir(), 'trace_connect.log');
+function __traceLog(tag, stack) {
+  try {
+    if (!__TRACE_ENABLED) return;
+    // Filter out stacks that originate from this instrumentation to reduce
+    // self-noise. Common instrumentation files we want to ignore include
+    // this file and the companion `jest.instrumentation.js`.
+    try {
+      const s = String(stack || new Error().stack || '');
+      const skipBasenames = ['jest.setup.js', 'jest.instrumentation.js'];
+      for (const b of skipBasenames) {
+        if (b && s.includes(b)) return;
+      }
+    } catch {}
+
+    const line = `[${new Date().toISOString()}] ${tag}\n${stack || new Error().stack}\n\n`;
+    try {
+      fs.appendFileSync(__TRACE_FILE, line);
+    } catch {}
+    try {
+      // Also write a copy into the workspace tests/ directory so we can
+      // inspect it easily from the runner environment.
+      const repoPath = path.join(process.cwd(), 'tests', 'trace_connect.log');
+      fs.appendFileSync(repoPath, line);
+    } catch {}
+  } catch {}
+}
 
 // Defensive shim: make console.warn safe during aggressive debug sweeps.
 // Some test cleanup paths attempt to write to stdio pipes that may have
@@ -232,6 +271,14 @@ try {
                 } catch {}
               }
             } catch {}
+            try {
+              if (__TRACE_ENABLED) {
+                __traceLog(
+                  'Agent.prototype.createConnection',
+                  sock && sock._createdStack ? sock._createdStack : new Error().stack
+                );
+              }
+            } catch {}
             return sock;
           };
         }
@@ -259,6 +306,14 @@ try {
             } catch {}
           }
         } catch {}
+        try {
+          if (__TRACE_ENABLED) {
+            __traceLog(
+              'net.createConnection',
+              sock && sock._createdStack ? sock._createdStack : new Error().stack
+            );
+          }
+        } catch {}
         return sock;
       };
     }
@@ -276,7 +331,37 @@ try {
       try {
         if (typeof listener === 'function' && !listener._creationStack) {
           try {
-            listener._creationStack = new Error('listener-created').stack;
+            const s = new Error('listener-created').stack || '';
+            // Avoid tagging listeners that are created by this instrumentation
+            // file itself to reduce self-noise in traces. Compare by basename
+            // (e.g. 'jest.setup.js') since stack frames may use relative paths
+            // or different directory prefixes across runners.
+            try {
+              const basename =
+                typeof path === 'object' && path && path.basename
+                  ? path.basename(__filename)
+                  : 'jest.setup.js';
+              if (basename && String(s).includes(basename)) {
+                // skip attaching stack for instrumentation-created listeners
+              } else {
+                listener._creationStack = s;
+              }
+            } catch {
+              listener._creationStack = s;
+            }
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (
+          __TRACE_ENABLED &&
+          String(event) === 'connect' &&
+          typeof listener._creationStack === 'string'
+        ) {
+          // log where connect listeners are attached (but only if we have
+          // a non-instrumentation creation stack to avoid self-noise)
+          try {
+            __traceLog("EventEmitter.on('connect') added", listener._creationStack);
           } catch {}
         }
       } catch {}
@@ -286,7 +371,31 @@ try {
       try {
         if (typeof listener === 'function' && !listener._creationStack) {
           try {
-            listener._creationStack = new Error('listener-created').stack;
+            const s = new Error('listener-created').stack || '';
+            try {
+              const basename =
+                typeof path === 'object' && path && path.basename
+                  ? path.basename(__filename)
+                  : 'jest.setup.js';
+              if (basename && String(s).includes(basename)) {
+                // skip attaching stack for instrumentation-created listeners
+              } else {
+                listener._creationStack = s;
+              }
+            } catch {
+              listener._creationStack = s;
+            }
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (
+          __TRACE_ENABLED &&
+          String(event) === 'connect' &&
+          typeof listener._creationStack === 'string'
+        ) {
+          try {
+            __traceLog("EventEmitter.once('connect') added", listener._creationStack);
           } catch {}
         }
       } catch {}
@@ -333,6 +442,14 @@ try {
               sock.unref();
             } catch {}
           }
+        }
+      } catch {}
+      try {
+        if (__TRACE_ENABLED) {
+          __traceLog(
+            'tls.connect',
+            sock && sock._createdStack ? sock._createdStack : new Error().stack
+          );
         }
       } catch {}
       return sock;

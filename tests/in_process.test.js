@@ -22,17 +22,36 @@ describe('in-process webhook app (refactored)', () => {
   // require the app and use supertest(app).
   const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
   let requester;
+  let _appInstance = null;
   if (process.env.WEBHOOK_BASE) {
     requester = supertest(base);
   } else {
     try {
-       
-      const app = require('../novain-platform/webhook/server');
-      requester = supertest(app);
+      _appInstance = require('../novain-platform/webhook/server');
+      // Use an agent when testing an in-process app so we can close it
+      // explicitly in afterAll to avoid lingering handles.
+      requester = supertest.agent(_appInstance);
     } catch (e) {
       requester = supertest(base);
     }
   }
+
+  afterAll(() => {
+    // Best-effort cleanup: destroy shared agents and other resources the app
+    // may have created (keeps sockets from lingering in Jest runs).
+    try {
+      if (_appInstance && typeof _appInstance.closeResources === 'function') {
+        try {
+          _appInstance.closeResources();
+        } catch {}
+      }
+      if (requester && typeof requester.close === 'function') {
+        try {
+          requester.close();
+        } catch {}
+      }
+    } catch {}
+  });
 
   it('returns llm_elicit stub with source "stub"', async () => {
     // Use a small retry wrapper to avoid transient ECONNREFUSED flakes in CI

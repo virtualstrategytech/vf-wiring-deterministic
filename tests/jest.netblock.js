@@ -116,11 +116,24 @@ try {
     }
   });
 } catch {
-  // If nock is not installed, fail loudly so CI/devs add the dependency.
-  // But in case of a tooling quirk, log a warning and continue.
+  // If nock is not installed, avoid noisy repeated warnings. Emit a single
+  // informational line (not a loud `warn`) and write a small file for CI
+  // artifact collection. Guard with a global flag so multiple test files
+  // loading this helper won't spam the logs.
   try {
-    console.warn(
-      'tests/jest.netblock.js: nock not available, external network requests will not be blocked'
-    );
+    if (!global.__NETBLOCK_NOCK_MISSING) {
+      global.__NETBLOCK_NOCK_MISSING = true;
+      try {
+        require('fs').appendFileSync(
+          '/tmp/nock_missing_notice.log',
+          `${new Date().toISOString()} nock not installed: network blocking disabled\n`
+        );
+      } catch {}
+      try {
+        console.info(
+          'jest.netblock: nock not installed; external network calls will not be blocked (quiet notice)'
+        );
+      } catch {}
+    }
   } catch {}
 }
