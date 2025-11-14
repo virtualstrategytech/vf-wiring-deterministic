@@ -11,10 +11,19 @@ const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
+// Shared agents for outgoing requests. Reusing agents reduces per-request
+// Agent/socket churn and lowers the number of connect/listener allocations
+// visible to the test instrumentation. Tests can still opt into creating
+// per-request agents by setting `FORCE_PER_REQUEST_AGENT=1`.
+const sharedHttpAgent = new http.Agent({ keepAlive: true });
+const sharedHttpsAgent = new https.Agent({ keepAlive: true });
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
 const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
+// Test debug flag: allow '1' or 'true' to enable verbose test-only logging
+const DEBUG_TESTS = process.env.DEBUG_TESTS === 'true' || process.env.DEBUG_TESTS === '1';
 // ---- Config (env vars)
 // Note: some tests set `process.env.WEBHOOK_API_KEY` after this module is loaded.
 // To ensure tests and CI can update the API key at runtime (without requiring
@@ -40,15 +49,9 @@ if (!fetchFn) {
   }
 }
 
-// Debug: when running tests with DEBUG_TESTS, print what fetch implementation
-// was captured at module init so we can diagnose mocking issues.
-try {
-  if (process.env.DEBUG_TESTS) {
-    try {
-      console.info('DEBUG_TESTS: fetchFn present at module init?', typeof fetchFn === 'function');
-    } catch {}
-  }
-} catch {}
+// Note: DEBUG_TESTS is available above as a boolean; avoid noisy prints at
+// module init. Tests and CI can enable `DEBUG_TESTS=1` to get more verbose
+// per-request diagnostics which are already gated at call sites.
 
 // add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
@@ -69,18 +72,27 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
       // in non-production can cause many transient sockets/listeners and
       // trigger MaxListenersExceededWarning in CI. Make it opt-in.
       const shouldForce = process.env.FORCE_PER_REQUEST_AGENT === '1';
+      // Determine protocol for this URL
+      let proto = 'http:';
+      try {
+        proto = new URL(url).protocol || 'http:';
+      } catch {
+        proto = String(url || '').startsWith('https:') ? 'https:' : 'http:';
+      }
+
       if (!opts.agent && shouldForce) {
-        let proto = 'http:';
-        try {
-          proto = new URL(url).protocol || 'http:';
-        } catch {
-          proto = String(url || '').startsWith('https:') ? 'https:' : 'http:';
-        }
+        // Tests explicitly requested a per-request (non-keep-alive) agent.
         createdAgent =
           proto === 'https:'
             ? new https.Agent({ keepAlive: false })
             : new http.Agent({ keepAlive: false });
         opts.agent = createdAgent;
+      } else if (!opts.agent) {
+        // Use shared keep-alive agents by default to reduce per-request
+        // Agent creation churn. This avoids creating many short-lived
+        // sockets while still allowing connection reuse. Teardown will
+        // attempt to destroy these agents during shutdown.
+        opts.agent = proto === 'https:' ? sharedHttpsAgent : sharedHttpAgent;
       }
     } catch {
       // best-effort only
@@ -284,7 +296,7 @@ app.use((req, res, next) => {
         return _origJson(obj);
       };
     }
-  } catch (e) {
+  } catch {
     /* ignore - normalization is best-effort */
   }
   next();
@@ -359,7 +371,7 @@ try {
       setTimeout(() => process.exit(1), 50).unref();
     } catch {}
   });
-} catch (e) {
+} catch {
   // best-effort only: do not crash if logging setup fails
 }
 
@@ -897,6 +909,23 @@ if (require.main === module) {
     } catch (e) {
       void e;
     }
+
+    // Destroy shared HTTP(S) agents to ensure sockets are closed and do not
+    // keep the process alive in test/CI environments.
+    try {
+      if (sharedHttpAgent && typeof sharedHttpAgent.destroy === 'function') {
+        try {
+          sharedHttpAgent.destroy();
+        } catch {}
+      }
+    } catch {}
+    try {
+      if (sharedHttpsAgent && typeof sharedHttpsAgent.destroy === 'function') {
+        try {
+          sharedHttpsAgent.destroy();
+        } catch {}
+      }
+    } catch {}
 
     // Stop accepting new connections and close existing ones. If server
     // close hangs, force exit after a short timeout to avoid stalls in CI.
