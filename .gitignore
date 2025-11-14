@@ -245,3 +245,7 @@ ci-artifacts*/
 novain-platform/smoke-artifacts/
 smoke-artifacts/
 tests/artifacts/
+
+# Ignore generated trace summary artifacts from local test runs
+tests/trace_summary*.json
+tests/*.trace_summary*.json

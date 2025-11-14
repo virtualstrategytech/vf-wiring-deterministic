@@ -106,6 +106,36 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: unexpected error: ${e && e.message}`);
   }
+  // Close any cached ephemeral server created by request-helper to avoid
+  // leaving a listening handle open across the test run. This is best-effort
+  // and will silently continue if the helper isn't present.
+  try {
+    try {
+      const rh = require('./helpers/request-helper');
+      if (rh && typeof rh.closeCachedServer === 'function') {
+        appendLog('globalTeardown: closing cached request-helper server');
+        try {
+          await rh.closeCachedServer();
+          appendLog('globalTeardown: cached server closed');
+        } catch (e) {
+          appendLog(`globalTeardown: closeCachedServer error: ${e && e.message}`);
+        }
+      }
+      // If the request-helper exposed a shared-agent restore, call it to
+      // destroy any pooled agents we installed during tests.
+      if (rh && typeof rh._restoreAndDestroySharedAgents === 'function') {
+        appendLog('globalTeardown: restoring/destroying shared test agents');
+        try {
+          await rh._restoreAndDestroySharedAgents();
+          appendLog('globalTeardown: shared test agents destroyed');
+        } catch (e) {
+          appendLog(`globalTeardown: _restoreAndDestroySharedAgents error: ${e && e.message}`);
+        }
+      }
+    } catch {}
+  } catch (e) {
+    appendLog(`globalTeardown: closeCachedServer unexpected error: ${e && e.message}`);
+  }
   // Ensure Node http/https global agents are destroyed to avoid lingering sockets
   try {
     const http = require('http');
