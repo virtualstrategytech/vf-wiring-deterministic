@@ -136,6 +136,28 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: closeCachedServer unexpected error: ${e && e.message}`);
   }
+  // Attempt to call app-level cleanup helpers (if the webhook app was loaded
+  // in-process during tests). This will destroy shared agents and other
+  // resources created by the app that may keep sockets open.
+  try {
+    try {
+      const app = require('../novain-platform/webhook/server');
+      if (app && typeof app.closeResources === 'function') {
+        appendLog('globalTeardown: calling app.closeResources()');
+        try {
+          await app.closeResources();
+          appendLog('globalTeardown: app.closeResources() completed');
+        } catch (e) {
+          appendLog(`globalTeardown: app.closeResources error: ${e && e.message}`);
+        }
+      }
+    } catch (e) {
+      // best-effort; app may not have been required during tests
+      appendLog(`globalTeardown: require app failed: ${e && e.message}`);
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: app cleanup unexpected error: ${e && e.message}`);
+  }
   // Ensure Node http/https global agents are destroyed to avoid lingering sockets
   try {
     const http = require('http');
