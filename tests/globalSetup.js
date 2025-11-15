@@ -87,10 +87,13 @@ module.exports = async () => {
 
   logLine('globalSetup: starting; webhookDir=', webhookDir);
 
-  // If running inside GitHub Actions, assume the workflow's Start webhook
+  // If running inside GitHub Actions and the job is NOT explicitly asking
+  // to spawn a child-process server, assume the workflow's Start webhook
   // step started the server. Wait briefly for the port to be ready and
   // then return without spawning a local child to avoid duplicate servers.
-  if (process.env.GITHUB_ACTIONS === 'true') {
+  // When `USE_CHILD_PROCESS_SERVER=1` is set (used by some CI jobs), do
+  // not take this early-return path so the job can spawn its own server.
+  if (process.env.GITHUB_ACTIONS === 'true' && process.env.USE_CHILD_PROCESS_SERVER !== '1') {
     const actionPort = Number(process.env.PORT || 3000);
     try {
       await waitForReady(actionPort, 20000);
@@ -111,6 +114,14 @@ module.exports = async () => {
       logStream.end();
     } catch {}
     return;
+  }
+  // When running on GitHub Actions with USE_CHILD_PROCESS_SERVER=1 we want
+  // the test job to spawn the webhook locally. Log that decision so CI
+  // artifacts show why we proceeded to spawn a child.
+  if (process.env.GITHUB_ACTIONS === 'true' && process.env.USE_CHILD_PROCESS_SERVER === '1') {
+    logLine(
+      'globalSetup: GITHUB_ACTIONS=true and USE_CHILD_PROCESS_SERVER=1; will spawn local child server'
+    );
   }
 
   // Resolve API key: prefer explicit env -> secret file (if present) -> generated fallback
