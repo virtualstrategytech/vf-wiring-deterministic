@@ -14,11 +14,17 @@ jobs:
     runs-on: ubuntu-latest
 
     # Make secrets and paths visible to all steps in a way the Actions
-    # language server understands, which eliminates the "context might be invalid"
-    # warnings in VS Code.
+    # language server understands.
     env:
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
+      DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
+      PING_CHECK: $RUNNER_TEMP/ping_check.txt
+      HEALTH_BODY: $RUNNER_TEMP/health_body.txt
+      HEALTH_ERR: $RUNNER_TEMP/health_err.txt
+      HEALTH_TRACE: $RUNNER_TEMP/health_trace.txt
+      PING_TRACE: $RUNNER_TEMP/ping_trace.txt
 
     steps:
       - name: Checkout
@@ -28,25 +34,14 @@ jobs:
         shell: bash
         run: |
           if [ -z "${WEBHOOK_BASE}" ]; then
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set runner temp paths
-        shell: bash
-        run: |
-          # Export runner temp paths to GITHUB_ENV so they are available as env vars in subsequent steps
-          echo "SOCKET_DEBUG_LOG=${RUNNER_TEMP}/socket_debug.log" >> "$GITHUB_ENV"
-          echo "DNS_TRACE=${RUNNER_TEMP}/dns_trace.txt" >> "$GITHUB_ENV"
-          echo "PING_CHECK=${RUNNER_TEMP}/ping_check.txt" >> "$GITHUB_ENV"
-          echo "HEALTH_BODY=${RUNNER_TEMP}/health_body.txt" >> "$GITHUB_ENV"
-          echo "HEALTH_ERR=${RUNNER_TEMP}/health_err.txt" >> "$GITHUB_ENV"
-          echo "HEALTH_TRACE=${RUNNER_TEMP}/health_trace.txt" >> "$GITHUB_ENV"
-          echo "PING_TRACE=${RUNNER_TEMP}/ping_trace.txt" >> "$GITHUB_ENV"
+            echo "ERROR: WEBHOOK_BASE secret is not configured." >&2
+            exit 1
           fi
           if [ -z "${WEBHOOK_API_KEY}" ]; then
             echo "ERROR: WEBHOOK_API_KEY secret is not configured." >&2
             exit 1
           fi
+          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -127,7 +122,6 @@ jobs:
       - name: Run staging smoke tests
         shell: bash
         env:
-          # Jest settings, merged on top of job-level env
           WEBHOOK_HEALTH_TIMEOUT: '15000'
           WEBHOOK_PING_TIMEOUT: '20000'
           WEBHOOK_GENERATE_TIMEOUT: '120000'
