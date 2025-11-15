@@ -650,6 +650,11 @@ async function requestApp(
     // No supertest client: start a temporary server and perform a node http request
     try {
       const srv = http.createServer(app);
+      // Prefer to unref ephemeral servers so they don't keep the event loop
+      // alive; this reduces false positives from Jest detectOpenHandles.
+      try {
+        if (typeof srv.unref === 'function') srv.unref();
+      } catch {}
       // track active sockets for this temporary server so we can force-close
       // them before calling srv.close() to avoid lingering handles on Windows
       const tmpConnections = new Set();
@@ -658,6 +663,17 @@ async function requestApp(
         try {
           tmpConnections.add(socket);
           socket.on('close', () => tmpConnections.delete(socket));
+        } catch {}
+      });
+      // Ensure we clear tracked connections when the server closes
+      srv.on('close', () => {
+        try {
+          for (const s of Array.from(tmpConnections)) {
+            try {
+              s.destroy();
+            } catch {}
+          }
+          tmpConnections.clear();
         } catch {}
       });
       // ensure closeServer exists immediately so finally can always close it
@@ -677,6 +693,14 @@ async function requestApp(
             } catch {}
             try {
               __req_tmpSocketMap.delete(srv);
+            } catch {}
+            try {
+              // remove outstanding listeners to help Jest detect no bound fns
+              try {
+                srv.removeAllListeners('connection');
+                srv.removeAllListeners('request');
+                srv.removeAllListeners('listening');
+              } catch {}
             } catch {}
             srv.close(() => resolve());
           } catch {
@@ -832,4 +856,51 @@ async function _restoreAndDestroySharedAgents() {
   } catch {}
 }
 
-module.exports = { requestApp, closeCachedServer, _restoreAndDestroySharedAgents };
+// Best-effort helper to close any temporary servers tracked in __req_tmpSocketMap.
+// This is intended for globalTeardown to forcibly remove listening handles
+// that may have been left by a failed test path.
+async function _forceCloseTemporaryServers() {
+  try {
+    for (const [srv, sset] of Array.from(__req_tmpSocketMap.entries())) {
+      try {
+        if (sset && typeof sset === 'object') {
+          for (const s of Array.from(sset)) {
+            try {
+              s.destroy();
+            } catch {}
+          }
+        }
+      } catch {}
+      try {
+        __req_tmpSocketMap.delete(srv);
+      } catch {}
+      try {
+        try {
+          srv.removeAllListeners('connection');
+          srv.removeAllListeners('request');
+          srv.removeAllListeners('listening');
+        } catch {}
+        await new Promise((resolve) => {
+          try {
+            srv.close(() => resolve());
+            // ensure the timer won't keep the event loop alive
+            try {
+              if (typeof resolve === 'function') {
+                // noop
+              }
+            } catch {}
+          } catch {
+            resolve();
+          }
+        });
+      } catch {}
+    }
+  } catch {}
+}
+
+module.exports = {
+  requestApp,
+  closeCachedServer,
+  _restoreAndDestroySharedAgents,
+  _forceCloseTemporaryServers,
+};

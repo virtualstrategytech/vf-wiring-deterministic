@@ -132,6 +132,16 @@ module.exports = async () => {
           appendLog(`globalTeardown: _restoreAndDestroySharedAgents error: ${e && e.message}`);
         }
       }
+      // Force-close any temporary servers tracked by the request-helper
+      if (rh && typeof rh._forceCloseTemporaryServers === 'function') {
+        appendLog('globalTeardown: force-closing temporary servers from request-helper');
+        try {
+          await rh._forceCloseTemporaryServers();
+          appendLog('globalTeardown: forced temporary servers closed');
+        } catch (e) {
+          appendLog(`globalTeardown: _forceCloseTemporaryServers error: ${e && e.message}`);
+        }
+      }
     } catch {}
   } catch (e) {
     appendLog(`globalTeardown: closeCachedServer unexpected error: ${e && e.message}`);
