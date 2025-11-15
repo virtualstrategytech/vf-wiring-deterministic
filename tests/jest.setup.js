@@ -69,7 +69,7 @@ function __traceLog(tag, stack) {
 // exceptions from bubbling up and failing tests.
 try {
   const util = require('util');
-  const _origConsoleWarn = console.warn;
+  const _origConsoleWarn = typeof console.warn === 'function' ? console.warn : undefined;
   console.warn = function safeConsoleWarn(...args) {
     try {
       // If stderr is closed/unwritable, avoid writing diagnostics.
@@ -99,7 +99,15 @@ try {
           }
         });
         try {
-          return _origConsoleWarn.apply(console, safe);
+          if (typeof _origConsoleWarn === 'function') {
+            return Function.prototype.apply.call(_origConsoleWarn, console, safe);
+          }
+          // fall back to console.log if original warn is unavailable
+          try {
+            return console.log.apply(console, safe);
+          } catch {
+            return undefined;
+          }
         } catch {
           return undefined;
         }
@@ -108,7 +116,14 @@ try {
       // Higher verbosity: pass arguments through but still guard against
       // stderr being closed or write errors.
       try {
-        return _origConsoleWarn.apply(console, args);
+        if (typeof _origConsoleWarn === 'function') {
+          return Function.prototype.apply.call(_origConsoleWarn, console, args);
+        }
+        try {
+          return console.log.apply(console, args);
+        } catch {
+          return undefined;
+        }
       } catch {
         return undefined;
       }

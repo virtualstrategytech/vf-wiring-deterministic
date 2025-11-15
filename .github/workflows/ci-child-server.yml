@@ -25,7 +25,7 @@ jobs:
       CI: 'true'
       SKIP_SYNC_SECRET: 'true'
       SKIP_BODY_PARSER: '1'
-      SKIP_SMOKE: 'true'
+      SKIP_SMOKE: 'false'
       USE_CHILD_PROCESS_SERVER: '1'
       FORCE_PER_REQUEST_AGENT: '1'
       FORCE_DETERMINISTIC_IDS: '1'
@@ -45,7 +45,11 @@ jobs:
         run: npm ci
 
       - name: Run tests (child-process server)
+        env:
+          SKIP_SMOKE: 'false'
         run: |
+          # enforce SKIP_SMOKE=false for this step to avoid accidental overrides
+          echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
 
       - name: Upload test logs on failure
