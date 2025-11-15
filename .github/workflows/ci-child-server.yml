@@ -3,6 +3,11 @@ name: CI - child-process server tests
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      DEBUG_TESTS:
+        description: 'Enable debug traces (set to "1" to enable)'
+        required: false
+        default: '0'
   push:
     branches: [feat/wiring-agent]
 
@@ -65,8 +70,8 @@ jobs:
       - name: Run tests (child-process server) and capture debug logs
         env:
           USE_CHILD_PROCESS_SERVER: '1'
-          DEBUG_TESTS: '1'
-          NODE_DEBUG: 'net,tls'
+          DEBUG_TESTS: "${{ github.event.inputs.DEBUG_TESTS }}"
+          NODE_DEBUG: "${{ github.event.inputs.DEBUG_TESTS == '1' && 'net,tls' || '' }}"
           SKIP_BODY_PARSER: '1'
           FORCE_PER_REQUEST_AGENT: '1'
           FORCE_DETERMINISTIC_IDS: '1'
