@@ -8,6 +8,9 @@ const crypto = require('crypto');
 const secretFilePath = path.resolve(__dirname, 'webhook.secret');
 const pidFilePath = path.resolve(__dirname, 'webhook.pid');
 const logFilePath = path.resolve(__dirname, 'globalSetup.log');
+const portFilePath = path.resolve(__dirname, 'webhook.port');
+const childStdoutPath = path.resolve(__dirname, 'webhook.child.stdout.log');
+const childStderrPath = path.resolve(__dirname, 'webhook.child.stderr.log');
 // Utility: wait for a TCP port to be accepting connections.
 function waitForPort(port, timeout = 30000) {
   // increased default timeout
@@ -200,12 +203,35 @@ module.exports = async () => {
         logLine('globalSetup: failed to write pid file:', e && e.message);
       }
 
-      // pipe child's stdout/stderr to a repo-level server.log for CI artifact collection
+      // write port so tests (or teardown) can discover which port we're using
+      try {
+        fs.writeFileSync(portFilePath, String(port), 'utf8');
+        logLine('globalSetup: wrote port file to', portFilePath, 'port=', port);
+      } catch (e) {
+        logLine('globalSetup: failed to write port file:', e && e.message);
+      }
+
+      // pipe child's stdout/stderr to repo-level and per-run files for CI artifact collection
       try {
         const repoServerLog = path.resolve(repoRoot, 'server.log');
         const serverLogStream = fs.createWriteStream(repoServerLog, { flags: 'a' });
-        if (child.stdout) child.stdout.pipe(serverLogStream);
-        if (child.stderr) child.stderr.pipe(serverLogStream);
+        const stdoutStream = fs.createWriteStream(childStdoutPath, { flags: 'a' });
+        const stderrStream = fs.createWriteStream(childStderrPath, { flags: 'a' });
+        if (child.stdout) {
+          child.stdout.pipe(serverLogStream);
+          child.stdout.pipe(stdoutStream);
+        }
+        if (child.stderr) {
+          child.stderr.pipe(serverLogStream);
+          child.stderr.pipe(stderrStream);
+        }
+        child.on('exit', (code, signal) => {
+          logLine('globalSetup: child exited code=', code, 'signal=', signal);
+          try {
+            stdoutStream.end();
+            stderrStream.end();
+          } catch {}
+        });
       } catch (e) {
         logLine('globalSetup: failed to pipe child stdout/stderr:', e && e.message);
       }
@@ -214,13 +240,20 @@ module.exports = async () => {
       try {
         if (typeof child.unref === 'function') child.unref();
       } catch {}
+
+      // Wait longer and with retries for CI flakiness
       try {
-        await waitForReady(port, 20000);
+        await waitForReady(port, 30000);
         logLine('globalSetup: spawned child server is ready on', port);
       } catch (e) {
-        // fallback to raw TCP port detection
-        await waitForPort(port, 20000);
-        logLine('globalSetup: spawned child server is accepting connections on', port);
+        // fallback to raw TCP port detection with extended timeout
+        try {
+          await waitForPort(port, 30000);
+          logLine('globalSetup: spawned child server is accepting connections on', port);
+        } catch (e2) {
+          logLine('globalSetup: spawned child did not open port within timeout');
+          throw e2;
+        }
       }
     } catch (err) {
       logLine('globalSetup: spawned child did not open port in time:', err && err.message);
