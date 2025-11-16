@@ -192,6 +192,35 @@ module.exports = async () => {
     appendLog(`globalTeardown: agent destroy error: ${e && e.message}`);
   }
 
+  // Best-effort: if undici is used anywhere in tests or app code, close
+  // the global dispatcher to free sockets. This library is commonly used
+  // by modern HTTP clients and can keep native handles open if not closed.
+  try {
+    const undici = require('undici');
+    if (undici) {
+      try {
+        const gd =
+          typeof undici.getGlobalDispatcher === 'function' ? undici.getGlobalDispatcher() : null;
+        if (gd && typeof gd.close === 'function') {
+          try {
+            gd.close();
+            appendLog('globalTeardown: undici.getGlobalDispatcher().close() called');
+          } catch (e) {
+            appendLog(`globalTeardown: undici.close failed: ${e && e.message}`);
+          }
+        }
+        if (gd && typeof gd.destroy === 'function') {
+          try {
+            gd.destroy();
+            appendLog('globalTeardown: undici.getGlobalDispatcher().destroy() called');
+          } catch (e) {
+            appendLog(`globalTeardown: undici.destroy failed: ${e && e.message}`);
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+
   // Also attempt to destroy any agent used by 'superagent' / 'supertest' helpers
   try {
     const { Agent } = require('http');
