@@ -1,0 +1,138 @@
+name: CI Monitor - collect failed run info
+
+on:
+  workflow_run:
+    workflows: ["CI - child-process server tests"]
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+jobs:
+  notify-on-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Gather artifacts and notify
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
+
+            // List artifacts for the failed run
+            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id });
+            const artifacts = (artifactsResp && artifactsResp.data && artifactsResp.data.artifacts) || [];
+
+            let body = `Automated triage: workflow run [#${run.id}](${runUrl}) for **${run.name}** completed with **${run.conclusion}**.\n\n`;
+            if (artifacts.length === 0) {
+              body += 'No artifacts were found for this run.\n\n';
+            } else {
+              body += 'Artifacts detected for the failed run:\n\n';
+              for (const a of artifacts) {
+                const artifactUrl = `https://github.com/${owner}/${repo}/suites/${run.id}/artifacts`;
+                body += `- ${a.name} (size=${a.size_in_bytes} bytes) — [view artifacts](${artifactUrl})\n`;
+              }
+              body += '\n';
+            }
+
+            // Add a short diagnostic summary (counts)
+            body += `\n**Summary**:\n- total artifacts: ${artifacts.length}\n- workflow: ${run.name}\n- conclusion: ${run.conclusion}\n\n`;
+
+            // If this run is associated with pull requests, post a comment on the PRs
+            const prs = run.pull_requests || [];
+            if (prs.length > 0) {
+              for (const pr of prs) {
+                try {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+                } catch (err) {
+                  core && core.info && core.info(`Failed to comment on PR #${pr.number}: ${String(err)}`);
+                }
+              }
+              return;
+            }
+
+            // Otherwise, open an issue to track the flake
+            const title = `CI flake: child-process server tests failed (run ${run.id})`;
+            try {
+              await github.rest.issues.create({ owner, repo, title, body });
+            } catch (err) {
+              core && core.info && core.info(`Failed to create issue: ${String(err)}`);
+            }
+name: CI Monitor - collect failed run info
+
+on:
+  workflow_run:
+    workflows: ['CI - child-process server tests']
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+jobs:
+  notify-on-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Gather artifacts and notify
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
+
+            // List artifacts for the failed run
+            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id });
+            const artifacts = (artifactsResp && artifactsResp.data && artifactsResp.data.artifacts) || [];
+
+            let body = `Automated triage: workflow run [#${run.id}](${runUrl}) for **${run.name}** completed with **${run.conclusion}**.\n\n`;
+            if (artifacts.length === 0) {
+              body += 'No artifacts were found for this run.\n\n';
+            } else {
+              body += 'Artifacts detected for the failed run:\n\n';
+              for (const a of artifacts) {
+                const artifactUrl = `https://github.com/${owner}/${repo}/suites/${run.id}/artifacts`;
+                body += `- ${a.name} (size=${a.size_in_bytes} bytes) — [view artifacts](${artifactUrl})\n`;
+              }
+              body += '\n';
+            }
+
+            // Add a short diagnostic summary (counts)
+            body += `\n**Summary**:\n- total artifacts: ${artifacts.length}\n- workflow: ${run.name}\n- conclusion: ${run.conclusion}\n\n`;
+
+            // If this run is associated with pull requests, post a comment on the PRs
+            const prs = run.pull_requests || [];
+            if (prs.length > 0) {
+              for (const pr of prs) {
+                try {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+                } catch (err) {
+                  core && core.info && core.info(`Failed to comment on PR #${pr.number}: ${String(err)}`);
+                }
+              }
+              return;
+            }
+
+            // Otherwise, open an issue to track the flake
+            const title = `CI flake: child-process server tests failed (run ${run.id})`;
+            try {
+              await github.rest.issues.create({ owner, repo, title, body });
+            } catch (err) {
+              core && core.info && core.info(`Failed to create issue: ${String(err)}`);
+            }
