@@ -250,3 +250,11 @@ tests/artifacts/
 tests/trace_summary*.json
 tests/*.trace_summary*.json
 tests/parse-trace.js
+
+# Local/test artifacts created by runs on developer machines or CI diagnostics
+# Do not commit these; they are transient logs/artifacts
+recent-runs.json
+jest-output-local.txt
+jest-output-local.*
+tests/jest-output-local.txt
+tests/jest-detect-local*
