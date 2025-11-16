@@ -100,7 +100,9 @@ try {
         });
         try {
           if (typeof _origConsoleWarn === 'function') {
-            return Function.prototype.apply.call(_origConsoleWarn, console, safe);
+            try {
+              return _origConsoleWarn.apply(console, safe);
+            } catch {}
           }
           // fall back to console.log if original warn is unavailable
           try {
@@ -117,7 +119,9 @@ try {
       // stderr being closed or write errors.
       try {
         if (typeof _origConsoleWarn === 'function') {
-          return Function.prototype.apply.call(_origConsoleWarn, console, args);
+          try {
+            return _origConsoleWarn.apply(console, args);
+          } catch {}
         }
         try {
           return console.log.apply(console, args);
