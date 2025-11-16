@@ -1,0 +1,23 @@
+[
+  {
+    "idx": 0,
+    "type": "Socket",
+    "socket": {
+      "destroyed": false
+    }
+  },
+  {
+    "idx": 1,
+    "type": "Socket",
+    "socket": {
+      "destroyed": false
+    }
+  },
+  {
+    "idx": 2,
+    "type": "Socket",
+    "socket": {
+      "destroyed": false
+    }
+  }
+]

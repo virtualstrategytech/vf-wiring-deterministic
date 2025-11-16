@@ -3,6 +3,11 @@ name: CI - child-process server tests
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      DEBUG_TESTS:
+        description: 'Enable debug traces (set to "1" to enable)'
+        required: false
+        default: '0'
   push:
     branches: [feat/wiring-agent]
 
@@ -14,6 +19,19 @@ jobs:
   child-server-tests:
     name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
+
+    # Job-level env so Actions + VS Code know these contexts exist
+    env:
+      CI: 'true'
+      SKIP_SYNC_SECRET: 'true'
+      SKIP_BODY_PARSER: '1'
+      SKIP_SMOKE: 'false'
+      USE_CHILD_PROCESS_SERVER: '1'
+      FORCE_PER_REQUEST_AGENT: '1'
+      FORCE_DETERMINISTIC_IDS: '1'
+      TEST_PATCH_RAW_BODY: '1'
+      JEST_OUTPUT_LOG: tests/jest-output.txt
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,15 +46,10 @@ jobs:
 
       - name: Run tests (child-process server)
         env:
-          CI: 'true'
-          SKIP_SYNC_SECRET: 'true'
-          SKIP_BODY_PARSER: '1'
-          SKIP_SMOKE: 'true'
-          USE_CHILD_PROCESS_SERVER: '1'
-          FORCE_PER_REQUEST_AGENT: '1'
-          FORCE_DETERMINISTIC_IDS: '1'
-          TEST_PATCH_RAW_BODY: '1'
+          SKIP_SMOKE: 'false'
         run: |
+          # enforce SKIP_SMOKE=false for this step to avoid accidental overrides
+          echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
 
       - name: Upload test logs on failure
@@ -44,12 +57,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-child
-          path: tests/jest-output.txt
+          path: ${{ env.JEST_OUTPUT_LOG }}
 
   test-child-server:
-    name: Run tests with child-process server
+    name: Run tests with child-process server (manual debug)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+
+    # Manual / debug run env: make everything explicit at job level
+    env:
+      USE_CHILD_PROCESS_SERVER: '1'
+      SKIP_BODY_PARSER: '1'
+      FORCE_PER_REQUEST_AGENT: '1'
+      FORCE_DETERMINISTIC_IDS: '1'
+      TEST_PATCH_RAW_BODY: '1'
+      DEBUG_TESTS: ${{ github.event.inputs.DEBUG_TESTS }}
+      NODE_DEBUG: ${{ github.event.inputs.DEBUG_TESTS == '1' && 'net,tls' || '' }}
+      TEST_RESULTS_LOG: /tmp/test-results.log
+      SOCKET_DEBUG_LOG: /tmp/socket_debug.log
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,24 +89,19 @@ jobs:
         run: npm ci
 
       - name: Run tests (child-process server) and capture debug logs
-        env:
-          USE_CHILD_PROCESS_SERVER: '1'
-          DEBUG_TESTS: '1'
-          NODE_DEBUG: 'net,tls'
-          SKIP_BODY_PARSER: '1'
-          FORCE_PER_REQUEST_AGENT: '1'
-          FORCE_DETERMINISTIC_IDS: '1'
-          TEST_PATCH_RAW_BODY: '1'
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
+          echo "DEBUG_TESTS=${DEBUG_TESTS:-0} NODE_DEBUG=${NODE_DEBUG:-<none>}"
           # capture both stdout+stderr (node debug traces go to stderr)
-          npm test -- --runInBand 2>&1 | tee /tmp/test-results.log
+          npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
 
       - name: Collect additional socket debug (proc/net/tcp)
         if: always()
         run: |
-          echo "--- /proc/net/tcp ---" > /tmp/socket_debug.log || true
-          if [ -f /proc/net/tcp ]; then cat /proc/net/tcp >> /tmp/socket_debug.log || true; fi
+          echo "--- /proc/net/tcp ---" > "${SOCKET_DEBUG_LOG}" || true
+          if [ -f /proc/net/tcp ]; then
+            cat /proc/net/tcp >> "${SOCKET_DEBUG_LOG}" || true
+          fi
 
       - name: Upload debug artifacts
         if: always()
@@ -88,5 +109,5 @@ jobs:
         with:
           name: socket-debug-artifacts
           path: |
-            /tmp/test-results.log
-            /tmp/socket_debug.log
+            ${{ env.TEST_RESULTS_LOG }}
+            ${{ env.SOCKET_DEBUG_LOG }}

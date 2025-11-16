@@ -9,6 +9,12 @@ jobs:
     strategy:
       matrix:
         node-version: [18.x]
+
+    # Define env at job level so Actions + VS Code know these exist
+    env:
+      PORT: 3000
+      UNHANDLED_REJECTIONS_LOG: $RUNNER_TEMP/vf_unhandled_rejections.log
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,18 +30,13 @@ jobs:
 
       - name: Ensure webhook server is running
         # Idempotent: if a server is already listening on 127.0.0.1:3000, do nothing.
-        # Otherwise start the webhook and let it bind. This avoids races where
-        # the runner and workflow both try to start the server.
+        # Otherwise start the webhook and let it bind.
         run: |
           set -euo pipefail
-          PORT=3000
-          # Ensure an explicit unhandled-rejections log path so CI can collect
-          # any top-level unhandled/uncaught traces emitted by the server.
-          UNHANDLED_REJECTIONS_LOG="${RUNNER_TEMP:-/tmp}/vf_unhandled_rejections.log"
-          export UNHANDLED_REJECTIONS_LOG
-          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}" >> $GITHUB_ENV || true
 
+          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}"
           echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+
           if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
             echo "Webhook already listening on ${PORT}, skipping start"
           else
@@ -50,6 +51,7 @@ jobs:
               sleep 1
             done
           fi
+        shell: bash
 
       - name: Run lint
         run: npm run lint
@@ -88,6 +90,12 @@ jobs:
       matrix:
         node-version: [18.x]
 
+    # Job-level env: VS Code sees these, and Node gets them automatically
+    env:
+      PORT: 3000
+      UNHANDLED_REJECTIONS_LOG: $RUNNER_TEMP/vf_unhandled_rejections.log
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -101,28 +109,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Inject the secret into the runner environment only for pushes or same-repo PRs.
-      # Avoids evaluating secrets for fork PRs while still making the secret available
-      # to the subsequent Run tests step when allowed.
-      - name: Inject WEBHOOK_API_KEY for same-repo runs
-        if: ${{ github.event_name != 'pull_request' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
-        run: echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> $GITHUB_ENV
-        shell: bash
+      # No need for a separate "inject" step; env is already set at the job level
 
       - name: Ensure webhook server is running (idempotent)
-        # Make the test job robust to timing by waiting longer and only starting
-        # the server when needed. This step keeps behavior stable for both
-        # same-repo PRs and fork PRs where secrets may not be available.
         run: |
           set -euo pipefail
-          PORT=${PORT:-3000}
-          # Ensure an explicit unhandled-rejections log path so CI can collect
-          # any top-level unhandled/uncaught traces emitted by the server.
-          UNHANDLED_REJECTIONS_LOG="${RUNNER_TEMP:-/tmp}/vf_unhandled_rejections.log"
-          export UNHANDLED_REJECTIONS_LOG
-          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}" >> $GITHUB_ENV || true
 
+          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}"
           echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
+
           if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
             echo "Webhook already listening on ${PORT}, skipping start"
           else
@@ -142,7 +137,7 @@ jobs:
 
       - name: Run tests
         env:
-          CI: 'true'
+          CI: 'true' # merges with job env (WEBHOOK_API_KEY, UNHANDLED_REJECTIONS_LOG, PORT)
         run: npm test --silent
 
       - name: Upload server.log on failure

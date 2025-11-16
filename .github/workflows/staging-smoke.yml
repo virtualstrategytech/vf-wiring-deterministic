@@ -12,18 +12,36 @@ permissions:
 jobs:
   run-smoke:
     runs-on: ubuntu-latest
+
+    # Make secrets and paths visible to all steps in a way the Actions
+    # language server understands.
+    env:
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
+      DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
+      PING_CHECK: $RUNNER_TEMP/ping_check.txt
+      HEALTH_BODY: $RUNNER_TEMP/health_body.txt
+      HEALTH_ERR: $RUNNER_TEMP/health_err.txt
+      HEALTH_TRACE: $RUNNER_TEMP/health_trace.txt
+      PING_TRACE: $RUNNER_TEMP/ping_trace.txt
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Write runtime secrets to environment
+      - name: Verify required secrets are present
         shell: bash
-        env:
-          WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
-          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE=$WEBHOOK_BASE" >> $GITHUB_ENV; fi
-          if [ -n "$WEBHOOK_API_KEY" ]; then echo "WEBHOOK_API_KEY=$WEBHOOK_API_KEY" >> $GITHUB_ENV; fi
+          if [ -z "${WEBHOOK_BASE}" ]; then
+            echo "ERROR: WEBHOOK_BASE secret is not configured." >&2
+            exit 1
+          fi
+          if [ -z "${WEBHOOK_API_KEY}" ]; then
+            echo "ERROR: WEBHOOK_API_KEY secret is not configured." >&2
+            exit 1
+          fi
+          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -34,56 +52,80 @@ jobs:
         run: npm ci
 
       - name: Collect quick curl traces
+        shell: bash
         run: |
-          # normalize base to avoid accidental double-slash when joining paths
+          # Normalize base to avoid accidental double-slash when joining paths
           BASE=${WEBHOOK_BASE%/}
-          # Persist normalized value to subsequent steps so Node/Jest sees the trimmed WEBHOOK_BASE
-          echo "WEBHOOK_BASE=${BASE}" >> $GITHUB_ENV
-          echo "Resolving target host for $BASE"
-          HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
-          echo "Host: $HOST"
-          nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
-          ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
+
+          echo "Using WEBHOOK_BASE=${BASE}"
+
+          echo "Resolving target host for ${BASE}"
+          HOST=$(echo "${BASE}" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          echo "Host: ${HOST}"
+
+          nslookup "${HOST}" > "${DNS_TRACE}" 2>&1 || true
+          ping -c 1 "${HOST}" > "${PING_CHECK}" 2>&1 || true
+
           # Retry /health a few times before running the smoke tests
-          echo "Checking $BASE/health (retries)"
+          echo "Checking ${BASE}/health (retries)"
           attempts=0
           max=12
           http_status=0
-          until [ $attempts -ge $max ]
-          do
+
+          until [ "${attempts}" -ge "${max}" ]; do
             attempts=$((attempts+1))
-            echo "Attempt $attempts/$max..."
-            http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$BASE/health" 2>/tmp/health_err || true)
-            echo "HTTP status: $http_status"
-            if [ "$http_status" = "200" ]; then
+            echo "Attempt ${attempts}/${max}..."
+            http_status=$(
+              curl --silent --show-error --fail --max-time 30 \
+                -w '%{http_code}' \
+                -o "${HEALTH_BODY}" \
+                "${BASE}/health" 2>"${HEALTH_ERR}" || true
+            )
+            echo "HTTP status: ${http_status}"
+            if [ "${http_status}" = "200" ]; then
               echo "Health OK"
-              cat /tmp/health_body.txt || true
+              cat "${HEALTH_BODY}" || true
               break
             fi
             echo "Body/Error:"
-            cat /tmp/health_body.txt || true
-            cat /tmp/health_err || true
+            cat "${HEALTH_BODY}" || true
+            cat "${HEALTH_ERR}" || true
             sleep 5
           done
-          if [ "$http_status" != "200" ]; then
-            echo "Health check failed after $max attempts (status $http_status)" >&2
+
+          if [ "${http_status}" != "200" ]; then
+            echo "Health check failed after ${max} attempts (status ${http_status})" >&2
           fi
-          echo "Collecting quick curl traces for $BASE"
-          curl --silent --show-error --max-time 30 -v "$BASE/health" > /tmp/health_trace.txt 2>&1 || true
+
+          echo "Collecting quick curl traces for ${BASE}"
+          curl --silent --show-error --max-time 30 -v \
+            "${BASE}/health" > "${HEALTH_TRACE}" 2>&1 || true
+
           printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
-          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+
+          curl --silent --show-error --max-time 30 -v \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${WEBHOOK_API_KEY}" \
+            -d @/tmp/ping.json \
+            "${BASE}/webhook" > "${PING_TRACE}" 2>&1 || true
 
       - name: Initialize socket debug log
+        shell: bash
         run: |
           # create a small header for the socket debug log so artifact exists even if tests don't run
-          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
-          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
+          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > "${SOCKET_DEBUG_LOG}" || true
+          if [ -n "${WEBHOOK_BASE}" ]; then
+            echo "WEBHOOK_BASE_HOST=$(echo "${WEBHOOK_BASE}" | sed -E 's#^https?://([^/]+).*#\1#')" \
+              >> "${SOCKET_DEBUG_LOG}" || true
+          fi
 
       - name: Run staging smoke tests
+        shell: bash
+        env:
+          WEBHOOK_HEALTH_TIMEOUT: '15000'
+          WEBHOOK_PING_TIMEOUT: '20000'
+          WEBHOOK_GENERATE_TIMEOUT: '120000'
         run: |
-          export WEBHOOK_HEALTH_TIMEOUT=15000
-          export WEBHOOK_PING_TIMEOUT=20000
-          export WEBHOOK_GENERATE_TIMEOUT=120000
           npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
 
       - name: Upload smoke diagnostics (on failure)
@@ -92,6 +134,8 @@ jobs:
         with:
           name: staging-smoke-diagnostics
           path: |
-            /tmp/health_trace.txt
-            /tmp/ping_trace.txt
-            /tmp/socket_debug.log
+            ${{ env.HEALTH_TRACE }}
+            ${{ env.PING_TRACE }}
+            ${{ env.SOCKET_DEBUG_LOG }}
+            ${{ env.DNS_TRACE }}
+            ${{ env.PING_CHECK }}

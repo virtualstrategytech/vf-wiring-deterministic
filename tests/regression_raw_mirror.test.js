@@ -23,9 +23,13 @@ const base = process.env.WEBHOOK_BASE || `http://127.0.0.1:${process.env.PORT ||
 let useRequestAppForRemote = false;
 try {
   // Prefer in-process Express app when available
-   
+
   const app = require('../novain-platform/webhook/server');
-  requester = request(app);
+  // Prefer using our request helper which creates and tears down a
+  // temporary server for each request to avoid lingering supertest
+  // internal server/listen handles that can keep Jest from exiting.
+  requester = null;
+  useRequestAppForRemote = true;
 } catch (e) {
   // Fall back to using the shared request helper which creates and
   // tears down remote connections safely (sets Connection: close, destroys

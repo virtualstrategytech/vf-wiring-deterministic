@@ -69,7 +69,7 @@ function __traceLog(tag, stack) {
 // exceptions from bubbling up and failing tests.
 try {
   const util = require('util');
-  const _origConsoleWarn = console.warn;
+  const _origConsoleWarn = typeof console.warn === 'function' ? console.warn : undefined;
   console.warn = function safeConsoleWarn(...args) {
     try {
       // If stderr is closed/unwritable, avoid writing diagnostics.
@@ -99,7 +99,15 @@ try {
           }
         });
         try {
-          return _origConsoleWarn.apply(console, safe);
+          // Avoid calling the original console.warn implementation directly
+          // because on some CI runners writing to stderr can throw. Use
+          // console.log with a safe-serialized payload instead and swallow
+          // any errors to ensure diagnostics never fail tests.
+          try {
+            return console.log.apply(console, safe);
+          } catch {
+            return undefined;
+          }
         } catch {
           return undefined;
         }
@@ -108,7 +116,14 @@ try {
       // Higher verbosity: pass arguments through but still guard against
       // stderr being closed or write errors.
       try {
-        return _origConsoleWarn.apply(console, args);
+        // See above: avoid invoking the original console.warn. Use
+        // console.log and guard against write errors so diagnostics are
+        // non-fatal.
+        try {
+          return console.log.apply(console, args);
+        } catch {
+          return undefined;
+        }
       } catch {
         return undefined;
       }
@@ -264,9 +279,21 @@ try {
         const orig = Agent.prototype.createConnection;
         if (typeof orig === 'function') {
           Agent.prototype.createConnection = function createConnectionProtoWithStack(...args) {
-            const sock = orig.apply(this, args);
+            let sock;
             try {
-              sock._createdStack = new Error('agent-proto-socket-created').stack;
+              try {
+                sock = orig.apply(this, args);
+              } catch (e1) {
+                try {
+                  sock = orig.apply(null, args);
+                } catch (e2) {
+                  sock = undefined;
+                }
+              }
+            } catch {}
+            try {
+              if (sock && typeof sock === 'object' && !sock._createdStack)
+                sock._createdStack = new Error('agent-proto-socket-created').stack;
               if (sock && typeof sock.unref === 'function') {
                 try {
                   sock.unref();
@@ -435,10 +462,27 @@ try {
   if (tls && typeof tls.connect === 'function') {
     const origTlsConnect = tls.connect;
     tls.connect = function tlsConnectWithStack(...args) {
-      const sock = origTlsConnect.apply(tls, args);
+      let sock;
+      try {
+        try {
+          sock = origTlsConnect.apply(this, args);
+        } catch (e1) {
+          try {
+            sock = origTlsConnect.apply(tls, args);
+          } catch (e2) {
+            try {
+              sock = origTlsConnect.apply(null, args);
+            } catch (e3) {
+              sock = undefined;
+            }
+          }
+        }
+      } catch {}
       try {
         if (sock && typeof sock === 'object') {
-          sock._createdStack = new Error('tls-connect-created').stack;
+          try {
+            if (!sock._createdStack) sock._createdStack = new Error('tls-connect-created').stack;
+          } catch {}
           if (typeof sock.unref === 'function') {
             try {
               sock.unref();

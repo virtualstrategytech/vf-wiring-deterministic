@@ -24,21 +24,39 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    # Job-level env ensures GitHub Actions + VS Code language server
+    # know all contexts exist (no more "context access might be invalid").
     env:
-      WEBHOOK_API_KEY: ${{ secrets['WEBHOOK_API_KEY'] }}
-      WEBHOOK_BASE: ${{ secrets['WEBHOOK_BASE'] }}
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+
       # Stabilize socket and random handles during smoke tests
       FORCE_PER_REQUEST_AGENT: '1'
       FORCE_DETERMINISTIC_IDS: '1'
       # Patch AsyncResource in tests to avoid raw-body creating persistent native handles
       TEST_PATCH_RAW_BODY: '1'
+
       # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
       # dispatch can enable verbose diagnostics without changing other workflows.
       DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
       DEBUG_TESTS_LEVEL: ${{ github.event.inputs.debug_tests_level || '' }}
+
+      # Centralize temp file paths so they’re first-class env contexts
+      SOCKET_DEBUG_LOG: /tmp/socket_debug.log
+      DNS_TRACE: /tmp/dns_trace.txt
+      PING_CHECK: /tmp/ping_check.txt
+      HEALTH_TRACE: /tmp/health_trace.txt
+      PING_TRACE: /tmp/ping_trace.txt
+      HEALTH_BODY: /tmp/health_body.txt
+      HEALTH_ERR: /tmp/health_err
+      ASYNC_HANDLE_MAP: /tmp/async_handle_map.json
+      ACTIVE_HANDLES: /tmp/active_handles.json
+
     outputs:
       webhook_key_fingerprint: ${{ steps.set-fingerprint.outputs.fingerprint }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,166 +67,182 @@ jobs:
           node-version: 18
 
       - name: Validate workflow inputs and secrets
+        shell: bash
         run: |
           echo "Validating inputs..."
-          if [ -z "$WEBHOOK_BASE" ]; then
+          if [ -z "${WEBHOOK_BASE}" ]; then
             echo "ERROR: WEBHOOK_BASE secret is empty." >&2
             exit 1
           fi
-          if [ -z "$WEBHOOK_API_KEY" ]; then
+          if [ -z "${WEBHOOK_API_KEY}" ]; then
             echo "ERROR: WEBHOOK_API_KEY secret is empty." >&2
             exit 1
           fi
-          echo "WEBHOOK_BASE is set to: $WEBHOOK_BASE"
+          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
 
-      - name: Normalize WEBHOOK_BASE
+      - name: Normalize WEBHOOK_BASE (log only)
+        shell: bash
         run: |
           # Remove any trailing slash(es) from WEBHOOK_BASE so joining paths
           # like "$WEBHOOK_BASE/health" won't produce double-slashes ("//health").
-          # Persist normalized value to subsequent steps using $GITHUB_ENV.
           NORMALIZED=${WEBHOOK_BASE%/}
-          echo "WEBHOOK_BASE=${NORMALIZED}" >> $GITHUB_ENV
           echo "Normalized WEBHOOK_BASE=${NORMALIZED}"
+          # We still use ${WEBHOOK_BASE%/} in subsequent steps; no need to
+          # rewrite the env via $GITHUB_ENV, which keeps things simpler.
 
       - name: Quick readiness check (poll /ready then /health)
         id: health
+        shell: bash
         run: |
-          # Normalize base here to avoid accidental double-slashes when joining paths
           BASE=${WEBHOOK_BASE%/}
-          echo "Checking service readiness at $BASE/ready (fallback to /health)"
+          echo "Checking service readiness at ${BASE}/ready (fallback to /health)"
           attempts=0
           max=18
           http_status=0
+
           # First try /ready (fast false/200 semantics); if that never becomes 200, fall back to /health
-          until [ $attempts -ge $max ]
-          do
+          until [ "${attempts}" -ge "${max}" ]; do
             attempts=$((attempts+1))
-            echo "Attempt $attempts/$max to /ready..."
-            http_status=$(curl --silent --show-error --max-time 8 -w '%{http_code}' -o /tmp/ready_body.txt "$BASE/ready" 2>/tmp/ready_err || true)
-            echo "ready HTTP status: $http_status"
-            if [ "$http_status" = "200" ]; then
+            echo "Attempt ${attempts}/${max} to /ready..."
+            http_status=$(
+              curl --silent --show-error --max-time 8 \
+                -w '%{http_code}' \
+                -o "${HEALTH_BODY}" \
+                "${BASE}/ready" 2>"${HEALTH_ERR}" || true
+            )
+            echo "ready HTTP status: ${http_status}"
+            if [ "${http_status}" = "200" ]; then
               echo "/ready OK"
-              cat /tmp/ready_body.txt || true
+              cat "${HEALTH_BODY}" || true
               break
             fi
             # small delay and try again; allow more time before falling back
             sleep 2
           done
-          if [ "$http_status" != "200" ]; then
+
+          if [ "${http_status}" != "200" ]; then
             echo "/ready did not return 200 within retries, falling back to /health" >&2
             attempts=0
             max=12
             http_status=0
-            until [ $attempts -ge $max ]
-            do
+            until [ "${attempts}" -ge "${max}" ]; do
               attempts=$((attempts+1))
-              echo "Attempt $attempts/$max to /health..."
-              http_status=$(curl --silent --show-error --fail --max-time 30 -w '%{http_code}' -o /tmp/health_body.txt "$BASE/health" 2>/tmp/health_err || true)
-              echo "health HTTP status: $http_status"
-              if [ "$http_status" = "200" ]; then
+              echo "Attempt ${attempts}/${max} to /health..."
+              http_status=$(
+                curl --silent --show-error --fail --max-time 30 \
+                  -w '%{http_code}' \
+                  -o "${HEALTH_BODY}" \
+                  "${BASE}/health" 2>"${HEALTH_ERR}" || true
+              )
+              echo "health HTTP status: ${http_status}"
+              if [ "${http_status}" = "200" ]; then
                 echo "Health OK"
-                cat /tmp/health_body.txt || true
+                cat "${HEALTH_BODY}" || true
                 break
               fi
               echo "Body/Error (health):"
-              cat /tmp/health_body.txt || true
-              cat /tmp/health_err || true
+              cat "${HEALTH_BODY}" || true
+              cat "${HEALTH_ERR}" || true
               sleep 5
             done
           fi
-          if [ "$http_status" != "200" ]; then
-            echo "Readiness/Health check failed after retries (status $http_status)" >&2
+
+          if [ "${http_status}" != "200" ]; then
+            echo "Readiness/Health check failed after retries (status ${http_status})" >&2
             exit 1
           fi
 
       - name: Install dependencies (root + webhook)
+        shell: bash
         run: |
           echo "Installing repository root dependencies (for Jest and CI tools)"
           # Run quick lockfile diagnostic to catch mismatches early
           node scripts/check-locks.js || true
           npm ci
+
           echo "Installing webhook subpackage dependencies (novain-platform/webhook)"
           cd novain-platform/webhook && npm ci
 
       - name: Compute fingerprint and export to outputs
         id: set-fingerprint
+        shell: bash
         run: |
           node -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt
-          echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> $GITHUB_OUTPUT
-        shell: bash
+          echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Run deployed smoke tests
         env:
           SKIP_SYNC_SECRET: 'true'
+        shell: bash
         run: |
           # Initialize persistent socket debug log so artifact is created even if tests time out early
-          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
-          if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
+          printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > "${SOCKET_DEBUG_LOG}" || true
+          if [ -n "${WEBHOOK_BASE}" ]; then
+            BASE=${WEBHOOK_BASE%/}
+            HOST=$(echo "${BASE}" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+            echo "WEBHOOK_BASE_HOST=${HOST}" >> "${SOCKET_DEBUG_LOG}" || true
+          fi
 
-          # use a normalized base here as well
           BASE=${WEBHOOK_BASE%/}
-          echo "Running smoke tests against $BASE"
-          # Run a short, verbose curl trace to capture immediate network issues before Jest
-          # Save traces to files so we can upload them on failure for debugging
-          echo "Resolving target host for $BASE"
-          HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
-          echo "Host: $HOST"
-          nslookup "$HOST" > /tmp/dns_trace.txt 2>&1 || true
-          ping -c 1 "$HOST" > /tmp/ping_check.txt 2>&1 || true
+          echo "Running smoke tests against ${BASE}"
+
+          echo "Resolving target host for ${BASE}"
+          HOST=$(echo "${BASE}" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
+          echo "Host: ${HOST}"
+          nslookup "${HOST}" > "${DNS_TRACE}" 2>&1 || true
+          ping -c 1 "${HOST}" > "${PING_CHECK}" 2>&1 || true
+
           echo "Collecting quick curl traces..."
-          curl --silent --show-error --max-time 30 -v "$BASE/health" > /tmp/health_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v "${BASE}/health" > "${HEALTH_TRACE}" 2>&1 || true
           printf '%s' '{"action":"ping","question":"ci-check","name":"CI","tenantId":"default"}' > /tmp/ping.json
-          curl --silent --show-error --max-time 30 -v -H "Content-Type: application/json" -H "x-api-key: $WEBHOOK_API_KEY" -d @/tmp/ping.json "$BASE/webhook" > /tmp/ping_trace.txt 2>&1 || true
+          curl --silent --show-error --max-time 30 -v \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${WEBHOOK_API_KEY}" \
+            -d @/tmp/ping.json \
+            "${BASE}/webhook" > "${PING_TRACE}" 2>&1 || true
 
           # Export per-request timeouts for the smoke test runner (millis)
           export WEBHOOK_HEALTH_TIMEOUT=15000
           export WEBHOOK_PING_TIMEOUT=20000
           export WEBHOOK_GENERATE_TIMEOUT=120000
-          # If DEBUG_TESTS is enabled, preload our instrumentation as early as possible
-          # by forcing Node to require the instrumentation file at process startup.
-          # This helps capture socket creation stacks that may be created before
-          # Jest's setupFiles run.
+
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
             echo "DEBUG_TESTS is enabled; preloading jest.netblock.js and jest.instrumentation.js via NODE_OPTIONS"
-            # Prepend to NODE_OPTIONS so existing options are preserved. Require the
-            # netblock file first so nock allowlist is established before other
-            # setup files run; then preload the instrumentation file to capture
-            # socket creation stacks as early as possible.
-            export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
+            export NODE_OPTIONS="--require ${GITHUB_WORKSPACE}/tests/jest.netblock.js --require ${GITHUB_WORKSPACE}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
             echo "NODE_OPTIONS=${NODE_OPTIONS}"
           else
             echo "DEBUG_TESTS not enabled; running without early instrumentation preload"
           fi
 
-          # Run jest in a guarded block so we can always dump async handles even on failure.
           set -o pipefail
           EXIT_CODE=0
           npx jest tests/webhook.smoke.test.js --runInBand --verbose --testTimeout=180000 || EXIT_CODE=$?
 
-          # Always try to collect async handle dumps in the same shell context so they reflect the test process state.
-          echo 'Collecting async handle dumps to /tmp (guarded)' >> /tmp/socket_debug.log || true
-          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
-          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
+          echo 'Collecting async handle dumps to /tmp (guarded)' >> "${SOCKET_DEBUG_LOG}" || true
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync(process.env.ASYNC_HANDLE_MAP||'/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote async handle map'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync(process.env.ACTIVE_HANDLES||'/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote active handles'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
 
-          # Also copy any repo-written debug dumps into /tmp for upload
           mkdir -p /tmp/smoke-debug || true
           cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
           cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
           ls -l /tmp/smoke-debug || true
 
-          # Exit with the original Jest exit code so CI reflects test status
-          exit $EXIT_CODE
+          exit "${EXIT_CODE}"
+
       - name: 'Final cleanup: attempt to close any remaining sockets in this job'
         if: always()
+        shell: bash
         run: |
           echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'
           node -e "try{ const handles=(process._getActiveHandles&&process._getActiveHandles())||[]; handles.forEach((h,i)=>{ try{ const n=h&&h.constructor&&h.constructor.name||'<unknown>'; if(n==='Socket'||n==='TLSSocket'){ try{ if(h && typeof h.end==='function') h.end(); }catch{} try{ if(h && typeof h.destroy==='function') h.destroy(); }catch{} try{ if(h && h._handle && typeof h._handle.close==='function') h._handle.close(); }catch{} } }catch(e){} }); console.error('cleanup attempted'); }catch(e){console.error('cleanup failed',e&&e.stack);}"
+
       - name: Dump debug handles (when DEBUG_TESTS enabled)
         if: ${{ env.DEBUG_TESTS == '1' || env.DEBUG_TESTS == 'true' }}
+        shell: bash
         run: |
           echo 'DEBUG_TESTS enabled — writing async handle map and active handles to /tmp for artifact upload'
-          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync('/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/async_handle_map.json'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
-          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync('/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote /tmp/active_handles.json'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const out=[]; const m=global.__async_handle_map||new Map(); for(const [id,info] of m.entries()){ out.push({id, type: String(info && info.type), stack: String(info && info.stack).split('\n').slice(0,8).join('\n')}); } fs.writeFileSync(process.env.ASYNC_HANDLE_MAP||'/tmp/async_handle_map.json', JSON.stringify(out, null, 2)); console.error('wrote async handle map'); }catch(e){console.error('async map dump failed', e && e.stack||e);}"
+          node -e "try{const fs=require('fs'); const handles=(process._getActiveHandles && process._getActiveHandles())||[]; const out=handles.map((h,i)=>{ try{ const name=(h && h.constructor && h.constructor.name) || '<unknown>'; const info={idx:i, type:name}; try{ if(h && typeof h._createdStack==='string') info._createdStack=h._createdStack.split('\n').slice(0,6).join('\n'); }catch{} try{ if(h && h.localAddress) info.localAddress=h.localAddress; if(h && h.localPort) info.localPort=h.localPort; if(h && h.remoteAddress) info.remoteAddress=h.remoteAddress; if(h && h.remotePort) info.remotePort=h.remotePort; }catch{} return info;}catch(e){return {idx:i,type:'error'}} }); fs.writeFileSync(process.env.ACTIVE_HANDLES||'/tmp/active_handles.json', JSON.stringify(out, null, 2)); console.error('wrote active handles'); }catch(e){console.error('active handles dump failed', e && e.stack||e);}"
 
       - name: Upload debug artifacts (always)
         if: always()
@@ -216,24 +250,19 @@ jobs:
         with:
           name: smoke-debug-handles
           path: |
-            # Primary: any debug dumps produced in /tmp by the job
-            /tmp/async_handle_map.json
-            /tmp/active_handles.json
-            # Any repo-written debug dumps copied into /tmp by the previous step
+            ${{ env.ASYNC_HANDLE_MAP }}
+            ${{ env.ACTIVE_HANDLES }}
             /tmp/smoke-debug/*
-            # Also upload any async handle maps written by the test process
-            # into the repository workspace (jest.setup.js writes into ./artifacts/)
             artifacts/async_handles_*.json
             artifacts/active_handles_*.json
 
       - name: Collect repo debug dumps to /tmp (always)
         if: always()
+        shell: bash
         run: |
-          # Copy any artifacts written into the repository workspace artifacts/ into /tmp so the upload step (which also searches /tmp) will include them reliably
           mkdir -p /tmp/smoke-debug || true
           cp -v artifacts/async_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
           cp -v artifacts/active_handles_*.json /tmp/smoke-debug/ 2>/dev/null || true
-          # Helpful listing to make sure artifacts are present in job logs
           echo '--- /tmp listing ---'
           ls -la /tmp || true
           echo '--- /tmp/smoke-debug listing ---'
@@ -243,11 +272,12 @@ jobs:
 
       - name: Preview debug dumps (if present)
         if: always()
+        shell: bash
         run: |
-          echo 'Preview /tmp/async_handle_map.json (first 200 lines if present)'
-          if [ -f /tmp/async_handle_map.json ]; then head -n 200 /tmp/async_handle_map.json || true; else echo 'no /tmp/async_handle_map.json'; fi
-          echo 'Preview /tmp/active_handles.json (first 200 lines if present)'
-          if [ -f /tmp/active_handles.json ]; then head -n 200 /tmp/active_handles.json || true; else echo 'no /tmp/active_handles.json'; fi
+          echo 'Preview async handle map (first 200 lines if present)'
+          if [ -f "${ASYNC_HANDLE_MAP}" ]; then head -n 200 "${ASYNC_HANDLE_MAP}" || true; else echo "no ${ASYNC_HANDLE_MAP}"; fi
+          echo 'Preview active handles (first 200 lines if present)'
+          if [ -f "${ACTIVE_HANDLES}" ]; then head -n 200 "${ACTIVE_HANDLES}" || true; else echo "no ${ACTIVE_HANDLES}"; fi
 
       - name: Upload smoke diagnostics (always)
         if: always()
@@ -255,19 +285,17 @@ jobs:
         with:
           name: smoke-diagnostics
           path: |
-            /tmp/health_trace.txt
-            /tmp/ping_trace.txt
-            /tmp/health_body.txt
-            /tmp/health_err
-            /tmp/socket_debug.log
-            # Also upload any socket_debug written into the repository artifacts folder
+            ${{ env.HEALTH_TRACE }}
+            ${{ env.PING_TRACE }}
+            ${{ env.HEALTH_BODY }}
+            ${{ env.HEALTH_ERR }}
+            ${{ env.SOCKET_DEBUG_LOG }}
             artifacts/socket_debug.log
             scripts/check-locks.js
+
       - name: Confirm webhook envs (non-secret)
+        shell: bash
         run: |
           echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
           echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"
-
-# force reparse 2025-11-04T10:52:32.6734367-05:00
-# Touch: ensure this workflow file is present on feature branches for manual dispatch (updated by agent)

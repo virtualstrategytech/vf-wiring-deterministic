@@ -1,0 +1,62 @@
+[
+  {
+    "id": 2716,
+    "type": "DNSCHANNEL",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at ChannelWrap.emitInitNative (node:internal/async_hooks:200:43)\n    at ResolverBase.[dns:resolver:initializeHandle] (node:internal/dns/utils:81:20)\n    at new ResolverBase (node:internal/dns/utils:76:28)\n    at getDefaultResolver (node:internal/dns/utils:243:23)\n    at bindDefaultResolver (node:internal/dns/utils:253:27)\n    at node:dns:344:1\n    at BuiltinModule.compileForInternalLoader (node:internal/bootstrap/realm:390:7)\n    at requireBuiltin (node:internal/bootstrap/realm:421:14)\n    at lookupAndConnect (node:net:1318:32)"
+  },
+  {
+    "id": 3016,
+    "type": "TLSWRAP",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at TLSWrap.emitInitNative (node:internal/async_hooks:200:43)\n    at TLSSocket._wrapHandle (node:_tls_wrap:696:24)\n    at new TLSSocket (node:_tls_wrap:577:18)\n    at apply (node:_tls_wrap:1752:19)\n    at Object.tlsConnectWithStack [as connect] (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:438:35)\n    at Agent.call (node:https:158:22)\n    at Agent.createConnectionWithStack [as createConnection] (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:234:29)\n    at Agent.createSocket (node:_http_agent:341:26)\n    at Agent.addRequest (node:_http_agent:288:10)"
+  },
+  {
+    "id": 3057,
+    "type": "ZLIB",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at Zlib.emitInitNative (node:internal/async_hooks:200:43)\n    at Gunzip.Zlib (node:zlib:699:18)\n    at new Gunzip (node:zlib:776:3)\n    at Object.value [as createGunzip] (node:zlib:897:14)\n    at ClientRequest.<anonymous> (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/novain-platform/webhook/node_modules/node-fetch/lib/index.js:1682:27)\n    at ClientRequest.emit (node:events:529:35)\n    at HTTPParser.parserOnIncomingClient [as onIncoming] (node:_http_client:700:27)\n    at HTTPParser.parserOnHeadersComplete (node:_http_common:119:17)\n    at TLSSocket.socketOnData (node:_http_client:541:22)"
+  },
+  {
+    "id": 3079,
+    "type": "Timeout",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at initAsyncResource (node:internal/timers:164:5)\n    at new Timeout (node:internal/timers:198:5)\n    at setTimeout (node:timers:165:19)\n    at Status._debouncedEmit (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/@jest/reporters/build/Status.js:259:7)\n    at Status._tick (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/@jest/reporters/build/Status.js:268:10)\n    at Timeout._onTimeout (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/@jest/reporters/build/Status.js:134:45)\n    at listOnTimeout (node:internal/timers:569:17)"
+  },
+  {
+    "id": 3181,
+    "type": "Timeout",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at initAsyncResource (node:internal/timers:164:5)\n    at new Timeout (node:internal/timers:198:5)\n    at setTimeout (node:timers:165:19)\n    at Promise.then.completed (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:317:17)\n    at new Promise (<anonymous>)\n    at callAsyncCircusFn (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:316:10)\n    at _callCircusTest (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/run.js:218:40)"
+  },
+  {
+    "id": 3188,
+    "type": "TLSWRAP",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at TLSWrap.emitInitNative (node:internal/async_hooks:200:43)\n    at TLSSocket._wrapHandle (node:_tls_wrap:696:24)\n    at new TLSSocket (node:_tls_wrap:577:18)\n    at apply (node:_tls_wrap:1752:19)\n    at Object.tlsConnectWithStack [as connect] (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:438:35)\n    at Agent.call (node:https:158:22)\n    at Agent.createConnectionWithStack [as createConnection] (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:234:29)\n    at Agent.createSocket (node:_http_agent:341:26)\n    at Agent.addRequest (node:_http_agent:288:10)"
+  },
+  {
+    "id": 3207,
+    "type": "ZLIB",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at Zlib.emitInitNative (node:internal/async_hooks:200:43)\n    at Gunzip.Zlib (node:zlib:699:18)\n    at new Gunzip (node:zlib:776:3)\n    at Object.value [as createGunzip] (node:zlib:897:14)\n    at ClientRequest.<anonymous> (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/novain-platform/webhook/node_modules/node-fetch/lib/index.js:1682:27)\n    at ClientRequest.emit (node:events:529:35)\n    at HTTPParser.parserOnIncomingClient [as onIncoming] (node:_http_client:700:27)\n    at HTTPParser.parserOnHeadersComplete (node:_http_common:119:17)\n    at TLSSocket.socketOnData (node:_http_client:541:22)"
+  },
+  {
+    "id": 3235,
+    "type": "Immediate",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at initAsyncResource (node:internal/timers:164:5)\n    at new Immediate (node:internal/timers:620:5)\n    at setImmediate (node:timers:307:10)\n    at TLSSocket.onSocketCloseDestroySSL (node:_tls_wrap:750:3)\n    at TLSSocket.emit (node:events:529:35)\n    at node:net:350:12\n    at TCP.done (node:_tls_wrap:657:7)"
+  },
+  {
+    "id": 3237,
+    "type": "TickObject",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at process.nextTick (node:internal/process/task_queues:132:5)\n    at endReadable (node:internal/streams/readable:1389:13)\n    at Gunzip.Readable.read (node:internal/streams/readable:487:7)\n    at flow (node:internal/streams/readable:1064:34)\n    at emitReadable_ (node:internal/streams/readable:647:3)\n    at onEofChunk (node:internal/streams/readable:611:5)\n    at readableAddChunk (node:internal/streams/readable:319:5)"
+  },
+  {
+    "id": 3238,
+    "type": "TickObject",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at process.nextTick (node:internal/process/task_queues:132:5)\n    at onDestroy (node:internal/streams/destroy:105:15)\n    at Gunzip.ZlibBase._destroy (node:zlib:409:3)\n    at _destroy (node:internal/streams/destroy:109:10)\n    at Gunzip.destroy (node:internal/streams/destroy:71:5)\n    at endReadableNT (node:internal/streams/readable:1416:16)\n    at processTicksAndRejections (node:internal/process/task_queues:82:21)"
+  },
+  {
+    "id": 3289,
+    "type": "Timeout",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at initAsyncResource (node:internal/timers:164:5)\n    at new Timeout (node:internal/timers:198:5)\n    at setTimeout (node:timers:165:19)\n    at Promise.then.completed (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:317:17)\n    at new Promise (<anonymous>)\n    at callAsyncCircusFn (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:316:10)\n    at _callCircusHook (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/run.js:181:40)"
+  },
+  {
+    "id": 3292,
+    "type": "TickObject",
+    "stack": "Error: handle-init\n    at AsyncHook.init (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/jest.setup.js:503:21)\n    at emitInitNative (node:internal/async_hooks:200:43)\n    at emitInitScript (node:internal/async_hooks:503:3)\n    at process.nextTick (node:internal/process/task_queues:132:5)\n    at /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/webhook.smoke.test.js:165:40\n    at new Promise (<anonymous>)\n    at /home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/tests/webhook.smoke.test.js:165:13\n    at Promise.then.completed (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:391:28)\n    at new Promise (<anonymous>)\n    at callAsyncCircusFn (/home/runner/work/vf-wiring-deterministic/vf-wiring-deterministic/node_modules/jest-circus/build/utils.js:316:10)"
+  }
+]

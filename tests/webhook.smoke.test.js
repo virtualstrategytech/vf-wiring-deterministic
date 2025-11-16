@@ -125,6 +125,9 @@ async function withRetries(fn, retries = 8, delay = 500) {
 
 // Helper: write short debug lines to stderr and a file so CI captures them reliably
 function writeDebugLog(line) {
+  // Disabled by default to avoid littering repo with logs. Enable with
+  // `WRITE_DEBUG_LOG=true` in CI/locally when you explicitly want the file.
+  if (!(process.env.WRITE_DEBUG_LOG === '1' || process.env.WRITE_DEBUG_LOG === 'true')) return;
   try {
     console.error(line);
   } catch {}

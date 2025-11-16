@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "strict": false,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "types": []
   },
   "include": ["scripts/**/*", "tests/**/*", "novain-platform/**/*", "**/*.{ts,tsx,js,jsx}"],
   "exclude": ["node_modules", "dist", ".git"]

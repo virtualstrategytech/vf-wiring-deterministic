@@ -5,6 +5,8 @@ const { spawnSync } = require('child_process');
 module.exports = async () => {
   const pidFile = path.resolve(__dirname, 'webhook.pid');
   const logFile = path.resolve(__dirname, 'globalSetup.log');
+  const childStdoutPath = path.resolve(__dirname, 'webhook.child.stdout.log');
+  const childStderrPath = path.resolve(__dirname, 'webhook.child.stderr.log');
 
   function appendLog(line) {
     try {
@@ -132,6 +134,16 @@ module.exports = async () => {
           appendLog(`globalTeardown: _restoreAndDestroySharedAgents error: ${e && e.message}`);
         }
       }
+      // Force-close any temporary servers tracked by the request-helper
+      if (rh && typeof rh._forceCloseTemporaryServers === 'function') {
+        appendLog('globalTeardown: force-closing temporary servers from request-helper');
+        try {
+          await rh._forceCloseTemporaryServers();
+          appendLog('globalTeardown: forced temporary servers closed');
+        } catch (e) {
+          appendLog(`globalTeardown: _forceCloseTemporaryServers error: ${e && e.message}`);
+        }
+      }
     } catch {}
   } catch (e) {
     appendLog(`globalTeardown: closeCachedServer unexpected error: ${e && e.message}`);
@@ -158,6 +170,41 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: app cleanup unexpected error: ${e && e.message}`);
   }
+  // Best-effort: close any WriteStream/FileWriteStream handles that were
+  // created by `globalSetup` to capture child stdout/stderr. These file
+  // streams can remain open across the test run and show up as lingering
+  // handles in Jest's detectOpenHandles. Inspect active handles and
+  // end/destroy any matching streams.
+  try {
+    if (typeof process._getActiveHandles === 'function') {
+      const handles = process._getActiveHandles() || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (!name) continue;
+          if (String(name) === 'WriteStream' || String(name) === 'FileWriteStream') {
+            try {
+              const p = h && h.path ? String(h.path) : '';
+              if (p === childStdoutPath || p === childStderrPath) {
+                try {
+                  appendLog(`globalTeardown: closing lingering write stream for ${p}`);
+                } catch {}
+                try {
+                  if (typeof h.end === 'function') h.end();
+                } catch {}
+                try {
+                  if (typeof h.destroy === 'function') h.destroy();
+                } catch {}
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: closing child stdout/stderr streams failed: ${e && e.message}`);
+  }
   // Ensure Node http/https global agents are destroyed to avoid lingering sockets
   try {
     const http = require('http');
@@ -180,6 +227,53 @@ module.exports = async () => {
     }
   } catch (e) {
     appendLog(`globalTeardown: agent destroy error: ${e && e.message}`);
+  }
+
+  // Best-effort: if undici is used anywhere in tests or app code, close
+  // the global dispatcher to free sockets. This library is commonly used
+  // by modern HTTP clients and can keep native handles open if not closed.
+  try {
+    const undici = require('undici');
+    if (undici) {
+      try {
+        const gd =
+          typeof undici.getGlobalDispatcher === 'function' ? undici.getGlobalDispatcher() : null;
+        if (gd && typeof gd.close === 'function') {
+          try {
+            gd.close();
+            appendLog('globalTeardown: undici.getGlobalDispatcher().close() called');
+          } catch (e) {
+            appendLog(`globalTeardown: undici.close failed: ${e && e.message}`);
+          }
+        }
+        if (gd && typeof gd.destroy === 'function') {
+          try {
+            gd.destroy();
+            appendLog('globalTeardown: undici.getGlobalDispatcher().destroy() called');
+          } catch (e) {
+            appendLog(`globalTeardown: undici.destroy failed: ${e && e.message}`);
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // Also attempt to destroy any agent used by 'superagent' / 'supertest' helpers
+  try {
+    const { Agent } = require('http');
+    if (Agent && typeof Agent.prototype.destroy === 'function') {
+      try {
+        // Best effort: destroy globalAgent again to ensure closures
+        if (Agent.globalAgent && typeof Agent.globalAgent.destroy === 'function') {
+          Agent.globalAgent.destroy();
+          appendLog('globalTeardown: Agent.globalAgent.destroy() called');
+        }
+      } catch (e) {
+        appendLog(`globalTeardown: Agent.globalAgent.destroy failed: ${e && e.message}`);
+      }
+    }
+  } catch (e) {
+    // ignore
   }
 
   // Append final marker
