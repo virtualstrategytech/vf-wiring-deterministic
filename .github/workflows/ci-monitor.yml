@@ -2,8 +2,20 @@ name: CI Monitor - collect failed run info
 
 on:
   workflow_run:
-    workflows: ['CI - child-process server tests']
-    types: [completed]
+    workflows:
+      - CI - child-process server tests
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'The workflow run id to inspect (optional). If empty, the job will exit.'
+        required: false
+        default: ''
+      create_issue:
+        description: 'If "true", create an issue when artifacts are found (manual test only)'
+        required: false
+        default: 'false'
 
 permissions:
   issues: write
@@ -12,6 +24,7 @@ permissions:
 
 jobs:
   notify-on-failure:
+    # Only run when the workflow finished in failure
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
 
@@ -20,51 +33,105 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Gather artifacts and notify
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.MONITOR_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const run = context.payload.workflow_run;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
+            const { owner, repo } = context.repo;
+            const runUrl =
+              run.html_url ||
+              `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
 
             // List artifacts for the failed run
-            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id });
-            const artifacts = (artifactsResp && artifactsResp.data && artifactsResp.data.artifacts) || [];
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner,
+              repo,
+              run_id: run.id,
+            });
+            const artifacts = data.artifacts || [];
 
             let body = `Automated triage: workflow run [#${run.id}](${runUrl}) for **${run.name}** completed with **${run.conclusion}**.\n\n`;
+
             if (artifacts.length === 0) {
               body += 'No artifacts were found for this run.\n\n';
             } else {
               body += 'Artifacts detected for the failed run:\n\n';
               for (const a of artifacts) {
-                const artifactUrl = `https://github.com/${owner}/${repo}/suites/${run.id}/artifacts`;
+                const artifactUrl = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts`;
                 body += `- ${a.name} (size=${a.size_in_bytes} bytes) — [view artifacts](${artifactUrl})\n`;
               }
               body += '\n';
             }
 
-            // Add a short diagnostic summary (counts)
-            body += `\n**Summary**:\n- total artifacts: ${artifacts.length}\n- workflow: ${run.name}\n- conclusion: ${run.conclusion}\n\n`;
+            body += `**Summary**:\n- total artifacts: ${artifacts.length}\n- workflow: ${run.name}\n- conclusion: ${run.conclusion}\n\n`;
 
-            // If this run is associated with pull requests, post a comment on the PRs
             const prs = run.pull_requests || [];
+
+            // If this run is associated with PRs, comment on each PR
             if (prs.length > 0) {
               for (const pr of prs) {
                 try {
-                  await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    body,
+                  });
                 } catch (err) {
-                  core && core.info && core.info(`Failed to comment on PR #${pr.number}: ${String(err)}`);
+                  core.info?.(`Failed to comment on PR #${pr.number}: ${String(err)}`);
                 }
               }
               return;
             }
 
-            // Otherwise, open an issue to track the flake
+            // Otherwise, open an issue to track the failure
             const title = `CI flake: child-process server tests failed (run ${run.id})`;
             try {
-              await github.rest.issues.create({ owner, repo, title, body });
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+              });
             } catch (err) {
-              core && core.info && core.info(`Failed to create issue: ${String(err)}`);
+              core.info?.(`Failed to create issue: ${String(err)}`);
+            }
+
+  manual-test:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Manual: Gather artifacts and optionally create issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.MONITOR_TOKEN }}
+          script: |
+            const inputs = context.payload.inputs || {};
+            const runId = inputs.run_id && inputs.run_id.trim();
+            const createIssue = String(inputs.create_issue || 'false') === 'true';
+            const { owner, repo } = context.repo;
+            if (!runId) {
+              core.info?.('No run_id provided to manual-test; set `run_id` when dispatching this workflow.');
+              return;
+            }
+            let artifacts = [];
+            try {
+              const resp = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: Number(runId) });
+              artifacts = (resp && resp.data && resp.data.artifacts) || [];
+            } catch (err) {
+              core.info?.(`Failed to list artifacts for run ${runId}: ${String(err)}`);
+            }
+            core.info?.(`Manual monitor: found ${artifacts.length} artifacts for run ${runId}`);
+            for (const a of artifacts) core.info?.(JSON.stringify(a));
+            if (createIssue) {
+              try {
+                const title = `Manual monitor: artifacts for run ${runId}`;
+                const body = `Artifacts: ${artifacts.map((a) => a.name).join(', ')}`;
+                await github.rest.issues.create({ owner, repo, title, body });
+                core.info?.('Created issue for manual monitor.');
+              } catch (err) {
+                core.info?.(`Failed to create issue: ${String(err)}`);
+              }
             }
