@@ -99,12 +99,10 @@ try {
           }
         });
         try {
-          if (typeof _origConsoleWarn === 'function') {
-            try {
-              return _origConsoleWarn.apply(console, safe);
-            } catch {}
-          }
-          // fall back to console.log if original warn is unavailable
+          // Avoid calling the original console.warn implementation directly
+          // because on some CI runners writing to stderr can throw. Use
+          // console.log with a safe-serialized payload instead and swallow
+          // any errors to ensure diagnostics never fail tests.
           try {
             return console.log.apply(console, safe);
           } catch {
@@ -118,11 +116,9 @@ try {
       // Higher verbosity: pass arguments through but still guard against
       // stderr being closed or write errors.
       try {
-        if (typeof _origConsoleWarn === 'function') {
-          try {
-            return _origConsoleWarn.apply(console, args);
-          } catch {}
-        }
+        // See above: avoid invoking the original console.warn. Use
+        // console.log and guard against write errors so diagnostics are
+        // non-fatal.
         try {
           return console.log.apply(console, args);
         } catch {
