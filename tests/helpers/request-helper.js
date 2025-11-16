@@ -27,6 +27,28 @@ try {
   }
 } catch {}
 
+// Expose a test-only helper to destroy shared agents. Jest/global teardown
+// can call this to ensure agent sockets are closed deterministically.
+function _destroySharedAgents() {
+  try {
+    try {
+      if (__req_sharedHttpAgent && typeof __req_sharedHttpAgent.destroy === 'function') {
+        __req_sharedHttpAgent.destroy();
+      }
+    } catch {}
+    try {
+      if (__req_sharedHttpsAgent && typeof __req_sharedHttpsAgent.destroy === 'function') {
+        __req_sharedHttpsAgent.destroy();
+      }
+    } catch {}
+  } catch {}
+}
+
+// export the helper for jest setup/teardown to call
+try {
+  module.exports = Object.assign(module.exports || {}, { _destroySharedAgents });
+} catch {}
+
 // Best-effort test-only helper: temporarily replace async_hooks.AsyncResource
 // with a no-op wrapper while starting an ephemeral server. Some libraries
 // create AsyncResources during server.listen/startup which can leave

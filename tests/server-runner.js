@@ -31,7 +31,7 @@ try {
         // interceptable by nock in some Node versions).
         try {
           // prefer node-fetch@2
-           
+
           globalThis.fetch = require('node-fetch');
           console.info('server-runner: installed node-fetch for child process nock compatibility');
         } catch {}
@@ -43,16 +43,67 @@ try {
   const server = http.createServer(app);
   server.listen(0, '127.0.0.1', () => {
     const addr = server.address();
+    // Wait for a basic health response if available before telling the
+    // parent the port. This reduces races where the server is "listening"
+    // at the OS level but framework startup hasn't completed handling
+    // middleware or routing. Best-effort: time out after 2s and send port.
     try {
-      if (process.send) {
-        process.send({ port: addr.port });
-      } else {
-        // fallback for manual runs where IPC isn't available
-        // print a machine-parseable line to stdout
-        console.log(`TEST_SERVER_PORT:${addr.port}`);
-      }
-    } catch {
-      // ignore
+      const port = addr && addr.port ? addr.port : 0;
+      const http = require('http');
+      const checkHealth = () =>
+        new Promise((resolve) => {
+          try {
+            const req = http.get(
+              { hostname: '127.0.0.1', port, path: '/health', timeout: 800 },
+              (res) => {
+                try {
+                  // treat any 2xx as healthy
+                  const ok = res.statusCode >= 200 && res.statusCode < 300;
+                  res.resume();
+                  resolve(ok);
+                } catch (e) {
+                  resolve(false);
+                }
+              }
+            );
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => {
+              try {
+                req.destroy();
+              } catch {}
+              resolve(false);
+            });
+          } catch (e) {
+            resolve(false);
+          }
+        });
+
+      (async () => {
+        const deadline = Date.now() + 2000;
+        let healthy = false;
+        while (Date.now() < deadline && !healthy) {
+          try {
+             
+            healthy = await checkHealth();
+            if (!healthy) await new Promise((r) => setTimeout(r, 150));
+          } catch {
+            // ignore and retry
+          }
+        }
+
+        try {
+          if (process.send) {
+            process.send({ port });
+          } else {
+            // fallback for manual runs where IPC isn't available
+            console.log(`TEST_SERVER_PORT:${port}`);
+          }
+        } catch {}
+      })();
+    } catch (e) {
+      try {
+        if (process.send) process.send({ port: addr.port });
+      } catch {}
     }
   });
 

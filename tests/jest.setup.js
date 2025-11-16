@@ -1163,6 +1163,15 @@ afterAll(async () => {
 
           // Additionally, aggressively clear any sockets held in http/https global agent pools
           try {
+            // Best-effort: destroy any shared test agents from request-helper
+            try {
+              const rh = require('./helpers/request-helper');
+              if (rh && typeof rh._destroySharedAgents === 'function') {
+                try {
+                  rh._destroySharedAgents();
+                } catch {}
+              }
+            } catch {}
             const drainAgent = (agent) => {
               if (!agent) return;
               try {

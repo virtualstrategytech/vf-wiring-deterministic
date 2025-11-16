@@ -52,12 +52,18 @@ jobs:
           echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
 
-      - name: Upload test logs on failure
+      - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-child
-          path: ${{ env.JEST_OUTPUT_LOG }}
+          path: |
+            ${{ env.JEST_OUTPUT_LOG }}
+            artifacts/**
+            /tmp/async_handle_map.json
+            /tmp/async_handle_map*.json
+            tests/async_handles_*.json
+            tests/child_active_handles_*.json
 
   test-child-server:
     name: Run tests with child-process server (manual debug)
@@ -111,3 +117,10 @@ jobs:
           path: |
             ${{ env.TEST_RESULTS_LOG }}
             ${{ env.SOCKET_DEBUG_LOG }}
+
+      - name: Upload artifacts directory (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: artifacts/**
