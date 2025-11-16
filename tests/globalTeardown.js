@@ -5,6 +5,8 @@ const { spawnSync } = require('child_process');
 module.exports = async () => {
   const pidFile = path.resolve(__dirname, 'webhook.pid');
   const logFile = path.resolve(__dirname, 'globalSetup.log');
+  const childStdoutPath = path.resolve(__dirname, 'webhook.child.stdout.log');
+  const childStderrPath = path.resolve(__dirname, 'webhook.child.stderr.log');
 
   function appendLog(line) {
     try {
@@ -167,6 +169,41 @@ module.exports = async () => {
     }
   } catch (e) {
     appendLog(`globalTeardown: app cleanup unexpected error: ${e && e.message}`);
+  }
+  // Best-effort: close any WriteStream/FileWriteStream handles that were
+  // created by `globalSetup` to capture child stdout/stderr. These file
+  // streams can remain open across the test run and show up as lingering
+  // handles in Jest's detectOpenHandles. Inspect active handles and
+  // end/destroy any matching streams.
+  try {
+    if (typeof process._getActiveHandles === 'function') {
+      const handles = process._getActiveHandles() || [];
+      for (let i = 0; i < handles.length; i++) {
+        try {
+          const h = handles[i];
+          const name = h && h.constructor && h.constructor.name;
+          if (!name) continue;
+          if (String(name) === 'WriteStream' || String(name) === 'FileWriteStream') {
+            try {
+              const p = h && h.path ? String(h.path) : '';
+              if (p === childStdoutPath || p === childStderrPath) {
+                try {
+                  appendLog(`globalTeardown: closing lingering write stream for ${p}`);
+                } catch {}
+                try {
+                  if (typeof h.end === 'function') h.end();
+                } catch {}
+                try {
+                  if (typeof h.destroy === 'function') h.destroy();
+                } catch {}
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    appendLog(`globalTeardown: closing child stdout/stderr streams failed: ${e && e.message}`);
   }
   // Ensure Node http/https global agents are destroyed to avoid lingering sockets
   try {

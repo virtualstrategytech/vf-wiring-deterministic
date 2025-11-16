@@ -178,16 +178,30 @@ module.exports = async () => {
   let child;
   try {
     logLine('globalSetup: spawning webhook via', nodeCmd, serverFile);
-    child = spawn(nodeCmd, [serverFile], {
+    // Default: capture stdout/stderr so local devs can inspect server logs.
+    // On GitHub Actions we avoid creating persistent pipe WriteStreams
+    // that can show up as lingering handles; use `ignore` for CI runners.
+    const spawnOptions = {
       cwd: webhookDir,
       env: {
         ...process.env,
         WEBHOOK_API_KEY: secretPlain,
         PORT: String(port),
       },
-      // capture stdout/stderr so CI and local devs can inspect server logs
       stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    };
+    try {
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        logLine(
+          'globalSetup: GITHUB_ACTIONS=true; spawning child with stdio ignored to avoid lingering pipes'
+        );
+        spawnOptions.stdio = ['ignore', 'ignore', 'ignore'];
+      }
+    } catch {
+      // ignore
+    }
+
+    child = spawn(nodeCmd, [serverFile], spawnOptions);
   } catch (e) {
     logLine('globalSetup: failed to spawn node directly:', e.message);
   }
