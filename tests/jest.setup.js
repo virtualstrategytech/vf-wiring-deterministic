@@ -99,12 +99,33 @@ try {
           }
         });
         try {
-          // Avoid calling the original console.warn implementation directly
-          // because on some CI runners writing to stderr can throw. Use
-          // console.log with a safe-serialized payload instead and swallow
-          // any errors to ensure diagnostics never fail tests.
+          // Avoid calling console.* methods which may themselves be
+          // hooked or rely on stdio that is closed in CI. Serialize the
+          // safe payload to a single string and write directly to
+          // process.stderr/process.stdout inside a guarded try/catch so
+          // diagnostics never throw or leak stack frames from here.
           try {
-            return console.log.apply(console, safe);
+            const out = Array.isArray(safe) ? safe.join(' ') : String(safe || '');
+            try {
+              if (
+                process &&
+                process.stderr &&
+                process.stderr.writable !== false &&
+                !process.stderr.destroyed
+              ) {
+                process.stderr.write(String(out) + '\n');
+              } else if (
+                process &&
+                process.stdout &&
+                process.stdout.writable !== false &&
+                !process.stdout.destroyed
+              ) {
+                process.stdout.write(String(out) + '\n');
+              }
+            } catch {
+              // swallow any write errors
+            }
+            return undefined;
           } catch {
             return undefined;
           }
@@ -116,11 +137,41 @@ try {
       // Higher verbosity: pass arguments through but still guard against
       // stderr being closed or write errors.
       try {
-        // See above: avoid invoking the original console.warn. Use
-        // console.log and guard against write errors so diagnostics are
-        // non-fatal.
+        // Serialize arguments to a single line and write directly to
+        // stderr/stdout to avoid calling console methods that may be
+        // unavailable or which can throw in CI. Keep this best-effort
+        // and non-fatal.
         try {
-          return console.log.apply(console, args);
+          const parts = Array.from(args || []).map((a) => {
+            try {
+              if (a && typeof a === 'object')
+                return util.inspect(a, { depth: 1, maxArrayLength: 5, breakLength: 120 });
+              return String(a);
+            } catch {
+              return '[unserializable]';
+            }
+          });
+          const out = parts.join(' ');
+          try {
+            if (
+              process &&
+              process.stderr &&
+              process.stderr.writable !== false &&
+              !process.stderr.destroyed
+            ) {
+              process.stderr.write(String(out) + '\n');
+            } else if (
+              process &&
+              process.stdout &&
+              process.stdout.writable !== false &&
+              !process.stdout.destroyed
+            ) {
+              process.stdout.write(String(out) + '\n');
+            }
+          } catch {
+            // swallow
+          }
+          return undefined;
         } catch {
           return undefined;
         }
