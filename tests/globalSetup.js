@@ -279,6 +279,104 @@ module.exports = async () => {
     }
   }
 
+  // Spawn a lightweight prompt mock child so tests have a deterministic
+  // prompt service available at a known URL (avoids ECONNREFUSED in CI).
+  try {
+    const promptPidFile = path.resolve(__dirname, 'prompt-mock.pid');
+    const promptInfoFile = path.resolve(__dirname, 'prompt-mock.json');
+    const promptPort = Number(process.env.PROMPT_MOCK_PORT || 3001);
+    // Prefer the fixed prompt mock child if present (helps avoid accidental
+    // markdown-wrapped files). Fall back to the original file for backwards
+    // compatibility.
+    let promptScript = path.join(__dirname, 'prompt-mock-child-fixed.js');
+    if (!fs.existsSync(promptScript)) {
+      promptScript = path.join(__dirname, 'prompt-mock-child.js');
+    }
+    // Spawn prompt-mock unless PROMPT_URL was explicitly provided and not
+    // equal to the default local prompt host. This covers cases where the
+    // environment already set PROMPT_URL (deployed smoke tests) and avoids
+    // overriding it.
+    if (!process.env.PROMPT_URL || process.env.PROMPT_URL === 'http://127.0.0.1:3000') {
+      try {
+        logLine('globalSetup: spawning prompt-mock child on port', promptPort);
+        // Capture stdout/stderr to small files so spawn errors are visible
+        // in CI artifacts. Use pipes locally but keep CI-friendly defaults.
+        const promptStdout = path.resolve(__dirname, 'prompt-mock.child.stdout.log');
+        const promptStderr = path.resolve(__dirname, 'prompt-mock.child.stderr.log');
+        const spawnOpts = {
+          cwd: process.cwd(),
+          env: { ...process.env, PORT: String(promptPort), PROMPT_MOCK_PORT: String(promptPort) },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        };
+        const p = spawn(nodeCmd, [promptScript], spawnOpts);
+        // If we have child stdout/stderr streams, pipe them to files for artifact collection
+        try {
+          if (p && p.stdout) {
+            const outStream = fs.createWriteStream(promptStdout, { flags: 'a' });
+            p.stdout.pipe(outStream);
+          }
+          if (p && p.stderr) {
+            const errStream = fs.createWriteStream(promptStderr, { flags: 'a' });
+            p.stderr.pipe(errStream);
+          }
+        } catch (e) {
+          logLine('globalSetup: failed to pipe prompt-mock child stdio:', e && e.message);
+        }
+        if (p && p.pid) {
+          try {
+            fs.writeFileSync(promptPidFile, String(p.pid), 'utf8');
+          } catch {}
+          try {
+            if (typeof p.unref === 'function') p.unref();
+          } catch {}
+          logLine('globalSetup: prompt-mock spawned pid=', p.pid);
+
+          // Wait for the prompt mock to open its port and write info file
+          try {
+            await waitForPort(promptPort, 5000);
+            const url = `http://127.0.0.1:${promptPort}`;
+            // Write prompt info atomically: write to temp then rename
+            try {
+              const tmp = `${promptInfoFile}.tmp`;
+              fs.writeFileSync(tmp, JSON.stringify({ url }), 'utf8');
+              try {
+                fs.renameSync(tmp, promptInfoFile);
+              } catch (e) {
+                // fallback to direct write
+                fs.writeFileSync(promptInfoFile, JSON.stringify({ url }), 'utf8');
+              }
+            } catch (e) {
+              logLine('globalSetup: failed to write prompt info file:', e && e.message);
+            }
+            try {
+              process.env.PROMPT_URL = url;
+            } catch {}
+            logLine('globalSetup: prompt-mock ready at', url);
+          } catch (e) {
+            logLine('globalSetup: prompt-mock did not open port in time:', e && e.message);
+          }
+        }
+      } catch (e) {
+        logLine('globalSetup: failed to spawn prompt-mock child:', e && e.message);
+      }
+    } else {
+      // If a PROMPT_URL was provided externally, persist it for jest.setup to
+      // consume so tests can rely on a consistent source.
+      try {
+        const info = { url: process.env.PROMPT_URL };
+        try {
+          fs.writeFileSync(
+            path.resolve(__dirname, 'prompt-mock.json'),
+            JSON.stringify(info),
+            'utf8'
+          );
+        } catch {}
+      } catch {}
+    }
+  } catch (e) {
+    logLine('globalSetup: prompt-mock setup failed:', e && e.message);
+  }
+
   // Close the log stream now to avoid leaving an open file handle that
   // keeps the Node process alive. globalTeardown will append via
   // synchronous fs operations when it runs.
