@@ -311,6 +311,27 @@ module.exports = async () => {
     // ignore
   }
 
+  // Short grace period: allow OS to fully close sockets and for any
+  // asynchronous cleanup to complete before Jest's final open-handle
+  // detection runs. Then attempt one more best-effort cleanup pass.
+  try {
+    await new Promise((r) => setTimeout(r, 150));
+  } catch {}
+  try {
+    try {
+      const rh2 = require('./helpers/request-helper');
+      if (rh2 && typeof rh2._forceCloseTemporaryServers === 'function') {
+        appendLog('globalTeardown: final force-closing temporary servers');
+        try {
+          await rh2._forceCloseTemporaryServers();
+          appendLog('globalTeardown: final temporary servers closed');
+        } catch (e) {
+          appendLog(`globalTeardown: final _forceCloseTemporaryServers error: ${e && e.message}`);
+        }
+      }
+    } catch {}
+  } catch {}
+
   // Append final marker
   try {
     // Log active handles count and types for CI debugging
