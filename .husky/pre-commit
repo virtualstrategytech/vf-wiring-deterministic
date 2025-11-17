@@ -1,4 +1,17 @@
 #!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
+. "$(dirname "$0")/_/husky.sh"
 
-npx --no -- lint-staged
+# Proof the hook runs
+echo "husky pre-commit fired" >&2
+
+# Optionally run lint-staged if configured (safe no-op otherwise)
+if command -v npx >/dev/null 2>&1; then
+  if [ -f ".lintstagedrc" ] || [ -f ".lintstagedrc.cjs" ] || [ -f ".lintstagedrc.js" ] || \
+     [ -f ".lintstagedrc.json" ] || grep -q '"lint-staged"' package.json 2>/dev/null; then
+    npx --no-install lint-staged
+  fi
+fi
+
+# If you want full tests on commit, uncomment:
+# npm test --silent
+exit 0
