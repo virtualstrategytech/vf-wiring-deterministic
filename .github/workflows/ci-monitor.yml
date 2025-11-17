@@ -88,12 +88,20 @@ jobs:
             // Otherwise, open an issue to track the failure
             const title = `CI flake: child-process server tests failed (run ${run.id})`;
             try {
-              await github.rest.issues.create({
-                owner,
-                repo,
-                title,
-                body,
-              });
+              // Avoid creating duplicate issues for the same run id.
+              const existing = await github.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 100 });
+              const already = (existing && existing.data || []).some((i) => i.title === title);
+              if (already) {
+                core.info?.(`An open issue with title "${title}" already exists; skipping creation.`);
+              } else {
+                await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title,
+                  body,
+                  labels: ['ci-monitor'],
+                });
+              }
             } catch (err) {
               core.info?.(`Failed to create issue: ${String(err)}`);
             }
@@ -129,8 +137,15 @@ jobs:
               try {
                 const title = `Manual monitor: artifacts for run ${runId}`;
                 const body = `Artifacts: ${artifacts.map((a) => a.name).join(', ')}`;
-                await github.rest.issues.create({ owner, repo, title, body });
-                core.info?.('Created issue for manual monitor.');
+                // Avoid duplicate manual issues as well
+                const existing = await github.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 100 });
+                const already = (existing && existing.data || []).some((i) => i.title === title);
+                if (already) {
+                  core.info?.(`An open issue with title "${title}" already exists; skipping creation.`);
+                } else {
+                  await github.rest.issues.create({ owner, repo, title, body, labels: ['ci-monitor'] });
+                  core.info?.('Created issue for manual monitor.');
+                }
               } catch (err) {
                 core.info?.(`Failed to create issue: ${String(err)}`);
               }
