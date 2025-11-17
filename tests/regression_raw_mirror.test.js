@@ -15,6 +15,9 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 const request = require('supertest');
 const { requestApp } = require('./helpers/request-helper');
 
+// Ensure PROMPT_URL is defined for the test (globalSetup/jest.setup may set it)
+process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://127.0.0.1:3000';
+
 // Use in-process `app` when possible to avoid network races. If `WEBHOOK_BASE`
 // is set explicitly we will target that external base instead (useful for
 // deployed smoke tests). Otherwise prefer `require('../novain-platform/webhook/server')`.
@@ -52,13 +55,31 @@ async function postWithRetry(baseUrl, path, body, headers = {}, retries = 5) {
           timeout: 10000,
         });
         // Normalize to supertest-like shape for assertions in the tests
-        return { status: out.status || 0, body: out.body };
+        return { status: out.status || 0, body: out.body, headers: out.headers, text: out.text };
       }
       const resp = await requester.post(path).set(headers).send(body);
       return resp;
     } catch (err) {
       const isConnRefused = err && (err.code === 'ECONNREFUSED' || err.errno === 'ECONNREFUSED');
-      if (!isConnRefused || i + 1 === retries) throw err;
+      // If this is the last retry or a non-ECONNREFUSED error, surface
+      // helpful debug information before throwing so CI logs capture
+      // the HTTP response shape and headers.
+      if (!isConnRefused || i + 1 === retries) {
+        try {
+          console.error('postWithRetry: final error', err && err.stack ? err.stack : String(err));
+          if (err && err.response) {
+            try {
+              console.error('postWithRetry: response status:', err.response.status);
+              console.error('postWithRetry: response headers:', err.response.headers);
+              console.error(
+                'postWithRetry: response body:',
+                err.response.data || err.response.text
+              );
+            } catch {}
+          }
+        } catch {}
+        throw err;
+      }
       // backoff
       await new Promise((r) => setTimeout(r, 150 * (i + 1)));
     }
@@ -66,6 +87,7 @@ async function postWithRetry(baseUrl, path, body, headers = {}, retries = 5) {
 }
 
 describe('regression: raw/data.raw mirror', () => {
+  // Prompt mock is started centrally in `tests/globalSetup.js`.
   it('llm_elicit returns raw and data.raw with same payload', async () => {
     const resp = await postWithRetry(
       base,
@@ -73,7 +95,21 @@ describe('regression: raw/data.raw mirror', () => {
       { action: 'llm_elicit', question: 'Test', tenantId: 't' },
       { 'x-api-key': process.env.WEBHOOK_API_KEY }
     );
-
+    // If the HTTP response is not 200, print full details to aid CI debugging.
+    if (!resp || resp.status !== 200) {
+      try {
+        console.error('regression test: unexpected response status:', resp && resp.status);
+        try {
+          console.error('regression test: response headers:', resp && resp.headers);
+        } catch {}
+        try {
+          console.error(
+            'regression test: response body/text:',
+            resp && (resp.body || resp.text || resp.text)
+          );
+        } catch {}
+      } catch {}
+    }
     expect(resp.status).toBe(200);
     const body = resp.body || {};
     expect(body.raw).toBeDefined();

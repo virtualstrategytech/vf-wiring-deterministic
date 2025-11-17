@@ -108,6 +108,41 @@ module.exports = async () => {
   } catch (e) {
     appendLog(`globalTeardown: unexpected error: ${e && e.message}`);
   }
+  // Try to kill the spawned prompt-mock child (if any)
+  try {
+    const promptPidFile = path.resolve(__dirname, 'prompt-mock.pid');
+    const promptInfoFile = path.resolve(__dirname, 'prompt-mock.json');
+    if (fs.existsSync(promptPidFile)) {
+      let ppid = null;
+      try {
+        ppid = Number(fs.readFileSync(promptPidFile, 'utf8').trim());
+      } catch {}
+      if (ppid && !Number.isNaN(ppid)) {
+        appendLog(`globalTeardown: attempting to kill prompt-mock pid ${ppid}`);
+        try {
+          process.kill(ppid, 'SIGTERM');
+          appendLog(`globalTeardown: sent SIGTERM to prompt-mock ${ppid}`);
+        } catch (e) {
+          appendLog(`globalTeardown: prompt-mock kill SIGTERM failed: ${e && e.message}`);
+        }
+        try {
+          fs.unlinkSync(promptPidFile);
+          appendLog('globalTeardown: prompt-mock pid file removed');
+        } catch {}
+      } else {
+        try {
+          fs.unlinkSync(promptPidFile);
+          appendLog('globalTeardown: removed invalid prompt-mock pid file');
+        } catch {}
+      }
+    }
+    try {
+      if (fs.existsSync(path.resolve(__dirname, 'prompt-mock.json')))
+        fs.unlinkSync(path.resolve(__dirname, 'prompt-mock.json'));
+    } catch {}
+  } catch (e) {
+    appendLog(`globalTeardown: prompt-mock teardown error: ${e && e.message}`);
+  }
   // Close any cached ephemeral server created by request-helper to avoid
   // leaving a listening handle open across the test run. This is best-effort
   // and will silently continue if the helper isn't present.

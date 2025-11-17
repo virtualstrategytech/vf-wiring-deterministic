@@ -18,7 +18,102 @@ WAYLAND_DISPLAY=wayland-0
 WSL2_GUI_APPS_ENABLED=1
 WSLENV=
 WSL_DISTRO_NAME=Ubuntu
-WSL_INTEROP=/run/WSL/365_interop
+WSL_INTEROP=/run/WSL/397_interop
 XDG_RUNTIME_DIR=/run/user/1000/
 _=/usr/bin/env
 --- STARTING JEST ---
+DEBUG test-file loaded: webhook.smoke.test.js ts:2025-11-16T16:10:19.434Z
+PASS tests/webhook.smoke.test.js
+  webhook smoke
+    √ GET /health returns ok (115 ms)
+    √ POST /webhook (ping) returns 2xx (64 ms)
+    √ POST /webhook generate_lesson (best-effort) (38 ms)
+    √ POST /webhook generate_quiz (best-effort) (36 ms)
+
+  console.info
+    SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:181:11)
+
+PASS tests/in_process.test.js
+  in-process webhook app (refactored)
+    √ returns llm_elicit stub with source "stub" (118 ms)
+
+PASS tests/helpers/server-helper.test.js
+  server-helper
+    √ starts a server and closes it cleanly (347 ms)
+
+PASS tests/verify_in_process.test.js
+  in-process app smoke
+    √ GET /health returns ok (120 ms)
+    √ POST /webhook ping (in-process) works with API key (69 ms)
+
+PASS tests/regression_raw_mirror.test.js
+  regression: raw/data.raw mirror
+    √ llm_elicit returns raw and data.raw with same payload (151 ms)
+    √ invoke_component returns raw and data.raw with same payload (31 ms)
+
+PASS tests/llm_stub.test.js
+  llm_elicit stub behavior
+    √ POST /webhook llm_elicit returns stub when PROMPT_URL not set (222 ms)
+
+  console.log
+    RETRIEVAL_URL set: false
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:166:11)
+
+  console.info
+    PROMPT_URL set: true BUSINESS_URL set: false
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:167:11)
+
+  console.info
+    WEBHOOK_API_KEY present: true
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:169:11)
+
+PASS tests/debug_llm_logging.test.js
+  llm payload logging when DEBUG_WEBHOOK=true
+    √ logs llm payload snippet when enabled (95 ms)
+
+  console.info
+    SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:181:11)
+
+  console.log
+    [2025-11-16T16:10:24.693Z] GET /health rid=no-request-id
+
+      at novain-platform/webhook/server.js:322:13
+
+  console.info
+    SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)
+
+      at Object.<anonymous> (novain-platform/webhook/server.js:181:11)
+
+  console.log
+    [2025-11-16T16:10:24.770Z] POST /webhook rid=no-request-id
+
+      at novain-platform/webhook/server.js:322:13
+
+  console.log
+    webhook: action=ping name=Tester tenantId=default
+
+      at novain-platform/webhook/server.js:460:13
+
+DEBUG: active handles summary:
+DEBUG: captured listen callbacks count = 0
+PASS tests/webhook.inprocess.test.js
+  Webhook (in-process)
+    √ GET /health returns ok (130 ms)
+    √ POST /webhook ping responds with reply (78 ms)
+
+PASS tests/hello.test.js
+  √ sanity (38 ms)
+
+Test Suites: 9 passed, 9 total
+Tests:       15 passed, 15 total
+Snapshots:   0 total
+Time:        7.05 s
+Ran all test suites.
+--- JEST EXIT CODE: 0 ---
