@@ -90,22 +90,23 @@ module.exports = async () => {
 
   logLine('globalSetup: starting; webhookDir=', webhookDir);
 
-  // If running inside GitHub Actions and the job is NOT explicitly asking
-  // to spawn a child-process server, assume the workflow's Start webhook
-  // step started the server. Wait briefly for the port to be ready and
-  // then return without spawning a local child to avoid duplicate servers.
-  // When `USE_CHILD_PROCESS_SERVER=1` is set (used by some CI jobs), do
-  // not take this early-return path so the job can spawn its own server.
+  // Track whether an external server is already present so we avoid
+  // spawning a duplicate webhook child, but still continue with other
+  // setup work (for example starting the prompt-mock child). Do NOT
+  // return early here — only set `serverDetected` and continue.
+  let serverDetected = false;
   if (process.env.GITHUB_ACTIONS === 'true' && process.env.USE_CHILD_PROCESS_SERVER !== '1') {
     const actionPort = Number(process.env.PORT || 3000);
     try {
       await waitForReady(actionPort, 20000);
       logLine('globalSetup: running on GitHub Actions; server ready on port', actionPort);
+      serverDetected = true;
     } catch (e) {
       // fallback to raw port check if readiness endpoint isn't present or reachable
       try {
         await waitForPort(actionPort, 20000);
         logLine('globalSetup: running on GitHub Actions; port open on', actionPort);
+        serverDetected = true;
       } catch (e2) {
         logLine(
           'globalSetup: running on GitHub Actions but no server detected on port',
@@ -113,10 +114,8 @@ module.exports = async () => {
         );
       }
     }
-    try {
-      logStream.end();
-    } catch {}
-    return;
+    // purposely do not end the log stream here; keep writing diagnostics
+    // for the remainder of global setup so CI artifacts are complete.
   }
   // When running on GitHub Actions with USE_CHILD_PROCESS_SERVER=1 we want
   // the test job to spawn the webhook locally. Log that decision so CI
@@ -285,13 +284,10 @@ module.exports = async () => {
     const promptPidFile = path.resolve(__dirname, 'prompt-mock.pid');
     const promptInfoFile = path.resolve(__dirname, 'prompt-mock.json');
     const promptPort = Number(process.env.PROMPT_MOCK_PORT || 3001);
-    // Prefer the fixed prompt mock child if present (helps avoid accidental
-    // markdown-wrapped files). Fall back to the original file for backwards
-    // compatibility.
-    let promptScript = path.join(__dirname, 'prompt-mock-child-fixed.js');
-    if (!fs.existsSync(promptScript)) {
-      promptScript = path.join(__dirname, 'prompt-mock-child.js');
-    }
+    // Use the standard prompt mock child script name. We removed the
+    // defensive fallback to a differently-named file to keep behavior
+    // deterministic in CI and avoid surprising PR diffs.
+    const promptScript = path.join(__dirname, 'prompt-mock-child.js');
     // Spawn prompt-mock unless PROMPT_URL was explicitly provided and not
     // equal to the default local prompt host. This covers cases where the
     // environment already set PROMPT_URL (deployed smoke tests) and avoids
