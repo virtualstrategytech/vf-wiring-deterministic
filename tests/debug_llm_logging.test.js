@@ -92,6 +92,17 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
         }
       } catch {}
 
+      // Remove listeners to avoid bound anonymous functions remaining
+      try {
+        if (server && typeof server.removeAllListeners === 'function') {
+          try {
+            server.removeAllListeners('connection');
+            server.removeAllListeners('request');
+            server.removeAllListeners('listening');
+          } catch {}
+        }
+      } catch {}
+
       if (server && typeof server.close === 'function') {
         await new Promise((resolve) => server.close(resolve));
       }
