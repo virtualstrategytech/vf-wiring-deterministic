@@ -85,26 +85,9 @@ jobs:
               return;
             }
 
-            // Otherwise, open an issue to track the failure
-            const title = `CI flake: child-process server tests failed (run ${run.id})`;
-            try {
-              // Avoid creating duplicate issues for the same run id.
-              const existing = await github.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 100 });
-              const already = (existing && existing.data || []).some((i) => i.title === title);
-              if (already) {
-                core.info?.(`An open issue with title "${title}" already exists; skipping creation.`);
-              } else {
-                await github.rest.issues.create({
-                  owner,
-                  repo,
-                  title,
-                  body,
-                  labels: ['ci-monitor'],
-                });
-              }
-            } catch (err) {
-              core.info?.(`Failed to create issue: ${String(err)}`);
-            }
+            // Run is not associated with a PR — skip creating a repository issue.
+            // This repository prefers failing checks on PRs rather than auto-opening issues for non-PR runs.
+            core.info?.("Run not associated with a PR; skipping automatic issue creation.");
 
   manual-test:
     if: ${{ github.event_name == 'workflow_dispatch' }}
