@@ -1,10 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
 
 module.exports = async () => {
-  const pidFile = path.resolve(__dirname, 'webhook.pid');
-  const logFile = path.resolve(__dirname, 'globalSetup.log');
+  const pidFile = path.resolve(__dirname, "webhook.pid");
+  const logFile = path.resolve(__dirname, "globalSetup.log");
 
   function appendLog(line) {
     try {
@@ -12,27 +12,27 @@ module.exports = async () => {
     } catch {}
   }
 
-  appendLog('globalTeardown: starting');
+  appendLog("globalTeardown: starting");
 
   // Try to kill the spawned webhook process (if any)
   try {
     if (!fs.existsSync(pidFile)) {
-      appendLog('globalTeardown: pid file not found; nothing to kill');
+      appendLog("globalTeardown: pid file not found; nothing to kill");
       return;
     }
 
     let pid;
     try {
-      pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      pid = Number(fs.readFileSync(pidFile, "utf8").trim());
     } catch (e) {
       appendLog(`globalTeardown: failed reading pid file: ${e.message}`);
     }
 
     if (!pid || Number.isNaN(pid)) {
-      appendLog('globalTeardown: invalid pid; removing pid file if present');
+      appendLog("globalTeardown: invalid pid; removing pid file if present");
       try {
         fs.unlinkSync(pidFile);
-        appendLog('globalTeardown: pid file removed');
+        appendLog("globalTeardown: pid file removed");
       } catch {}
       return;
     }
@@ -41,7 +41,7 @@ module.exports = async () => {
 
     // Try a graceful kill first
     try {
-      process.kill(pid, 'SIGTERM');
+      process.kill(pid, "SIGTERM");
       appendLog(`globalTeardown: sent SIGTERM to ${pid}`);
     } catch (e) {
       appendLog(`globalTeardown: process.kill(SIGTERM) failed: ${e.message}`);
@@ -63,19 +63,23 @@ module.exports = async () => {
     }
 
     if (alive) {
-      appendLog(`globalTeardown: process ${pid} still alive after ${waitMs}ms; forcing kill`);
+      appendLog(
+        `globalTeardown: process ${pid} still alive after ${waitMs}ms; forcing kill`
+      );
       try {
-        if (process.platform === 'win32') {
-          spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']);
+        if (process.platform === "win32") {
+          spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"]);
           appendLog(`globalTeardown: taskkill invoked for ${pid}`);
         } else {
           try {
-            process.kill(pid, 'SIGKILL');
+            process.kill(pid, "SIGKILL");
             appendLog(`globalTeardown: sent SIGKILL to ${pid}`);
           } catch (e) {
-            appendLog(`globalTeardown: SIGKILL failed: ${e.message}; attempting pkill -P`);
-            spawnSync('pkill', ['-TERM', '-P', String(pid)]);
-            appendLog('globalTeardown: pkill invoked for child processes');
+            appendLog(
+              `globalTeardown: SIGKILL failed: ${e.message}; attempting pkill -P`
+            );
+            spawnSync("pkill", ["-TERM", "-P", String(pid)]);
+            appendLog("globalTeardown: pkill invoked for child processes");
           }
         }
       } catch (e) {
@@ -86,7 +90,9 @@ module.exports = async () => {
       await new Promise((r) => setTimeout(r, 300));
       try {
         process.kill(pid, 0);
-        appendLog(`globalTeardown: process ${pid} still exists after forced kill`);
+        appendLog(
+          `globalTeardown: process ${pid} still exists after forced kill`
+        );
       } catch {
         appendLog(`globalTeardown: process ${pid} no longer exists`);
       }
@@ -98,7 +104,7 @@ module.exports = async () => {
     try {
       if (fs.existsSync(pidFile)) {
         fs.unlinkSync(pidFile);
-        appendLog('globalTeardown: pid file removed');
+        appendLog("globalTeardown: pid file removed");
       }
     } catch (e) {
       appendLog(`globalTeardown: failed to remove pid file: ${e.message}`);
@@ -108,5 +114,5 @@ module.exports = async () => {
   }
 
   // Append final marker
-  appendLog('globalTeardown: finished');
+  appendLog("globalTeardown: finished");
 };
