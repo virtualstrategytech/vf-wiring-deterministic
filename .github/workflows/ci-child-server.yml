@@ -100,6 +100,7 @@ jobs:
             /tmp/async_handle_map*.json
             tests/async_handles_*.json
             tests/child_active_handles_*.json
+            # Prompt-mock and global setup diagnostics for CI triage
             tests/prompt-mock.child.stdout.log
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
