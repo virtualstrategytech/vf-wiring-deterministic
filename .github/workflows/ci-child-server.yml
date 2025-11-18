@@ -1,0 +1,60 @@
+name: CI - child-process server tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  child-server:
+    name: Run tests with child-process server
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+      FORCE_PER_REQUEST_AGENT: "1"
+      FORCE_DETERMINISTIC_IDS: "1"
+      TEST_PATCH_RAW_BODY: "1"
+      SKIP_SMOKE: "true"
+      SKIP_BODY_PARSER: "1"
+      # no CI_LOOSE_WARN here — keep standard policy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests (child-process server)
+        run: bash ./scripts/ci_run_jest.sh
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: tests/jest-output.txt
+
+  child-server-loose:
+    name: Run tests with USE_CHILD_PROCESS_SERVER=1
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+      USE_CHILD_PROCESS_SERVER: "1"
+      FORCE_PER_REQUEST_AGENT: "1"
+      FORCE_DETERMINISTIC_IDS: "1"
+      TEST_PATCH_RAW_BODY: "1"
+      SKIP_SMOKE: "true"
+      SKIP_BODY_PARSER: "1"
+      CI_LOOSE_WARN: "1" # <- relax warnings only in this job
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests (child-process server, loose warns)
+        run: bash ./scripts/ci_run_jest.sh
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-child
+          path: tests/jest-output.txt
