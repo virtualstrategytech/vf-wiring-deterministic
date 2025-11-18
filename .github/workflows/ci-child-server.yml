@@ -16,7 +16,7 @@ permissions:
   actions: read
 
 jobs:
-  # Strict policy: child-process server, warns are normal warns (no relax)
+  # Strict policy: child-process server with standard warnings (no relax)
   child-server:
     name: Run tests with child-process server
     runs-on: ubuntu-latest
@@ -37,41 +37,57 @@ jobs:
         run: npm ci
       - name: Run tests (child-process server)
         run: bash ./scripts/ci_run_jest.sh
-      - name: Upload test logs on failure
+      - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: ${{ env.JEST_OUTPUT_LOG }}
+          path: |
+            ${{ env.JEST_OUTPUT_LOG }}
+            artifacts/**
+            /tmp/async_handle_map.json
+            /tmp/async_handle_map*.json
+            tests/async_handles_*.json
+            tests/child_active_handles_*.json
+            # Prompt-mock and global setup diagnostics for CI triage
+            tests/prompt-mock.child.stdout.log
+            tests/prompt-mock.child.stderr.log
+            tests/globalSetup.log
+            tests/prompt-mock.json
 
-  # Relaxed warnings + USE_CHILD_PROCESS_SERVER=1 to mimic runner isolation
-  child-server-loose:
-    name: Run tests with USE_CHILD_PROCESS_SERVER=1 (loose warns)
+  # USE_CHILD_PROCESS_SERVER=1 to mimic runner isolation; explicitly run smoke
+  child-server-tests:
+    name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
     env:
       CI: "true"
+      SKIP_SYNC_SECRET: "true"
+      SKIP_BODY_PARSER: "1"
+      SKIP_SMOKE: "false" # enforce smoke tests here
       USE_CHILD_PROCESS_SERVER: "1"
       FORCE_PER_REQUEST_AGENT: "1"
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
-      SKIP_SMOKE: "true"
-      SKIP_BODY_PARSER: "1"
-      CI_LOOSE_WARN: "1"
       JEST_OUTPUT_LOG: tests/jest-output.txt
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
+
       - name: Install dependencies
         run: npm ci
-      - name: Run tests (child-process server, loose warns)
-        # enforce SKIP_SMOKE=false for this step to avoid accidental overrides in shell
+
+      - name: Run tests (child-process server)
         env:
-          SKIP_SMOKE: "false"
+          SKIP_SMOKE: "false" # double-guard at step level
         run: |
           echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
+
       - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -84,7 +100,6 @@ jobs:
             /tmp/async_handle_map*.json
             tests/async_handles_*.json
             tests/child_active_handles_*.json
-            # Prompt-mock and global setup diagnostics for CI triage
             tests/prompt-mock.child.stdout.log
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
@@ -118,6 +133,7 @@ jobs:
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
           echo "DEBUG_TESTS=${DEBUG_TESTS:-0} NODE_DEBUG=${NODE_DEBUG:-<none>}"
+          # capture both stdout+stderr (node debug traces go to stderr)
           npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
       - name: Collect additional socket debug (proc/net/tcp)
         if: always()
