@@ -1,30 +1,25 @@
 /* tests/jest.setup.js */
-/* eslint-disable no-console */
+const origWarn = console.warn.bind(console);
+const origLog = console.log.bind(console);
 
-const original = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console),
-};
+// Relax warnings only when CI_LOOSE_WARN=1 (the child-process job)
+const LOOSE = process.env.CI_LOOSE_WARN === "1";
 
-// CI toggles
-const LOOSE_WARN = process.env.CI_LOOSE_WARN === "1"; // relax warns (for noisy child-process job)
-const FAIL_ON_WARN = process.env.CI_FAIL_ON_WARN === "1"; // opt-in locally to fail on warn
+// If someone wants to force failures on warn locally
+const FAIL_ON_WARN = process.env.CI_FAIL_ON_WARN === "1";
 
 console.warn = (...args) => {
-  if (LOOSE_WARN) {
-    // In the child-process CI job, warnings are informational only
-    original.log(...args);
+  if (LOOSE) {
+    origLog(...args); // treat warn as info
     return;
   }
   if (FAIL_ON_WARN) {
-    original.warn(...args);
-    // mark run as failed but let Jest exit cleanly
-    process.exitCode = 1;
+    origWarn(...args);
+    process.exitCode = 1; // let Jest exit cleanly but mark failure
     return;
   }
-  original.warn(...args);
+  origWarn(...args);
 };
 
-// Reasonable default for CI
+// Ensure deterministic timeout
 jest.setTimeout(Number(process.env.JEST_TIMEOUT || 10000));

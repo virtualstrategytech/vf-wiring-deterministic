@@ -1,4 +1,3 @@
-# .github/workflows/ci-child-server.yml
 name: CI - child-process server tests
 
 on:
@@ -50,7 +49,6 @@ jobs:
             /tmp/async_handle_map*.json
             tests/async_handles_*.json
             tests/child_active_handles_*.json
-            # Prompt-mock and global setup diagnostics for CI triage
             tests/prompt-mock.child.stdout.log
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
@@ -81,9 +79,8 @@ jobs:
         run: npm ci
       - name: Run tests (child-process server)
         env:
-          SKIP_SMOKE: "false"
+          SKIP_SMOKE: "false" # double-guard at step level
         run: |
-          # enforce SKIP_SMOKE=false for this step to avoid accidental overrides
           echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
       - name: Upload test logs and artifacts on failure
@@ -98,7 +95,6 @@ jobs:
             /tmp/async_handle_map*.json
             tests/async_handles_*.json
             tests/child_active_handles_*.json
-            # Prompt-mock and global setup diagnostics for CI triage
             tests/prompt-mock.child.stdout.log
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
@@ -132,7 +128,6 @@ jobs:
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
           echo "DEBUG_TESTS=${DEBUG_TESTS:-0} NODE_DEBUG=${NODE_DEBUG:-<none>}"
-          # capture both stdout+stderr (node debug traces go to stderr)
           npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
       - name: Collect additional socket debug (proc/net/tcp)
         if: always()

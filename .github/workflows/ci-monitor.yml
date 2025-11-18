@@ -1,15 +1,14 @@
-name: CI Monitor
+name: CI monitor - collect failed run info
 
 on:
   workflow_run:
-    # Use the exact display name of your main CI workflow here.
-    workflows: ["CI"]
+    workflows: ["CI - child-process server tests"]
     types: [completed]
 
 permissions:
-  issues: write
-  actions: read
   contents: read
+  actions: read
+  issues: write
 
 jobs:
   open-issue-on-failure:
@@ -17,25 +16,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Create issue with artifact summary
-        uses: actions/github-script@v7
+        uses: actions/github-script@v6
         with:
           script: |
             const run = context.payload.workflow_run;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
 
-            // list artifacts attached to the failed run
-            const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({
               owner, repo, run_id: run.id, per_page: 100
             });
+            const artifacts = artifactsResp.data.artifacts || [];
 
             const lines = [];
-            lines.push(`### CI failure: ${run.name} (run ${run.id})`);
+            lines.push(`## CI failure: ${run.name} (run ${run.id})`);
             lines.push('');
-            lines.push(`**Run**: ${run.html_url}`);
+            lines.push(`**Run**: ${runUrl}`);
             lines.push(`**Branch**: \`${run.head_branch}\``);
             lines.push(`**Commit**: \`${run.head_sha}\``);
-            lines.push('');
             if (artifacts.length) {
               lines.push('**Artifacts**');
               for (const a of artifacts) {
