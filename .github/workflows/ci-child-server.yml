@@ -7,15 +7,7 @@ on:
       DEBUG_TESTS:
         description: 'Enable debug traces (set to "1" to enable)'
         required: false
-<<<<<<< HEAD
-        default: '0'
-=======
-<<<<<<< HEAD
         default: "0"
-=======
-        default: '0'
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
   push:
     branches: [feat/wiring-agent]
 
@@ -24,118 +16,37 @@ permissions:
   actions: read
 
 jobs:
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-  # Strict policy: child-process server with standard warnings (no relax)
-  child-server:
-    name: Run tests with child-process server
-    runs-on: ubuntu-latest
-    env:
-      CI: "true"
-      FORCE_PER_REQUEST_AGENT: "1"
-      FORCE_DETERMINISTIC_IDS: "1"
-      TEST_PATCH_RAW_BODY: "1"
-      SKIP_SMOKE: "true"
-      SKIP_BODY_PARSER: "1"
-      JEST_OUTPUT_LOG: tests/jest-output.txt
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-      - name: Install dependencies
-        run: npm ci
-      - name: Run tests (child-process server)
-        run: bash ./scripts/ci_run_jest.sh
-      - name: Upload test logs and artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs
-          path: |
-            ${{ env.JEST_OUTPUT_LOG }}
-            artifacts/**
-            /tmp/async_handle_map.json
-            /tmp/async_handle_map*.json
-            tests/async_handles_*.json
-            tests/child_active_handles_*.json
-            tests/prompt-mock.child.stdout.log
-            tests/prompt-mock.child.stderr.log
-            tests/globalSetup.log
-            tests/prompt-mock.json
-
-  # USE_CHILD_PROCESS_SERVER=1 to mimic runner isolation; explicitly run smoke
   child-server-tests:
     name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
+
     env:
       CI: "true"
       SKIP_SYNC_SECRET: "true"
       SKIP_BODY_PARSER: "1"
-      SKIP_SMOKE: "false" # enforce smoke tests here
+      SKIP_SMOKE: "false"
       USE_CHILD_PROCESS_SERVER: "1"
       FORCE_PER_REQUEST_AGENT: "1"
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
       JEST_OUTPUT_LOG: tests/jest-output.txt
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
-      - name: Install dependencies
-        run: npm ci
-      - name: Run tests (child-process server)
-        env:
-          SKIP_SMOKE: "false" # double-guard at step level
-        run: |
-          echo "SKIP_SMOKE=${SKIP_SMOKE}"
-          bash ./scripts/ci_run_jest.sh
-=======
->>>>>>> origin/chore/ci-stabilize-and-clean
-  child-server-tests:
-    name: Run tests with USE_CHILD_PROCESS_SERVER=1
-    runs-on: ubuntu-latest
 
-    # Job-level env so Actions + VS Code know these contexts exist
-    env:
-      CI: 'true'
-      SKIP_SYNC_SECRET: 'true'
-      SKIP_BODY_PARSER: '1'
-      SKIP_SMOKE: 'false'
-      USE_CHILD_PROCESS_SERVER: '1'
-      FORCE_PER_REQUEST_AGENT: '1'
-      FORCE_DETERMINISTIC_IDS: '1'
-      TEST_PATCH_RAW_BODY: '1'
-      JEST_OUTPUT_LOG: tests/jest-output.txt
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
       - name: Run tests (child-process server)
         env:
-          SKIP_SMOKE: 'false'
+          SKIP_SMOKE: "false"
         run: |
-          # enforce SKIP_SMOKE=false for this step to avoid accidental overrides
           echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
 
-<<<<<<< HEAD
-=======
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -148,105 +59,42 @@ jobs:
             /tmp/async_handle_map*.json
             tests/async_handles_*.json
             tests/child_active_handles_*.json
-<<<<<<< HEAD
-            # Prompt-mock and global setup diagnostics for CI triage
-=======
-<<<<<<< HEAD
-=======
-            # Prompt-mock and global setup diagnostics for CI triage
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
             tests/prompt-mock.child.stdout.log
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
             tests/prompt-mock.json
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-  # Manual / debug workflow-dispatch with extra socket diagnostics
-=======
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
   test-child-server:
     name: Run tests with child-process server (manual debug)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
+
     env:
       USE_CHILD_PROCESS_SERVER: "1"
       SKIP_BODY_PARSER: "1"
       FORCE_PER_REQUEST_AGENT: "1"
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
-=======
->>>>>>> origin/chore/ci-stabilize-and-clean
-
-    # Manual / debug run env: make everything explicit at job level
-    env:
-      USE_CHILD_PROCESS_SERVER: '1'
-      SKIP_BODY_PARSER: '1'
-      FORCE_PER_REQUEST_AGENT: '1'
-      FORCE_DETERMINISTIC_IDS: '1'
-      TEST_PATCH_RAW_BODY: '1'
-<<<<<<< HEAD
-=======
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       DEBUG_TESTS: ${{ github.event.inputs.DEBUG_TESTS }}
       NODE_DEBUG: ${{ github.event.inputs.DEBUG_TESTS == '1' && 'net,tls' || '' }}
       TEST_RESULTS_LOG: /tmp/test-results.log
       SOCKET_DEBUG_LOG: /tmp/socket_debug.log
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
-      - name: Install dependencies
-        run: npm ci
-=======
->>>>>>> origin/chore/ci-stabilize-and-clean
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - run: npm ci
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install dependencies
-        run: npm ci
-
-<<<<<<< HEAD
-=======
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       - name: Run tests (child-process server) and capture debug logs
         run: |
           echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
           echo "DEBUG_TESTS=${DEBUG_TESTS:-0} NODE_DEBUG=${NODE_DEBUG:-<none>}"
-<<<<<<< HEAD
-          # capture both stdout+stderr (node debug traces go to stderr)
           npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
 
-=======
-<<<<<<< HEAD
-          npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
-=======
-          # capture both stdout+stderr (node debug traces go to stderr)
-          npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
-
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       - name: Collect additional socket debug (proc/net/tcp)
         if: always()
         run: |
@@ -254,14 +102,7 @@ jobs:
           if [ -f /proc/net/tcp ]; then
             cat /proc/net/tcp >> "${SOCKET_DEBUG_LOG}" || true
           fi
-<<<<<<< HEAD
 
-=======
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -270,14 +111,7 @@ jobs:
           path: |
             ${{ env.TEST_RESULTS_LOG }}
             ${{ env.SOCKET_DEBUG_LOG }}
-<<<<<<< HEAD
 
-=======
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
       - name: Upload artifacts directory (always)
         if: always()
         uses: actions/upload-artifact@v4
