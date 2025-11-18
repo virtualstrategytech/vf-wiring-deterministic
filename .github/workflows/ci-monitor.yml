@@ -1,65 +1,9 @@
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-name: CI monitor - collect failed run info
-
-on:
-  workflow_run:
-    workflows: ["CI - child-process server tests"]
-    types: [completed]
-
-permissions:
-  contents: read
-  actions: read
-  issues: write
-
-jobs:
-  open-issue-on-failure:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create issue with artifact summary
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const run = context.payload.workflow_run;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
-
-            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({
-              owner, repo, run_id: run.id, per_page: 100
-            });
-            const artifacts = artifactsResp.data.artifacts || [];
-
-            const lines = [];
-            lines.push(`## CI failure: ${run.name} (run ${run.id})`);
-            lines.push('');
-            lines.push(`**Run**: ${runUrl}`);
-            lines.push(`**Branch**: \`${run.head_branch}\``);
-            lines.push(`**Commit**: \`${run.head_sha}\``);
-            if (artifacts.length) {
-              lines.push('**Artifacts**');
-              for (const a of artifacts) {
-                lines.push(`- ${a.name} (${a.size_in_bytes} bytes)`);
-              }
-            } else {
-              lines.push('_No artifacts collected._');
-            }
-
-            await github.rest.issues.create({
-              owner, repo,
-              title: `CI failure: ${run.name} (run ${run.id})`,
-              body: lines.join('\n')
-            });
-=======
->>>>>>> origin/chore/ci-stabilize-and-clean
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI Monitor - collect failed run info
 
 on:
   workflow_run:
-    workflows: ['CI - child-process server tests']
+    workflows:
+      - "CI - child-process server tests"
     types:
       - completed
 
@@ -106,11 +50,8 @@ jobs:
             ].join('\n');
 
             await github.rest.issues.create({
-              owner, repo,
+              owner,
+              repo,
               title: `CI failure: ${run.name} (${runId})`,
               body
             });
-<<<<<<< HEAD
-=======
->>>>>>> origin/feat/wiring-agent
->>>>>>> origin/chore/ci-stabilize-and-clean
