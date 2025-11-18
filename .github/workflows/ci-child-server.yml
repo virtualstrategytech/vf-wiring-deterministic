@@ -1,25 +1,38 @@
 name: CI - child-process server tests
 
 on:
+  pull_request:
   workflow_dispatch:
+    inputs:
+      DEBUG_TESTS:
+        description: 'Enable debug traces (set to "1" to enable)'
+        required: false
+        default: "0"
+  push:
+    branches: [feat/wiring-agent]
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
+  # Strict policy: child-process server, warns are normal warns (no relax)
   child-server:
     name: Run tests with child-process server
     runs-on: ubuntu-latest
     env:
-      CI: true
+      CI: "true"
       FORCE_PER_REQUEST_AGENT: "1"
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
       SKIP_SMOKE: "true"
       SKIP_BODY_PARSER: "1"
-      # no CI_LOOSE_WARN here — keep standard policy
+      JEST_OUTPUT_LOG: tests/jest-output.txt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: "18"
       - name: Install dependencies
         run: npm ci
       - name: Run tests (child-process server)
@@ -29,32 +42,101 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: tests/jest-output.txt
+          path: ${{ env.JEST_OUTPUT_LOG }}
 
+  # Relaxed warnings + USE_CHILD_PROCESS_SERVER=1 to mimic runner isolation
   child-server-loose:
-    name: Run tests with USE_CHILD_PROCESS_SERVER=1
+    name: Run tests with USE_CHILD_PROCESS_SERVER=1 (loose warns)
     runs-on: ubuntu-latest
     env:
-      CI: true
+      CI: "true"
       USE_CHILD_PROCESS_SERVER: "1"
       FORCE_PER_REQUEST_AGENT: "1"
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
       SKIP_SMOKE: "true"
       SKIP_BODY_PARSER: "1"
-      CI_LOOSE_WARN: "1" # <- relax warnings only in this job
+      CI_LOOSE_WARN: "1"
+      JEST_OUTPUT_LOG: tests/jest-output.txt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: "18"
       - name: Install dependencies
         run: npm ci
       - name: Run tests (child-process server, loose warns)
-        run: bash ./scripts/ci_run_jest.sh
-      - name: Upload test logs on failure
+        # enforce SKIP_SMOKE=false for this step to avoid accidental overrides in shell
+        env:
+          SKIP_SMOKE: "false"
+        run: |
+          echo "SKIP_SMOKE=${SKIP_SMOKE}"
+          bash ./scripts/ci_run_jest.sh
+      - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-child
-          path: tests/jest-output.txt
+          path: |
+            ${{ env.JEST_OUTPUT_LOG }}
+            artifacts/**
+            /tmp/async_handle_map.json
+            /tmp/async_handle_map*.json
+            tests/async_handles_*.json
+            tests/child_active_handles_*.json
+            # Prompt-mock and global setup diagnostics for CI triage
+            tests/prompt-mock.child.stdout.log
+            tests/prompt-mock.child.stderr.log
+            tests/globalSetup.log
+            tests/prompt-mock.json
+
+  # Manual / debug workflow-dispatch with extra socket diagnostics
+  test-child-server:
+    name: Run tests with child-process server (manual debug)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      USE_CHILD_PROCESS_SERVER: "1"
+      SKIP_BODY_PARSER: "1"
+      FORCE_PER_REQUEST_AGENT: "1"
+      FORCE_DETERMINISTIC_IDS: "1"
+      TEST_PATCH_RAW_BODY: "1"
+      DEBUG_TESTS: ${{ github.event.inputs.DEBUG_TESTS }}
+      NODE_DEBUG: ${{ github.event.inputs.DEBUG_TESTS == '1' && 'net,tls' || '' }}
+      TEST_RESULTS_LOG: /tmp/test-results.log
+      SOCKET_DEBUG_LOG: /tmp/socket_debug.log
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests (child-process server) and capture debug logs
+        run: |
+          echo "Running tests with USE_CHILD_PROCESS_SERVER=1"
+          echo "DEBUG_TESTS=${DEBUG_TESTS:-0} NODE_DEBUG=${NODE_DEBUG:-<none>}"
+          npm test -- --runInBand 2>&1 | tee "${TEST_RESULTS_LOG}"
+      - name: Collect additional socket debug (proc/net/tcp)
+        if: always()
+        run: |
+          echo "--- /proc/net/tcp ---" > "${SOCKET_DEBUG_LOG}" || true
+          if [ -f /proc/net/tcp ]; then
+            cat /proc/net/tcp >> "${SOCKET_DEBUG_LOG}" || true
+          fi
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: socket-debug-artifacts
+          path: |
+            ${{ env.TEST_RESULTS_LOG }}
+            ${{ env.SOCKET_DEBUG_LOG }}
+      - name: Upload artifacts directory (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: artifacts/**
