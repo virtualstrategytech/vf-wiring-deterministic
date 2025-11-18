@@ -1,3 +1,4 @@
+# .github/workflows/ci-child-server.yml
 name: CI - child-process server tests
 
 on:
@@ -72,22 +73,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-
       - name: Install dependencies
         run: npm ci
-
       - name: Run tests (child-process server)
         env:
-          SKIP_SMOKE: "false" # double-guard at step level
+          SKIP_SMOKE: "false"
         run: |
+          # enforce SKIP_SMOKE=false for this step to avoid accidental overrides
           echo "SKIP_SMOKE=${SKIP_SMOKE}"
           bash ./scripts/ci_run_jest.sh
-
       - name: Upload test logs and artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
