@@ -88,7 +88,5 @@ afterAll(async () => {
     if (gd && typeof gd.close === 'function') await gd.close();
   } catch {}
 });
-        chore/ci-stabilize-and-clean
-        origin/feat/wiring-agent
-
-        feat/wiring-agent
+origin/chore/ci-stabilize-and-clean
+feat/wiring-agent

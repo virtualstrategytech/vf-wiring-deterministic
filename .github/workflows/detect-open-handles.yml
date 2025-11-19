@@ -16,15 +16,11 @@ defaults:
 
 jobs:
   detect-open-handles:
-    name: Run tests with detectOpenHandles
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm

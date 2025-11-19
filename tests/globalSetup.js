@@ -381,8 +381,6 @@ module.exports = async () => {
   } catch {
     // ignore
   }
-        chore/ci-stabilize-and-clean
-        origin/feat/wiring-agent
-
-        feat/wiring-agent
+origin/chore/ci-stabilize-and-clean
+feat/wiring-agent
 };

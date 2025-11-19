@@ -1,4 +1,4 @@
- module.exports = {
+module.exports = {
   testEnvironment: 'node',
   globalSetup: '<rootDir>/tests/globalSetup.js',
   globalTeardown: '<rootDir>/tests/globalTeardown.js',
@@ -15,5 +15,6 @@
   // before any modules that may open sockets during require-time.
   setupFiles: ['<rootDir>/tests/jest.instrumentation.js', '<rootDir>/tests/jest.netblock.js'],
   setupFilesAfterEnv: ['<rootDir>/tests/jest.setup.js'],
-       feat/wiring-agent
+origin/chore/ci-stabilize-and-clean
+feat/wiring-agent
 };
