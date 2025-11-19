@@ -1,73 +1,20 @@
-name: CI monitor - collect failed run info
-
-on:
-  workflow_run:
-    workflows: ["CI - child-process server tests"]
-    types: [completed]
-
-permissions:
-  contents: read
-  actions: read
-  issues: write
-
-jobs:
-  open-issue-on-failure:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create issue with artifact summary
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const run = context.payload.workflow_run;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const runUrl = run.html_url || `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
-
-            const artifactsResp = await github.rest.actions.listWorkflowRunArtifacts({
-              owner, repo, run_id: run.id, per_page: 100
-            });
-            const artifacts = artifactsResp.data.artifacts || [];
-
-            const lines = [];
-            lines.push(`## CI failure: ${run.name} (run ${run.id})`);
-            lines.push('');
-            lines.push(`**Run**: ${runUrl}`);
-            lines.push(`**Branch**: \`${run.head_branch}\``);
-            lines.push(`**Commit**: \`${run.head_sha}\``);
-            if (artifacts.length) {
-              lines.push('**Artifacts**');
-              for (const a of artifacts) {
-                lines.push(`- ${a.name} (${a.size_in_bytes} bytes)`);
-              }
-            } else {
-              lines.push('_No artifacts collected._');
-            }
-
-            await github.rest.issues.create({
-              owner, repo,
-              title: `CI failure: ${run.name} (run ${run.id})`,
-              body: lines.join('\n')
-            });
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI Monitor - collect failed run info
 
 on:
   workflow_run:
-    workflows: ['CI - child-process server tests']
-    types:
-      - completed
+    workflows:
+      - CI - child-process server tests
+      - Detect open handles
+    types: [completed]
 
 permissions:
   contents: read
-  actions: read
   issues: write
 
 jobs:
   notify-on-failure:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
-
     steps:
       - name: GitHub Script — open an issue with run details
         uses: actions/github-script@v7
@@ -78,10 +25,10 @@ jobs:
             const runId = run.id;
             const runUrl = run.html_url ?? `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
 
-            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+            const res = await github.rest.actions.listWorkflowRunArtifacts({
               owner, repo, run_id: runId
-            });
-            const artifacts = data?.artifacts ?? [];
+            }).catch(() => null);
+            const artifacts = res?.data?.artifacts ?? [];
 
             const artifactsMd = artifacts.length
               ? artifacts.map(a => `- **${a.name}** (${a.size_in_bytes ?? 0} bytes)`).join('\n')
@@ -89,13 +36,13 @@ jobs:
 
             const body = [
               `### CI failure: ${run.name}`,
-              ``,
+              '',
               `- **Run**: [${runId}](${runUrl})`,
-              `- **Branch**: ${run.head_branch}`,
+              `- **Branch**: \`${run.head_branch}\``,
               `- **Commit**: \`${run.head_sha}\``,
               `- **Actor**: @${run.actor?.login}`,
               `- **Event**: \`${run.event}\``,
-              ``,
+              '',
               `**Artifacts (${artifacts.length})**`,
               artifactsMd
             ].join('\n');
@@ -105,7 +52,3 @@ jobs:
               title: `CI failure: ${run.name} (${runId})`,
               body
             });
-        chore/ci-stabilize-and-clean
-        origin/feat/wiring-agent
-
-        feat/wiring-agent
