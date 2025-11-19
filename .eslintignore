@@ -1,0 +1,13 @@
+# Node/Build
+node_modules
+dist
+build
+coverage
+
+# Logs & artifacts
+*.log
+artifacts
+downloaded-artifacts
+
+# Jest config (CJS – let Jest load it, ESLint can skip)
+jest.config.cjs
