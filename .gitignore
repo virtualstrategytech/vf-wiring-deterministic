@@ -16,7 +16,6 @@ novain-platform/webhook/.env
 # =========================
 node_modules/
 dist/
-<<<<<<< HEAD
 .DS_Store
 # Voiceflow exports/backups
 *.vf
@@ -35,8 +34,6 @@ Thumbs.db
 !.vscode/settings.json
 .idea/
 # Build / cache
-=======
->>>>>>> origin/chore/ci-stabilize-and-clean
 build/
 .cache/
 .tmp/
@@ -205,7 +202,6 @@ cython_debug/
 novain-platform/webhook/Pinecone.txt
 backup-do not commit/
 
-<<<<<<< HEAD
 # CI / smoke artifacts (ignore heavy generated files)
 artifacts/
 artifacts-*/
@@ -229,8 +225,3 @@ jest-output-local.txt
 jest-output-local.*
 tests/jest-output-local.txt
 tests/jest-detect-local*
-=======
-# legacy/unused (typos from previous file) — ignore safely
-' n# local achive' nlocal_backups/
-' n# allow checked-in example env' n!.env.example
->>>>>>> origin/chore/ci-stabilize-and-clean
