@@ -1,169 +1,52 @@
 ﻿name: CI
 
-on: [push, pull_request]
+on:
+  pull_request: {}
+  push:
+    branches: [feat/wiring-agent]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: novain-platform/webhook
 
 jobs:
   lint:
-    name: Lint
+    name: Lint (18.x)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x]
-
-    # Define env at job level so Actions + VS Code know these exist
-    env:
-      PORT: 3000
-      UNHANDLED_REJECTIONS_LOG: $RUNNER_TEMP/vf_unhandled_rejections.log
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Ensure webhook server is running
-        # Idempotent: if a server is already listening on 127.0.0.1:3000, do nothing.
-        # Otherwise start the webhook and let it bind.
-        run: |
-          set -euo pipefail
-
-          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}"
-          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
-
-          if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
-            echo "Webhook already listening on ${PORT}, skipping start"
-          else
-            echo "Starting webhook server"
-            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
-            # give the server a moment to bind; poll the health endpoint
-            for i in {1..90}; do
-              if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
-                echo "Webhook server is ready"
-                break
-              fi
-              sleep 1
-            done
-          fi
-        shell: bash
-
-      - name: Run lint
-        run: npm run lint
-
-      - name: Upload server.log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-log-lint
-          path: server.log
-
-      - name: Upload unhandled-rejections log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unhandled-rejections-lint
-          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
-
-      - name: Upload server.log on success
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-log-lint-success
-          path: server.log
-
-      - name: Upload unhandled-rejections log on success
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unhandled-rejections-lint-success
-          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
+          node-version: 18
+          cache: npm
+          cache-dependency-path: novain-platform/webhook/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
 
   test:
+    name: Test (18.x)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x]
-
-    # Job-level env: VS Code sees these, and Node gets them automatically
     env:
-      PORT: 3000
-      UNHANDLED_REJECTIONS_LOG: $RUNNER_TEMP/vf_unhandled_rejections.log
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-
+      CI: "true"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      # No need for a separate "inject" step; env is already set at the job level
-
-      - name: Ensure webhook server is running (idempotent)
-        run: |
-          set -euo pipefail
-
-          echo "UNHANDLED_REJECTIONS_LOG=${UNHANDLED_REJECTIONS_LOG}"
-          echo "Checking for existing webhook on 127.0.0.1:${PORT}..."
-
-          if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
-            echo "Webhook already listening on ${PORT}, skipping start"
-          else
-            echo "Starting webhook server"
-            nohup node novain-platform/webhook/server.js > server.log 2>&1 &
-            echo "Waiting for webhook server to be ready on 127.0.0.1:${PORT}..."
-            # wait up to 90s
-            for i in {1..90}; do
-              if curl -sS --fail "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
-                echo "Webhook server is ready"
-                break
-              fi
-              sleep 1
-            done
-          fi
-        shell: bash
-
-      - name: Run tests
-        env:
-          CI: 'true' # merges with job env (WEBHOOK_API_KEY, UNHANDLED_REJECTIONS_LOG, PORT)
-        run: npm test --silent
-
-      - name: Upload server.log on failure
+          node-version: 18
+          cache: npm
+          cache-dependency-path: novain-platform/webhook/package-lock.json
+      - run: npm ci
+      - run: npm test -- --ci --runInBand
+      - name: Upload Jest output on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: server-log-test
-          path: server.log
-
-      - name: Upload unhandled-rejections log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unhandled-rejections-test
-          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
-
-      - name: Upload server.log on success
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-log-test-success
-          path: server.log
-
-      - name: Upload unhandled-rejections log on success
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unhandled-rejections-test-success
-          path: ${{ env.UNHANDLED_REJECTIONS_LOG }}
+          name: jest-output
+          path: |
+            tests/jest-output.txt
+            artifacts/**
