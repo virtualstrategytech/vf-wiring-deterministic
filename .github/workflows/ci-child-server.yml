@@ -1,7 +1,7 @@
 name: CI - child-process server tests
 
 on:
-  pull_request:
+  pull_request: {}
   workflow_dispatch:
     inputs:
       DEBUG_TESTS:
@@ -13,17 +13,12 @@ on:
 
 permissions:
   contents: read
-  actions: read
-
-defaults:
-  run:
-    shell: bash
-    working-directory: novain-platform/webhook
 
 jobs:
-  test-child-server:
+  child-server-tests:
     name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
+
     env:
       CI: "true"
       SKIP_SYNC_SECRET: "true"
@@ -34,6 +29,8 @@ jobs:
       FORCE_DETERMINISTIC_IDS: "1"
       TEST_PATCH_RAW_BODY: "1"
       JEST_OUTPUT_LOG: tests/jest-output.txt
+      DEBUG_TESTS: ${{ inputs.DEBUG_TESTS || '0' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,8 +49,6 @@ jobs:
         run: npm run lint --if-present
 
       - name: Run tests (child-process server)
-        env:
-          SKIP_SMOKE: "false"
         run: bash ./scripts/ci_run_jest.sh
 
       - name: Upload test logs and artifacts on failure
@@ -62,7 +57,7 @@ jobs:
         with:
           name: test-logs
           path: |
-            tests/jest-output.txt
+            ${{ env.JEST_OUTPUT_LOG }}
             /tmp/async_handle_map.json
             /tmp/async_handles_*.json
             tests/child_active_handles_*.json
