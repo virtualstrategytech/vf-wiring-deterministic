@@ -1,52 +1,57 @@
-﻿name: CI
+name: CI
 
 on:
-  pull_request: {}
+  pull_request:
+    branches: [feat/wiring-agent, pr41-resolve]
   push:
-    branches: [feat/wiring-agent]
-  workflow_dispatch: {}
+    branches: [feat/wiring-agent, pr41-resolve]
 
 permissions:
   contents: read
 
+# Run all steps from the real Node package
 defaults:
   run:
     shell: bash
     working-directory: novain-platform/webhook
 
 jobs:
-  lint:
+  lint-18x:
     name: Lint (18.x)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
-      - run: npm ci
-      - run: npm run lint --if-present
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  test:
-    name: Test (18.x)
-    runs-on: ubuntu-latest
-    env:
-      CI: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: "18"
           cache: npm
           cache-dependency-path: novain-platform/webhook/package-lock.json
-      - run: npm ci
-      - run: npm test -- --ci --runInBand
-      - name: Upload Jest output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint --if-present
+
+  test-18x:
+    name: test (18.x)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          name: jest-output
-          path: |
-            tests/jest-output.txt
-            artifacts/**
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: novain-platform/webhook/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --ci --runInBand

@@ -1,4 +1,4 @@
-﻿# =========================
+# =========================
 #   ENV & LOCAL SECRETS
 # =========================
 .env
@@ -16,24 +16,6 @@ novain-platform/webhook/.env
 # =========================
 node_modules/
 dist/
-.DS_Store
-# Voiceflow exports/backups
-*.vf
-backups/
-# Node / tooling
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-lock.yaml
-# Env
-.env.*
-!/env/.example.env
-# OS / editor
-Thumbs.db
-.vscode/
-!.vscode/settings.json
-.idea/
-# Build / cache
 build/
 .cache/
 .tmp/
@@ -202,26 +184,6 @@ cython_debug/
 novain-platform/webhook/Pinecone.txt
 backup-do not commit/
 
-# CI / smoke artifacts (ignore heavy generated files)
-artifacts/
-artifacts-*/
-ci-artifacts-*/
-ci-artifacts*/
-.github/actions-artifacts/
-.github/pr-artifacts/
-novain-platform/smoke-artifacts/
-smoke-artifacts/
-tests/artifacts/
-
-# Ignore generated trace summary artifacts from local test runs
-tests/trace_summary*.json
-tests/*.trace_summary*.json
-tests/parse-trace.js
-
-# Local/test artifacts created by runs on developer machines or CI diagnostics
-# Do not commit these; they are transient logs/artifacts
-recent-runs.json
-jest-output-local.txt
-jest-output-local.*
-tests/jest-output-local.txt
-tests/jest-detect-local*
+# legacy/unused (typos from previous file) — ignore safely
+' n# local achive' nlocal_backups/
+' n# allow checked-in example env' n!.env.example

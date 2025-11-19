@@ -1,10 +1,10 @@
 name: Detect open handles
 
 on:
-  pull_request: {}
+  pull_request:
+    branches: [feat/wiring-agent, pr41-resolve]
   push:
-    branches: [feat/wiring-agent]
-  workflow_dispatch: {}
+    branches: [feat/wiring-agent, pr41-resolve]
 
 permissions:
   contents: read
@@ -17,23 +17,17 @@ defaults:
 jobs:
   detect-open-handles:
     runs-on: ubuntu-latest
-    env:
-      CI: "true"
-      JEST_OUTPUT_LOG: tests/jest-output.txt
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: "18"
           cache: npm
           cache-dependency-path: novain-platform/webhook/package-lock.json
-      - run: npm ci
-      - run: npm test -- --ci --runInBand --detectOpenHandles
-      - name: Upload open-handle logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: open-handle-logs
-          path: |
-            tests/jest-output.txt
-            artifacts/**
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run Jest with detectOpenHandles
+        run: npm test -- --ci --runInBand --detectOpenHandles
