@@ -1,0 +1,1278 @@
+
+> vf-wiring-deterministic@1.0.0 pretest
+> node ./scripts/pretest.js
+
+pretest: CI=true, skipping sync_secret
+
+> vf-wiring-deterministic@1.0.0 test
+> jest --detectOpenHandles --globalSetup=./tests/globalSetup.js --globalTeardown=./tests/globalTeardown.js --runInBand
+
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: Socket._handle.readStart
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: Socket._handle.readStart
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _final: not ended, call shutdown()
+NET 2161: afterShutdown destroyed=false
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: _final: not ended, call shutdown()
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: Socket._handle.readStart
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: Socket._handle.readStart
+NET 2161: afterShutdown destroyed=false
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: emit close
+NET 2161: emit close
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _read - n 16384 isConnecting? false hasHandle? true
+NET 2161: _final: not ended, call shutdown()
+NET 2161: afterShutdown destroyed=false
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: _final: not ended, call shutdown()
+NET 2161: afterShutdown destroyed=false
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: emit close
+globalSetup skipped in CI / SKIP_SYNC_SECRET=true
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/health',
+    path: null,
+    href: 'http://127.0.0.1:3000/health',
+    method: 'GET',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      Accept: [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/webhook',
+    path: null,
+    href: 'http://127.0.0.1:3000/webhook',
+    method: 'POST',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      'x-api-key': [Array],
+      Accept: [Array],
+      'Content-Length': [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: emit close
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/webhook',
+    path: null,
+    href: 'http://127.0.0.1:3000/webhook',
+    method: 'POST',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      'x-api-key': [Array],
+      Accept: [Array],
+      'Content-Length': [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: emit close
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: createConnection [
+  [Object: null prototype] {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: '127.0.0.1',
+    port: '3000',
+    hostname: '127.0.0.1',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/webhook',
+    path: null,
+    href: 'http://127.0.0.1:3000/webhook',
+    method: 'POST',
+    headers: [Object: null prototype] {
+      'Content-Type': [Array],
+      Connection: [Array],
+      'x-api-key': [Array],
+      Accept: [Array],
+      'Content-Length': [Array],
+      'User-Agent': [Array],
+      'Accept-Encoding': [Array]
+    },
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      defaultPort: 80,
+      protocol: 'http:',
+      options: [Object: null prototype],
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype],
+      freeSockets: [Object: null prototype] {},
+      keepAliveMsecs: 1000,
+      keepAlive: false,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 0,
+      createConnection: [Function: createPerRequestAgentConnection],
+      [Symbol(kCapture)]: false
+    },
+    proto: 'http',
+    keepAlive: false,
+    noDelay: true,
+    servername: '',
+    _agentKey: '127.0.0.1:3000:',
+    encoding: null
+  },
+  [Function (anonymous)],
+  [Symbol(normalizedArgs)]: true
+]
+NET 2161: pipe false null
+NET 2161: connect: attempting to connect to 127.0.0.1:3000 (addressType: 4)
+NET 2161: _read - n 16384 isConnecting? true hasHandle? true
+NET 2161: _read wait for connection
+NET 2161: emit close
+NET 2161: afterConnect
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close
+NET 2161: destroy
+NET 2161: close
+NET 2161: close handle
+NET 2161: emit close

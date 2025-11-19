@@ -1,0 +1,26 @@
+name: Dispatch test (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Informational target'
+        required: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print inputs
+        run: |
+          echo "INPUT target=${{ github.event.inputs.target || '<missing>' }}"
+
+      - name: Create test artifact
+        run: |
+          echo '{"ok":true}' > /tmp/dispatch-test.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-test-artifact
+          path: /tmp/dispatch-test.json

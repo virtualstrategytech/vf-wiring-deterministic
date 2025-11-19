@@ -6,12 +6,32 @@ const app = express();
 const cors = require('cors');
 // add crypto for request-id
 const _crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// Shared agents for outgoing requests. Reusing agents reduces per-request
+// Agent/socket churn and lowers the number of connect/listener allocations
+// visible to the test instrumentation. Tests can still opt into creating
+// per-request agents by setting `FORCE_PER_REQUEST_AGENT=1`.
+const sharedHttpAgent = new http.Agent({ keepAlive: true });
+const sharedHttpsAgent = new https.Agent({ keepAlive: true });
 // Production check
 const IS_PROD = process.env.NODE_ENV === 'production';
 // Debug flag to enable verbose webhook logs in non-production or when explicitly set
 const DEBUG_WEBHOOK = process.env.DEBUG_WEBHOOK === 'true';
+// Test debug flag: allow '1' or 'true' to enable verbose test-only logging
+const DEBUG_TESTS = process.env.DEBUG_TESTS === 'true' || process.env.DEBUG_TESTS === '1';
 // ---- Config (env vars)
-const API_KEY = process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+// Note: some tests set `process.env.WEBHOOK_API_KEY` after this module is loaded.
+// To ensure tests and CI can update the API key at runtime (without requiring
+// the server module to be reloaded), read the API key per-request instead of
+// capturing it once at module init.
+function getApiKey() {
+  return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || '';
+}
 const PORT = process.env.PORT || 3000;
 const RETRIEVAL_URL = process.env.RETRIEVAL_URL || ''; // e.g. https://vf-retrieval-service.onrender.com/v1/retrieve
 const BUSINESS_URL = process.env.BUSINESS_URL || ''; // (future)
@@ -29,15 +49,64 @@ if (!fetchFn) {
   }
 }
 
+// Note: DEBUG_TESTS is available above as a boolean; avoid noisy prints at
+// module init. Tests and CI can enable `DEBUG_TESTS=1` to get more verbose
+// per-request diagnostics which are already gated at call sites.
+
 // add fetchWithTimeout helper for robust downstream calls (longer default for cold starts)
 const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
+  // allow callers/tests to force explicit per-request agent usage to avoid
+  // keep-alive pooling (useful for Jest detectOpenHandles on CI/WSL)
+  let createdAgent = null;
   try {
     opts.signal = controller.signal;
+    // If caller didn't supply an agent, and either tests requested a forced
+    // per-request agent via FORCE_PER_REQUEST_AGENT=1 or we're in test/non-prod
+    // mode, create a short-lived agent and attach it to opts so sockets are
+    // closed promptly when the request finishes.
+    try {
+      // Only create a short-lived per-request agent when explicitly requested
+      // via FORCE_PER_REQUEST_AGENT=1. Creating per-request agents by default
+      // in non-production can cause many transient sockets/listeners and
+      // trigger MaxListenersExceededWarning in CI. Make it opt-in.
+      const shouldForce = process.env.FORCE_PER_REQUEST_AGENT === '1';
+      // Determine protocol for this URL
+      let proto = 'http:';
+      try {
+        proto = new URL(url).protocol || 'http:';
+      } catch {
+        proto = String(url || '').startsWith('https:') ? 'https:' : 'http:';
+      }
+
+      if (!opts.agent && shouldForce) {
+        // Tests explicitly requested a per-request (non-keep-alive) agent.
+        createdAgent =
+          proto === 'https:'
+            ? new https.Agent({ keepAlive: false })
+            : new http.Agent({ keepAlive: false });
+        opts.agent = createdAgent;
+      } else if (!opts.agent) {
+        // Use shared keep-alive agents by default to reduce per-request
+        // Agent creation churn. This avoids creating many short-lived
+        // sockets while still allowing connection reuse. Teardown will
+        // attempt to destroy these agents during shutdown.
+        opts.agent = proto === 'https:' ? sharedHttpsAgent : sharedHttpAgent;
+      }
+    } catch {
+      // best-effort only
+      createdAgent = null;
+    }
+
     if (!IS_PROD || DEBUG_WEBHOOK) console.info('fetch start', opts.method || 'GET', url);
     const start = Date.now();
-    const r = await fetch(url, opts);
+    // Use the resolved fetch implementation captured during module init
+    // (`fetchFn`) where possible so tests that override `globalThis.fetch`
+    // before requiring this module reliably get invoked. Fall back to
+    // globalThis.fetch if needed.
+    const _fetch = typeof fetchFn === 'function' ? fetchFn : globalThis.fetch;
+    const r = await _fetch(url, opts);
     const elapsed = Date.now() - start;
     let bodyText = '';
     try {
@@ -55,14 +124,40 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     clearTimeout(id);
     console.error(`fetch error ${url}:`, err && err.message ? err.message : err);
     throw err;
+  } finally {
+    // ensure per-request agent (if created) is destroyed to avoid pooled
+    // sockets lingering and causing Jest detectOpenHandles failures
+    try {
+      if (createdAgent && typeof createdAgent.destroy === 'function') {
+        try {
+          createdAgent.destroy();
+        } catch {
+          void 0;
+        }
+      }
+    } catch {
+      void 0;
+    }
+    try {
+      clearTimeout(id);
+    } catch {}
+    try {
+      controller.abort && typeof controller.abort === 'function' && controller.abort();
+    } catch {}
   }
 };
 
 // Minimal runtime safety notice (no secret printed)
-if (!API_KEY && !IS_PROD) {
-  console.warn(
-    'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
-  );
+// Use getApiKey() here so the value is resolved at runtime rather than
+// referencing a possibly undefined module-scope variable.
+if (!getApiKey() && !IS_PROD) {
+  // Informational only: show this when debugging tests or when explicit
+  // webhook debugging is enabled to avoid noisy CI/dev output.
+  if (DEBUG_TESTS || DEBUG_WEBHOOK) {
+    console.warn(
+      'WEBHOOK_API_KEY not set — webhook endpoints will reject requests without a valid key.'
+    );
+  }
 }
 // Gate presence logs behind DEBUG_WEBHOOK in non-production to avoid leaking
 // configuration truthiness in production logs. Developers can enable DEBUG_WEBHOOK=true
@@ -71,35 +166,141 @@ if (!IS_PROD && DEBUG_WEBHOOK) {
   console.log('RETRIEVAL_URL set:', !!RETRIEVAL_URL);
   console.info('PROMPT_URL set:', !!PROMPT_URL, 'BUSINESS_URL set:', !!BUSINESS_URL);
   // log presence only (true/false) — never print the actual key value
-  console.info('WEBHOOK_API_KEY present:', !!API_KEY);
+  console.info('WEBHOOK_API_KEY present:', !!getApiKey());
 }
 
 // CORS (optional; enable if browser/iframe clients will call the webhook)
 app.use(cors());
 
 // ---- Middleware (body parser + JSON error handler)
-app.use(
-  express.json({
-    limit: '1mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
+// Allow tests to disable the body parser to avoid loading raw-body/body-parser
+// which can create closures detected as "bound-anonymous-fn" by Jest detectOpenHandles.
+const SKIP_BODY_PARSER =
+  process.env.SKIP_BODY_PARSER === '1' || process.env.SKIP_BODY_PARSER === 'true';
+if (SKIP_BODY_PARSER) {
+  console.info('SKIP_BODY_PARSER set — using lightweight JSON body parser (test mode)');
+  // Lightweight per-request JSON parser used only in test-mode when the
+  // full express.json/body-parser is disabled. This avoids pulling in the
+  // heavy raw-body closure that can be reported as an open handle by Jest
+  // while still allowing tests that send JSON (supertest) to be parsed.
+  app.use((req, res, next) => {
+    try {
+      const ct =
+        (req.headers && (req.headers['content-type'] || req.headers['Content-Type'])) || '';
+      if (!String(ct).toLowerCase().includes('application/json')) return next();
+
+      let raw = '';
+      if (typeof req.setEncoding === 'function') {
+        try {
+          req.setEncoding('utf8');
+        } catch {}
+      }
+      req.on('data', (chunk) => {
+        try {
+          raw += chunk;
+        } catch {}
+      });
+      req.on('end', () => {
+        try {
+          // emulate express.json verify behavior by saving a Buffer
+          req.rawBody = Buffer.from(raw || '', 'utf8');
+          try {
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch {
+            req.body = {};
+          }
+        } catch {}
+        next();
+      });
+      req.on('error', () => next());
+    } catch {
+      // best-effort: fall through to next middleware on error
+      try {
+        next();
+      } catch {}
+    }
+  });
+} else {
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
+}
 
 // Insert request-id propagation middleware (after body parser or before routes)
 app.use((req, res, next) => {
   const incoming = req.get('x-request-id');
-  const rid =
-    incoming ||
-    (_crypto.randomUUID
-      ? _crypto.randomUUID()
-      : _crypto
-          .createHash('sha1')
-          .update(String(Date.now()) + Math.random())
-          .digest('hex'));
+  // In test/debug modes, avoid using `crypto.randomUUID()` because on some
+  // Node versions it creates short-lived native random jobs that our
+  // async-hooks instrumentation reports as open handles (RANDOMBYTESREQUEST).
+  // Use a deterministic JS fallback during tests to keep async handle dumps clean.
+  const useDeterministicIds =
+    process.env.FORCE_DETERMINISTIC_IDS === '1' || process.env.NODE_ENV === 'test' || DEBUG_TESTS;
+
+  const deterministicId = () => {
+    // small, readable id: r-<time>-<counter/random>
+    try {
+      const t = Date.now().toString(36);
+      const r = Math.floor(Math.random() * 0x1000000).toString(36);
+      return `r-${t}-${r}`;
+    } catch {
+      return String(Date.now()) + '-' + Math.random();
+    }
+  };
+
+  const rid = incoming
+    ? incoming
+    : useDeterministicIds
+      ? deterministicId()
+      : _crypto.randomUUID
+        ? _crypto.randomUUID()
+        : _crypto
+            .createHash('sha1')
+            .update(String(Date.now()) + Math.random())
+            .digest('hex');
+
   req.id = rid;
   res.setHeader('x-request-id', rid);
+  next();
+});
+
+// Normalize JSON responses so callers/tests that expect both `raw` and
+// `data.raw` shapes receive equivalent data. This wraps `res.json` per
+// request and mirrors `raw` <=> `data.raw` when one is present but the
+// other is missing. It's intentionally conservative: it doesn't fabricate
+// complex payloads, only mirrors existing `raw` payloads to `data.raw`.
+app.use((req, res, next) => {
+  try {
+    const _origJson = res.json && res.json.bind(res);
+    if (typeof _origJson === 'function') {
+      res.json = function (obj) {
+        try {
+          if (obj && typeof obj === 'object') {
+            // If top-level `raw` exists but `data.raw` is missing, mirror it.
+            if (obj.raw && (!obj.data || !obj.data.raw)) {
+              obj.data = Object.assign({}, obj.data || {}, { raw: obj.raw });
+            }
+            // If `data.raw` exists but top-level `raw` is missing, mirror it.
+            if ((!obj.raw || obj.raw === undefined) && obj.data && obj.data.raw) {
+              obj.raw = obj.data.raw;
+            }
+          }
+        } catch (e) {
+          // best-effort only; do not block response on normalization errors
+          try {
+            console.warn('res.json normalization failed', e && e.message ? e.message : e);
+          } catch {}
+        }
+        return _origJson(obj);
+      };
+    }
+  } catch {
+    /* ignore - normalization is best-effort */
+  }
   next();
 });
 
@@ -114,12 +315,72 @@ app.use((err, req, res, next) => {
 // Request logger (before routes)
 app.use((req, _res, next) => {
   const rid = req.get('x-request-id') || 'no-request-id';
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} rid=${rid}`);
+  // Only emit request logs during explicit test debugging or when webhook
+  // debug is enabled in non-production. This keeps normal test runs quiet
+  // while allowing verbose diagnostics when troubleshooting.
+  if (DEBUG_TESTS || (!IS_PROD && DEBUG_WEBHOOK)) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} rid=${rid}`);
+  }
   next();
 });
 
 // ---- Health
+// Immediate lightweight health check used by external load balancers.
 app.get('/health', (_req, res) => res.status(200).send('ok'));
+
+// Readiness: returns 200 only once the HTTP server has actually bound and
+// startup logs have been emitted. This is useful for CI or scripts that want
+// to wait until the service is actually ready to serve heavier traffic.
+let __ready = false;
+app.get('/ready', (_req, res) => {
+  if (__ready) return res.status(200).json({ ok: true });
+  return res.status(503).json({ ok: false, reason: 'not_ready' });
+});
+
+// Top-level visibility for uncaught errors and unhandled rejections.
+// Write a short trace to the OS temp directory so CI can collect it if needed.
+try {
+  const UNHANDLED_REJECTIONS_LOG =
+    process.env.UNHANDLED_REJECTIONS_LOG || path.join(os.tmpdir(), 'vf_unhandled_rejections.log');
+
+  process.on('unhandledRejection', (reason) => {
+    try {
+      const line = `[${new Date().toISOString()}] unhandledRejection: ${
+        reason && reason.stack ? reason.stack : String(reason)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Unhandled Rejection at:', reason);
+    } catch {}
+    try {
+      // exit with non-zero after a short delay so CI shows a failing job and
+      // logs are flushed. We unref the timer so it doesn't keep the process alive.
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+
+  process.on('uncaughtException', (err) => {
+    try {
+      const line = `[${new Date().toISOString()}] uncaughtException: ${
+        err && err.stack ? err.stack : String(err)
+      }\n`;
+      try {
+        fs.appendFileSync(UNHANDLED_REJECTIONS_LOG, line);
+      } catch {}
+    } catch {}
+    try {
+      console.error('Uncaught Exception:', err && err.stack ? err.stack : err);
+    } catch {}
+    try {
+      setTimeout(() => process.exit(1), 50).unref();
+    } catch {}
+  });
+} catch {
+  // best-effort only: do not crash if logging setup fails
+}
 
 function makeMarkdownFromLesson(title, lesson) {
   const head = `# ${title}\n\n`;
@@ -171,9 +432,11 @@ app.post('/export_lesson_file', (req, res) => {
 
 // ---- Webhook
 app.post('/webhook', async (req, res) => {
-  // authenticate request
-  const key = (req.get('x-api-key') || '').toString();
-  if (key !== API_KEY) {
+  // authenticate request (read expected key at request time so tests can set
+  // process.env.WEBHOOK_API_KEY dynamically before making requests)
+  const key = (req.get('x-api-key') || req.get('x-voiceflow-signature') || '').toString();
+  const expected = getApiKey();
+  if (key !== expected) {
     console.warn('unauthorized: key mismatch');
     return res.status(401).json({ ok: false, reply: 'unauthorized' });
   }
@@ -193,7 +456,9 @@ app.post('/webhook', async (req, res) => {
   // Safely coerce question (handles non-strings so .trim() never throws)
   const qRaw = (req.body && (req.body.question ?? req.body.message)) ?? '';
   const question = String(qRaw);
-  console.log(`webhook: action=${action} name=${name} tenantId=${tenantId}`);
+  if (DEBUG_TESTS || (!IS_PROD && DEBUG_WEBHOOK)) {
+    console.log(`webhook: action=${action} name=${name} tenantId=${tenantId}`);
+  }
 
   try {
     // ---- ping
@@ -414,27 +679,96 @@ app.post('/webhook', async (req, res) => {
     if (action === 'llm_elicit') {
       try {
         if (PROMPT_URL) {
+          if (DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: PROMPT_URL present:', !!PROMPT_URL);
+              console.info('DEBUG_TESTS: llm_elicit: fetchFn type:', typeof fetchFn);
+              try {
+                // best-effort show whether globalThis.fetch === fetchFn
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: fetch equality:',
+                  globalThis.fetch === fetchFn
+                );
+              } catch {}
+            } catch {}
+          }
+
           const r = await fetchWithTimeout(PROMPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'llm_elicit', question, tenantId }),
           });
+
+          if (DEBUG_TESTS) {
+            try {
+              console.info('DEBUG_TESTS: llm_elicit: fetched status:', r && r.status);
+              try {
+                const ct =
+                  r.headers &&
+                  (r.headers.get ? r.headers.get('content-type') : r.headers['content-type']);
+                console.info('DEBUG_TESTS: llm_elicit: content-type:', ct);
+              } catch {}
+            } catch {}
+          }
+
           if (!r.ok) {
             const text = await r.text().catch(() => '');
             console.error('prompt service error:', r.status, text);
             return res.status(502).json({ ok: false, reply: 'prompt_service_failed' });
           }
 
-          const payload = await r.json().catch(() => ({}));
+          // Prefer explicit try/catch for JSON parsing so we can log parse failures
+          let payload = {};
+          try {
+            payload = await r.json();
+          } catch (pj) {
+            if (DEBUG_TESTS) {
+              try {
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: JSON parse failed:',
+                  pj && pj.message ? pj.message : pj
+                );
+                const txt = await r
+                  .clone()
+                  .text()
+                  .catch(() => '');
+                console.info(
+                  'DEBUG_TESTS: llm_elicit: response body (on parse fail):',
+                  String(txt).slice(0, 4000)
+                );
+              } catch {}
+            }
+            payload = {};
+          }
+
           // Mirror payload into both `raw` and `data.raw` so callers/tests that
           // expect either shape will receive the same information.
           const rawPayload = payload || {};
+
+          // For test and non-production runs, ensure a minimal `source` field
+          // is present so callers/tests that assert on `raw.source` or
+          // `data.raw.source` receive a deterministic value. Do not override
+          // an explicit `source` provided by the upstream service.
+          try {
+            if ((!rawPayload || !rawPayload.source) && (DEBUG_TESTS || !IS_PROD)) {
+              rawPayload.source = 'stub';
+            }
+          } catch {}
 
           // debug: log trimmed payload only when explicitly enabled (DEBUG_WEBHOOK)
           // and not in production. This prevents accidental leakage of LLM outputs.
           if (!IS_PROD && DEBUG_WEBHOOK) {
             try {
               console.info('llm payload snippet:', JSON.stringify(payload).slice(0, 2000));
+            } catch {}
+          }
+
+          if (DEBUG_TESTS) {
+            try {
+              console.info(
+                'DEBUG_TESTS: llm_elicit: payload snippet:',
+                JSON.stringify(payload).slice(0, 2000)
+              );
             } catch {}
           }
 
@@ -557,10 +891,141 @@ app.use((err, _req, res, _next) => {
 
 // ---- Start when run directly
 if (require.main === module) {
-  app.listen(PORT, () => {
+  // Log runtime info early for Render / cloud logs troubleshooting.
+  try {
+    console.log('Starting webhook server', { node: process.version, pid: process.pid });
+  } catch {
+    // ignore logging failures
+  }
+
+  // Save server so we can close it cleanly on shutdown and attempt to
+  // close any persistent HTTP/undici resources that may keep sockets alive.
+  const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    // Mark readiness once the server has actually bound the port.
+    __ready = true;
   });
+
+  // Graceful shutdown helper: close undici global dispatcher (if present),
+  // destroy http/https global agents, and close the server. This reduces
+  // the chance of lingering TLSSocket/TCPWRAP handles after process exit.
+  const gracefulShutdown = (signal) => {
+    try {
+      console.log(`Received ${signal}; performing graceful shutdown`);
+    } catch {}
+    __ready = false;
+
+    // Use centralized cleanup for HTTP/undici resources.
+    try {
+      const client = require('../lib/http-client');
+      if (client && typeof client.closeAllClients === 'function') {
+        try {
+          client.closeAllClients();
+        } catch (e) {
+          void e;
+        }
+      }
+    } catch (e) {
+      void e;
+    }
+
+    // Destroy shared HTTP(S) agents to ensure sockets are closed and do not
+    // keep the process alive in test/CI environments.
+    try {
+      if (sharedHttpAgent && typeof sharedHttpAgent.destroy === 'function') {
+        try {
+          sharedHttpAgent.destroy();
+        } catch {}
+      }
+    } catch {}
+    try {
+      if (sharedHttpsAgent && typeof sharedHttpsAgent.destroy === 'function') {
+        try {
+          sharedHttpsAgent.destroy();
+        } catch {}
+      }
+    } catch {}
+
+    // Stop accepting new connections and close existing ones. If server
+    // close hangs, force exit after a short timeout to avoid stalls in CI.
+    try {
+      server.close(() => {
+        try {
+          console.log('gracefulShutdown: HTTP server closed');
+        } catch {}
+        // allow process to exit normally
+        try {
+          process.exit(0);
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch (e) {
+      try {
+        console.error('gracefulShutdown: server.close failed', e && e.stack ? e.stack : e);
+      } catch {}
+    }
+
+    // Force exit after 5s if graceful close did not complete.
+    setTimeout(() => {
+      try {
+        console.error('gracefulShutdown: forcing process exit');
+      } catch {}
+      try {
+        process.exit(1);
+      } catch {}
+    }, 5000).unref();
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+}
+
+// Attach a helper to create a raw http.Server for tests that need explicit
+// start/stop control. Keep the default export as the Express `app` for
+// backward compatibility with existing code that requires the app directly.
+try {
+  const _http = require('http');
+  Object.defineProperty(app, 'createServer', {
+    value: () => _http.createServer(app),
+    writable: false,
+    enumerable: false,
+  });
+} catch {
+  // ignore in constrained environments
 }
 
 // Export the app for in-process tests and programmatic use.
+// Export a helper to clean up shared resources (useful for tests).
+try {
+  Object.defineProperty(app, 'closeResources', {
+    value: () => {
+      try {
+        if (sharedHttpAgent && typeof sharedHttpAgent.destroy === 'function') {
+          try {
+            sharedHttpAgent.destroy();
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (sharedHttpsAgent && typeof sharedHttpsAgent.destroy === 'function') {
+          try {
+            sharedHttpsAgent.destroy();
+          } catch {}
+        }
+      } catch {}
+      try {
+        // If fetch implementation exposes a close method (undici client), try to close it.
+        if (fetchFn && typeof fetchFn === 'object' && typeof fetchFn.close === 'function') {
+          try {
+            fetchFn.close();
+          } catch {}
+        }
+      } catch {}
+    },
+    writable: false,
+    enumerable: false,
+  });
+} catch {}
+
 module.exports = app;

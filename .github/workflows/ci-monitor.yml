@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 name: CI monitor - collect failed run info
 
 on:
@@ -50,7 +49,6 @@ jobs:
               title: `CI failure: ${run.name} (run ${run.id})`,
               body: lines.join('\n')
             });
-=======
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI Monitor - collect failed run info
 
@@ -107,4 +105,7 @@ jobs:
               title: `CI failure: ${run.name} (${runId})`,
               body
             });
->>>>>>> origin/feat/wiring-agent
+        chore/ci-stabilize-and-clean
+        origin/feat/wiring-agent
+
+        feat/wiring-agent

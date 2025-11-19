@@ -1,4 +1,14 @@
 // Ensure env is set before requiring the server so module-level flags are evaluated correctly
+const fs = require('fs');
+const path = require('path');
+const secretFile = path.resolve(__dirname, 'webhook.secret');
+if (!process.env.WEBHOOK_API_KEY && fs.existsSync(secretFile)) {
+  try {
+    process.env.WEBHOOK_API_KEY = fs.readFileSync(secretFile, 'utf8').trim();
+  } catch {
+    // ignore
+  }
+}
 process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
 process.env.NODE_ENV = 'development';
 process.env.DEBUG_WEBHOOK = 'true';
@@ -44,28 +54,88 @@ async function captureConsoleAsync(action) {
 
 describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
   jest.setTimeout(20000);
+  // To avoid leaving handles, create a short-lived local HTTP server from the
+  // exported Express `app` instance and target it via its base URL. This lets
+  // the test control server env (DEBUG_WEBHOOK) while still ensuring explicit
+  // shutdown to avoid Jest open-handle warnings.
+  const http = require('http');
+  let server;
+  let base;
+  // track connections so we can destroy them on teardown to avoid lingering
+  // keep-alive sockets that prevent the server from fully closing
+  let connections = new Set();
+
+  beforeAll(async () => {
+    server = http.createServer(app);
+    // Track sockets so we can force-close them in afterAll
+    server.on('connection', (socket) => {
+      connections.add(socket);
+      socket.on('close', () => connections.delete(socket));
+    });
+    try {
+      if (typeof server.unref === 'function') server.unref();
+      if (typeof server.setTimeout === 'function') server.setTimeout(0);
+      server.keepAliveTimeout = 0;
+    } catch {}
+    await new Promise((resolve) => server.listen(0, resolve));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
 
   afterAll(async () => {
     try {
+      // Destroy any active sockets to ensure server.close() can complete
+      try {
+        for (const s of Array.from(connections)) {
+          try {
+            s.destroy();
+          } catch {}
+        }
+      } catch {}
+
+      // Remove listeners to avoid bound anonymous functions remaining
+      try {
+        if (server && typeof server.removeAllListeners === 'function') {
+          try {
+            server.removeAllListeners('connection');
+            server.removeAllListeners('request');
+            server.removeAllListeners('listening');
+          } catch {}
+        }
+      } catch {}
+
+      if (server && typeof server.close === 'function') {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    } catch {}
+    try {
+      // Ensure exported app shared agents are destroyed to avoid lingering
+      // keepAlive sockets that can trigger Jest detectOpenHandles.
+      try {
+        if (app && typeof app.closeResources === 'function') {
+          try {
+            app.closeResources();
+          } catch {}
+        }
+      } catch {}
       const http = require('http');
       const https = require('https');
-      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
+      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function')
         http.globalAgent.destroy();
-      }
-      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
+      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function')
         https.globalAgent.destroy();
-      }
-      await new Promise((resolve) => setImmediate(resolve));
     } catch {}
   });
 
   it('logs llm payload snippet when enabled', async () => {
     const logs = await captureConsoleAsync(async () => {
-      const resp = await request(app)
+      // Ensure the client closes the socket after the request to avoid server
+      // keep-alive connections that can keep the HTTP server handle open.
+      const req = request(base)
         .post('/webhook')
         .set('x-api-key', process.env.WEBHOOK_API_KEY)
-        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' })
-        .timeout({ deadline: 5000 });
+        .set('Connection', 'close')
+        .send({ action: 'llm_elicit', question: 'Q', tenantId: 't' });
+      const resp = await req;
 
       expect(resp.status).toBeGreaterThanOrEqual(200);
       expect(resp.status).toBeLessThan(300);
@@ -76,69 +146,4 @@ describe('llm payload logging when DEBUG_WEBHOOK=true', () => {
     expect(/llm payload snippet|llm payload|raw payload/i.test(combined)).toBe(true);
   });
 });
-// Helper: POST JSON and return { status, data }
-// (kept at bottom in case other helpers want to use it)
-function postJson(url, body, headers = {}, timeout = 5000) {
-  const http = require('http');
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(url);
-      const data = JSON.stringify(body);
-      const options = {
-        method: 'POST',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        agent: false,
-        headers: Object.assign(
-          {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            Connection: 'close',
-          },
-          headers
-        ),
-      };
-
-      const req = http.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            const text = Buffer.concat(chunks).toString();
-            let json;
-            try {
-              json = JSON.parse(text);
-            } catch {
-              json = text;
-            }
-            resolve({ status: res.statusCode, data: json });
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        clearTimeout(timer);
-        try {
-          req.destroy();
-        } catch {}
-        reject(err);
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      req.write(data);
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
+// Note: helper removed (unused) to avoid lint warnings in CI

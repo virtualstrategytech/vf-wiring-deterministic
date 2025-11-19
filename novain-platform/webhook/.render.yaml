@@ -1,0 +1,17 @@
+# Render service snippet for vf-webhook-staging
+# Paste into Render "Manual YAML" import or use as reference when creating the service.
+services:
+  - type: web_service
+    name: vf-webhook-staging
+    env: node
+    branch: feature/staging
+    repo: https://github.com/virtualstrategytech/vf-wiring-deterministic
+    root: novain-platform/webhook
+    buildCommand: npm ci
+    startCommand: npm start
+    # Note: secrets (env vars) should be configured in the Render dashboard under Environment -> Secrets
+    envVars:
+      - key: WEBHOOK_BASE
+        value: https://vf-webhook-staging.onrender.com
+      - key: DEBUG_WEBHOOK_ENABLED
+        value: 'false'

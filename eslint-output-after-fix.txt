@@ -1,0 +1,9 @@
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\globalTeardown.js:344:24: '_e' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\globalTeardown.js:347:24: '_e' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\globalTeardown.js:350:24: '_e' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\helpers\request-helper.js:17:0: Parsing error: Declaration or statement expected. [Error]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\jest.instrumentation.js:99:10: '__restoreAsyncResource' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\server-runner.js:126:24: 'e' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+C:\Users\peais\Documents\Virtual Strategy Tech\VST NovAIn Voiceflow\vf-wiring-deterministic\tests\server-runner.js:155:18: 'e' is defined but never used. [Warning/@typescript-eslint/no-unused-vars]
+
+7 problems

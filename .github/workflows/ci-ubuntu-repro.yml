@@ -1,0 +1,52 @@
+﻿name: Ubuntu reproduction (manual)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  reproduce-tests:
+    name: Run tests on ubuntu-latest (with DEBUG_WEBHOOK)
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: "--max_old_space_size=4096"
+      DEBUG_WEBHOOK: "1"
+      CI: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create logs dir
+        run: mkdir -p logs
+
+      - name: Run Jest (in-band) and capture output
+        run: |
+          npx jest --runInBand --detectOpenHandles 2>&1 | tee logs/jest-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "jest exit code: $EXIT_CODE"
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            tail -n 200 logs/jest-output.txt || true
+          fi
+          exit $EXIT_CODE
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-repro-logs
+          path: |
+            logs/jest-output.txt
+            logs/**
+
+      - name: Print node/npm versions
+        run: |
+          node --version
+          npm --version

@@ -10,7 +10,7 @@ try {
 $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
 $plain = ($plain -replace '[^\u0020-\u007E]','').Trim()
 
-if (-not $plain) { Write-Error "Sanitized secret is empty. Aborting."; exit 1 }
+if ([string]::IsNullOrEmpty($plain)) { Write-Error "Sanitized secret is empty. Aborting."; exit 1 }
 
 $env:WEBHOOK_API_KEY = $plain
 

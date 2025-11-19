@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "checkJs": false,
+    "target": "ES2021",
+    "module": "commonjs",
+    "skipLibCheck": true,
+    "noResolve": true,
+    "types": []
+  },
+  "exclude": [
+    "node_modules",
+    "smoke-artifacts",
+    "artifacts",
+    "**/smoke-artifacts/**",
+    "**/artifacts/**",
+    ".github"
+  ]
+}

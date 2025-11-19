@@ -1,0 +1,40 @@
+name: Manual smoke (simple)
+
+on:
+  workflow_dispatch:
+    inputs:
+      webhook_base:
+        description: 'Target webhook base URL (e.g. https://my-deploy.onrender.com)'
+        required: true
+      webhook_api_key:
+        description: 'Webhook API key'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  run-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WEBHOOK_BASE: ${{ github.event.inputs.webhook_base }}
+      WEBHOOK_API_KEY: ${{ github.event.inputs.webhook_api_key }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install deps
+        run: |
+          npm ci
+
+      - name: Run smoke tests (single file)
+        run: |
+          # normalize and print a masked base for logs
+          echo "TARGET_BASE=$WEBHOOK_BASE"
+          npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000

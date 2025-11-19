@@ -1,10 +1,12 @@
 # normalize tests\webhook.secret: remove BOM/CR, trim whitespace, write UTF-8 without BOM
-$secretPath = Resolve-Path (Join-Path $PSScriptRoot '..\tests\webhook.secret')
+$secretPath = Resolve-Path (Join-Path $PSScriptRoot '..\tests\webhook.secret') -ErrorAction SilentlyContinue
 
-if (-not (Test-Path $secretPath)) {
-  Write-Error "Secret file not found: $secretPath"
+if ($null -eq $secretPath) {
+  Write-Error "Secret file not found: $PSScriptRoot\..\tests\webhook.secret"
   Exit 1
 }
+
+$secretPath = $secretPath.Path
 
 $content = Get-Content $secretPath -Raw
 

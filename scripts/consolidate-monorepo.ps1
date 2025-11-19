@@ -26,9 +26,9 @@ Remove-Item -Recurse -Force ".\vf-agent-prompt-engineer\node_modules" -ErrorActi
 Remove-Item -Recurse -Force ".\vf-agent-business-logic\node_modules" -ErrorAction SilentlyContinue
 
 # init root git if needed and commit
-if (-not (Test-Path .git)) { git init }
-git add . 
-git commit -m "Consolidate into novain-platform monorepo (import configs)" || Write-Output "Nothing to commit"
+if ((Test-Path -Path .git -PathType Any -ErrorAction SilentlyContinue) -eq $false) { git init }
+git add .
+git commit -m "Consolidate into novain-platform monorepo (import configs)" || Write-Output -InputObject "Nothing to commit"
 
 Pop-Location
-Write-Output "Done. Inspect novain-platform/* and push when ready."
+Write-Output -InputObject "Done. Inspect novain-platform/* and push when ready."

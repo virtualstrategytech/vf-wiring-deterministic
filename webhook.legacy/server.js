@@ -27,16 +27,37 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  // prefer client-provided id, otherwise generate one
   const incoming = req.get('x-request-id');
-  const rid =
-    incoming ||
-    (_crypto.randomUUID
-      ? _crypto.randomUUID()
-      : _crypto
-          .createHash('sha1')
-          .update(String(Date.now()) + Math.random())
-          .digest('hex'));
+  // In test/debug modes, avoid using `crypto.randomUUID()` because it can
+  // create short-lived native RNG jobs that show up in async-hooks dumps
+  // (RANDOMBYTESREQUEST). Use a small deterministic JS fallback during
+  // tests to keep async handle dumps clean.
+  const useDeterministicIds =
+    process.env.FORCE_DETERMINISTIC_IDS === '1' ||
+    process.env.NODE_ENV === 'test' ||
+    !!process.env.DEBUG_TESTS;
+
+  const deterministicId = () => {
+    try {
+      const t = Date.now().toString(36);
+      const r = Math.floor(Math.random() * 0x1000000).toString(36);
+      return `r-${t}-${r}`;
+    } catch {
+      return String(Date.now()) + '-' + Math.random();
+    }
+  };
+
+  const rid = incoming
+    ? incoming
+    : useDeterministicIds
+      ? deterministicId()
+      : _crypto.randomUUID
+        ? _crypto.randomUUID()
+        : _crypto
+            .createHash('sha1')
+            .update(String(Date.now()) + Math.random())
+            .digest('hex');
+
   req.id = rid;
   res.setHeader('x-request-id', rid);
   next();
@@ -264,7 +285,7 @@ app.post('/export_lesson_file', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Webhook listening on :${PORT}`);
   console.log(
     `WEBHOOK_API_KEY present: ${!!process.env.WEBHOOK_API_KEY} len=${process.env.WEBHOOK_API_KEY ? process.env.WEBHOOK_API_KEY.length : 0}`
@@ -274,3 +295,71 @@ app.listen(PORT, () => {
   );
   console.log(`Effective API_KEY length: ${API_KEY.length}`);
 });
+
+// Graceful shutdown: try to close any persistent HTTP/undici resources that
+// could keep sockets alive (helps CI/tests to exit cleanly).
+function gracefulShutdown(signal) {
+  try {
+    console.log(`Received ${signal}; shutting down`);
+  } catch {}
+
+  // try to close undici global dispatcher if available
+  try {
+    const undici = require('undici');
+    const getGd = typeof undici.getGlobalDispatcher === 'function';
+    const gd = getGd ? undici.getGlobalDispatcher() : undici.globalDispatcher;
+    if (gd && typeof gd.close === 'function') {
+      try {
+        gd.close();
+        console.log('gracefulShutdown: closed undici global dispatcher');
+      } catch (e) {
+        console.error('gracefulShutdown: undici.close failed', e && e.stack ? e.stack : e);
+      }
+    }
+  } catch (e) {
+    // ignore if undici not installed
+    void e;
+  }
+
+  // centralize client cleanup
+  try {
+    // require the centralized http-client cleanup helper from repo root
+    const client = require('../novain-platform/lib/http-client');
+    if (client && typeof client.closeAllClients === 'function') {
+      try {
+        client.closeAllClients();
+      } catch (e) {
+        void e;
+      }
+    }
+  } catch (e) {
+    void e;
+  }
+
+  try {
+    server.close(() => {
+      try {
+        console.log('gracefulShutdown: server closed');
+      } catch {}
+      try {
+        process.exit(0);
+      } catch {}
+    });
+  } catch (e) {
+    try {
+      console.error('gracefulShutdown: server.close failed', e && e.stack ? e.stack : e);
+    } catch {}
+  }
+
+  setTimeout(() => {
+    try {
+      console.error('gracefulShutdown: forcing exit');
+    } catch {}
+    try {
+      process.exit(1);
+    } catch {}
+  }, 5000).unref();
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

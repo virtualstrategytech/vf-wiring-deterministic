@@ -1,8 +1,20 @@
+param(
+  [Parameter(Mandatory=$false)] [string]$WebhookUrl = $env:WEBHOOK_URL,
+  [Parameter(Mandatory=$false)] [string]$ApiKey = $env:WEBHOOK_API_KEY
+)
+
 $params = @{
-  Uri = "$env:WEBHOOK_URL/webhook"
+  Uri = "$WebhookUrl/webhook"
   Method = 'Post'
-  Headers = @{ 'x-api-key' = $env:WEBHOOK_API_KEY }
+  Headers = @{ 'x-api-key' = $ApiKey }
   ContentType = 'application/json'
   Body = '{"action":"ping","question":"hi"}'
 }
-Invoke-RestMethod @params
+
+try {
+  Invoke-RestMethod @params -ErrorAction Stop
+  Write-Output "Ping posted to $($params.Uri)"
+} catch {
+  Write-Error "Ping failed: $($_.Exception.Message)"
+  exit 1
+}

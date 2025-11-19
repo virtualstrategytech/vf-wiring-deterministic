@@ -1,202 +1,206 @@
-﻿const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
+﻿// tests/webhook.smoke.test.js
+'use strict';
 
-const secretFile = path.resolve(__dirname, 'webhook.secret');
-const key =
-  process.env.WEBHOOK_API_KEY ||
-  (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
+// Hard skip at the very top: do nothing when SKIP_SMOKE is set.
+// This keeps CI quiet—no fs/network/logging during import.
+if (process.env.SKIP_SMOKE === 'true' || process.env.SKIP_SMOKE === '1') {
+  describe.skip('webhook smoke (skipped by SKIP_SMOKE)', () => {});
+} else {
+  const http = require('http');
+  const https = require('https');
+  const fs = require('fs');
+  const path = require('path');
 
-const base = process.env.WEBHOOK_BASE || 'http://127.0.0.1:3000';
+  const secretFile = path.resolve(__dirname, 'webhook.secret');
+  const key =
+    process.env.WEBHOOK_API_KEY ||
+    (fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : 'test123');
 
-describe('webhook smoke', () => {
-  // Allow longer for remote operations in CI (business/prompt services may be slower)
-  jest.setTimeout(60000);
+  const rawBase = (process.env.WEBHOOK_BASE || '').trim();
 
-  afterAll(async () => {
+  function _normalizeBase(b) {
+    if (!b) return b;
     try {
-      if (http && http.globalAgent && typeof http.globalAgent.destroy === 'function') {
-        http.globalAgent.destroy();
+      return String(b).trim().replace(/\/+$/u, '');
+    } catch {
+      return b;
+    }
+  }
+  const base = _normalizeBase(rawBase) || 'http://127.0.0.1:3000';
+
+  // Validate WEBHOOK_BASE (when provided) with a masked error.
+  function _maskBaseForLogs(b) {
+    try {
+      const u = new URL(b);
+      return `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+    } catch {
+      return '[invalid-base]';
+    }
+  }
+  try {
+    if (rawBase) new URL(base);
+  } catch {
+    throw new Error(`WEBHOOK_BASE is not a valid URL: ${_maskBaseForLogs(base)}`);
+  }
+  if (rawBase) {
+    const hasEnvKey = Boolean(process.env.WEBHOOK_API_KEY);
+    const secretFileExists = fs.existsSync(secretFile);
+    if (!hasEnvKey && !secretFileExists) {
+      throw new Error(
+        'WEBHOOK_BASE is set but WEBHOOK_API_KEY is missing (env or tests/webhook.secret). ' +
+          'Set SKIP_SMOKE=true to skip, or provide the secret.'
+      );
+    }
+  }
+
+  // Prefer in-process app (for local runs) if available.
+  let _localApp = null;
+  try {
+    if (key && !process.env.WEBHOOK_API_KEY) process.env.WEBHOOK_API_KEY = String(key);
+  } catch {}
+  try {
+    _localApp = require('../novain-platform/webhook/server');
+    if (!_localApp || typeof _localApp !== 'function') _localApp = null;
+  } catch {}
+
+  // Timeouts (overridable via env).
+  const HEALTH_TIMEOUT = Number(process.env.WEBHOOK_HEALTH_TIMEOUT) || 5000;
+  const PING_TIMEOUT = Number(process.env.WEBHOOK_PING_TIMEOUT) || 7000;
+  const GENERATE_TIMEOUT = Number(process.env.WEBHOOK_GENERATE_TIMEOUT) || 45000;
+
+  // Lightweight retry helper for transient ECONNREFUSED.
+  async function withRetries(fn, retries = 8, delay = 500) {
+    let lastErr;
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const refused = err?.code === 'ECONNREFUSED' || /ECONNREFUSED/.test(err?.message || '');
+        if (!refused || i + 1 === retries) throw err;
+        await new Promise((r) => setTimeout(r, delay));
       }
-      if (https && https.globalAgent && typeof https.globalAgent.destroy === 'function') {
-        https.globalAgent.destroy();
+    }
+    throw lastErr;
+  }
+
+  // Delegate HTTP to shared helper.
+  const { requestApp } = require('./helpers/request-helper');
+
+  async function postJson(url, body, headers = {}, timeout = 5000) {
+    const u = new URL(url);
+    const baseUrl = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+    const pathOnly = u.pathname + u.search;
+    const target =
+      _localApp && (baseUrl === 'http://127.0.0.1:3000' || baseUrl === 'http://localhost:3000')
+        ? _localApp
+        : baseUrl;
+    const result = await requestApp(target, {
+      method: 'post',
+      path: pathOnly,
+      body,
+      headers,
+      timeout,
+    });
+    return {
+      status: result?.status ?? result?.statusCode ?? 0,
+      data: result && (result.body ?? result.data),
+    };
+  }
+
+  async function getText(url, timeout = 3000) {
+    const u = new URL(url);
+    const baseUrl = `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+    const pathOnly = u.pathname + u.search;
+    const target =
+      _localApp && (baseUrl === 'http://127.0.0.1:3000' || baseUrl === 'http://localhost:3000')
+        ? _localApp
+        : baseUrl;
+    const result = await requestApp(target, { method: 'get', path: pathOnly, timeout });
+    return typeof result.body === 'string' ? result.body : JSON.stringify(result.body);
+  }
+
+  // ---------------------- Tests ----------------------
+  describe('webhook smoke', () => {
+    jest.setTimeout(60000);
+
+    afterAll(async () => {
+      try {
+        http?.globalAgent?.destroy?.();
+      } catch {}
+      try {
+        https?.globalAgent?.destroy?.();
+      } catch {}
+      await new Promise((r) => process.nextTick(r));
+    });
+
+    test('GET /health returns ok', async () => {
+      if (!base || !(base.startsWith('http://') || base.startsWith('https://'))) {
+        throw new Error(`WEBHOOK_BASE is not a valid HTTP URL: ${_maskBaseForLogs(base)}`);
       }
-      await new Promise((r) => setImmediate(r));
-    } catch {}
-  });
+      const url = `${base}/health`;
+      const retries = Number(process.env.WEBHOOK_HEALTH_RETRIES) || 12;
+      const retryDelay = Number(process.env.WEBHOOK_HEALTH_RETRY_DELAY) || 2000;
+      const text = await withRetries(() => getText(url, HEALTH_TIMEOUT), retries, retryDelay);
+      expect(typeof text).toBe('string');
+      expect(text.trim().toLowerCase()).toBe('ok');
+    });
 
-  test('GET /health returns ok', async () => {
-    const url = `${base}/health`;
-    const resp = await getText(url, 5000);
-    expect(typeof resp).toBe('string');
-    expect(resp.trim().toLowerCase()).toBe('ok');
-  });
+    test('POST /webhook (ping) returns 2xx', async () => {
+      const body = { action: 'ping', question: 'hello', name: 'Bob', tenantId: 'default' };
+      const resp = await withRetries(
+        () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, PING_TIMEOUT),
+        6,
+        300
+      );
+      expect(resp.status).toBeGreaterThanOrEqual(200);
+      expect(resp.status).toBeLessThan(300);
+      expect(resp.data).toBeDefined();
+    });
 
-  test('POST /webhook (ping) returns 2xx', async () => {
-    const body = { action: 'ping', question: 'hello', name: 'Bob', tenantId: 'default' };
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 7000);
-    expect(resp.status).toBeGreaterThanOrEqual(200);
-    expect(resp.status).toBeLessThan(300);
-    expect(resp.data).toBeDefined();
-  });
-
-  test('POST /webhook generate_lesson (best-effort)', async () => {
-    const body = { action: 'generate_lesson', question: 'Teach me SPQA', tenantId: 'default' };
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 45000);
-
-    // Accept success (2xx) OR a controlled server-side failure (500) when external services are not configured.
-    if (resp.status >= 200 && resp.status < 300) {
-      if (resp.data && typeof resp.data === 'object') {
-        expect(
-          resp.data.lessonTitle !== undefined ||
-            resp.data.lesson !== undefined ||
-            resp.data.reply !== undefined
-        ).toBeTruthy();
+    test('POST /webhook generate_lesson (best-effort)', async () => {
+      const body = { action: 'generate_lesson', question: 'Teach me SPQA', tenantId: 'default' };
+      const resp = await withRetries(
+        () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, GENERATE_TIMEOUT),
+        4,
+        500
+      );
+      if (resp.status >= 200 && resp.status < 300) {
+        if (resp.data && typeof resp.data === 'object') {
+          expect(
+            resp.data.lessonTitle !== undefined ||
+              resp.data.lesson !== undefined ||
+              resp.data.reply !== undefined
+          ).toBeTruthy();
+        } else {
+          expect(resp.data).toBeDefined();
+        }
       } else {
-        expect(resp.data).toBeDefined();
+        expect(resp.status).toBe(500);
       }
-    } else {
-      // allow 500 but fail other unexpected statuses
-      expect(resp.status).toBe(500);
-    }
-  });
+    });
 
-  test('POST /webhook generate_quiz (best-effort)', async () => {
-    const body = { action: 'generate_quiz', question: 'Quiz me on SPQA', tenantId: 'default' };
-    const resp = await postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, 45000);
-
-    if (resp.status >= 200 && resp.status < 300) {
-      if (resp.data && typeof resp.data === 'object') {
-        expect(
-          resp.data.quiz !== undefined ||
-            resp.data.mcqCount !== undefined ||
-            resp.data.mcq !== undefined ||
-            resp.data.reply !== undefined
-        ).toBeTruthy();
+    test('POST /webhook generate_quiz (best-effort)', async () => {
+      const body = { action: 'generate_quiz', question: 'Quiz me on SPQA', tenantId: 'default' };
+      const resp = await withRetries(
+        () => postJson(`${base}/webhook`, body, { 'x-api-key': String(key) }, GENERATE_TIMEOUT),
+        4,
+        500
+      );
+      if (resp.status >= 200 && resp.status < 300) {
+        if (resp.data && typeof resp.data === 'object') {
+          expect(
+            resp.data.quiz !== undefined ||
+              resp.data.mcqCount !== undefined ||
+              resp.data.mcq !== undefined ||
+              resp.data.reply !== undefined
+          ).toBeTruthy();
+        } else {
+          expect(resp.data).toBeDefined();
+        }
       } else {
-        expect(resp.data).toBeDefined();
+        expect(resp.status).toBe(500);
       }
-    } else {
-      // allow 500 as above
-      expect(resp.status).toBe(500);
-    }
-  });
-});
-
-// Helper: POST JSON and return { status, data }
-function postJson(url, body, headers = {}, timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(url);
-      const data = JSON.stringify(body);
-      const options = {
-        method: 'POST',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        // prevent socket pooling / keep-alive so Jest can exit cleanly
-        agent: false,
-        headers: Object.assign(
-          {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            Connection: 'close',
-          },
-          headers
-        ),
-      };
-
-      const transport = u.protocol === 'https:' ? https : http;
-      const req = transport.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            const text = Buffer.concat(chunks).toString();
-            let json;
-            try {
-              json = JSON.parse(text);
-            } catch {
-              json = text;
-            }
-            resolve({ status: res.statusCode, data: json });
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        clearTimeout(timer);
-        try {
-          req.destroy();
-        } catch {}
-        reject(err);
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      req.write(data);
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-// Helper: simple GET returning plain text
-function getText(url, timeout = 3000) {
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(url);
-      const options = {
-        method: 'GET',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: u.pathname + u.search,
-        agent: false,
-        headers: { Connection: 'close' },
-      };
-
-      const transport = u.protocol === 'https:' ? https : http;
-      const req = transport.request(options, (res) => {
-        clearTimeout(timer);
-        let chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          try {
-            resolve(Buffer.concat(chunks).toString());
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        clearTimeout(timer);
-        try {
-          req.destroy();
-        } catch {}
-        reject(err);
-      });
-
-      const timer = setTimeout(() => {
-        try {
-          req.destroy();
-        } catch {}
-        reject(new Error('timeout'));
-      }, timeout);
-
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
+    });
   });
 }

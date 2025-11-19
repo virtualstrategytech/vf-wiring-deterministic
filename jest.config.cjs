@@ -1,15 +1,4 @@
-<<<<<<< HEAD
-﻿/** @type {import('jest').Config} */
-module.exports = {
-  testEnvironment: "node",
-  testTimeout: Number(process.env.JEST_TIMEOUT || 10000),
-  verbose: true,
-  globalSetup: "<rootDir>/tests/globalSetup.js",
-  globalTeardown: "<rootDir>/tests/globalTeardown.js",
-  setupFilesAfterEnv: ["<rootDir>/tests/jest.setup.js"],
-  collectCoverage: false,
-=======
-﻿module.exports = {
+ module.exports = {
   testEnvironment: 'node',
   globalSetup: '<rootDir>/tests/globalSetup.js',
   globalTeardown: '<rootDir>/tests/globalTeardown.js',
@@ -26,5 +15,5 @@ module.exports = {
   // before any modules that may open sockets during require-time.
   setupFiles: ['<rootDir>/tests/jest.instrumentation.js', '<rootDir>/tests/jest.netblock.js'],
   setupFilesAfterEnv: ['<rootDir>/tests/jest.setup.js'],
->>>>>>> origin/feat/wiring-agent
+       feat/wiring-agent
 };

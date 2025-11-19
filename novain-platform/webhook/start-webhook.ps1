@@ -10,11 +10,24 @@ try {
 $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
 $plain = ($plain -replace '[^\u0020-\u007E]','').Trim()
 
-if (-not $plain) { Write-Error "Sanitized secret is empty. Aborting."; exit 1 }
+if ([string]::IsNullOrEmpty($plain)) { Write-Error "Sanitized secret is empty. Aborting."; exit 1 }
 
 $env:WEBHOOK_API_KEY = $plain
-if (-not $env:PORT) { $env:PORT = '3000' }
+if ([string]::IsNullOrEmpty($env:PORT)) { $env:PORT = '3000' }
 
 Set-Location $PSScriptRoot
+<#
+start-webhook.ps1
+Starts the webhook in the current PowerShell window. Ensures required envs are present
+and prints a short message. This keeps behavior unchanged (runs npm start in-process).
+#>
+if ([string]::IsNullOrEmpty($env:WEBHOOK_API_KEY)) {
+  Write-Warning "WEBHOOK_API_KEY is not set. The server may fail to start or accept requests."
+}
 Write-Output "Starting webhook in this window (secret not echoed)..."
-npm start
+try {
+  npm start
+} catch {
+  Write-Error "Failed to start webhook via npm: $($_.Exception.Message)"
+  exit 1
+}

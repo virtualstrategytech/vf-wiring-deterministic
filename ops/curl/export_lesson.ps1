@@ -35,7 +35,7 @@ try {
     -Body $body `
     -OutFile $OutFile
 
-  Write-Host "Saved:" $OutFile
+  Write-Output "Saved:" $OutFile
   exit 0
 }
 catch {
@@ -57,14 +57,14 @@ try {
     -ContentType 'application/json; charset=utf-8' `
     -Body $payload
 
-  if (-not $resp.ok) { throw "Webhook replied not ok: $($resp.reply)" }
-  if (-not $resp.url -or -not ($resp.url -like 'data:text/markdown*')) { throw "No markdown data URL in response." }
+  if ($null -eq $resp.ok -or -not $resp.ok) { throw "Webhook replied not ok: $($resp.reply)" }
+  if ($null -eq $resp.url -or -not ($resp.url -like 'data:text/markdown*')) { throw "No markdown data URL in response." }
 
   # Parse the data: URL and save it
   if ($resp.url -match '^data:text/markdown;base64,(?<b64>.+)$') {
     $bytes = [Convert]::FromBase64String($Matches['b64'])
     [IO.File]::WriteAllBytes($OutFile, $bytes)
-    Write-Host "Saved (from data URL):" $OutFile
+    Write-Output "Saved (from data URL):" $OutFile
   } else {
     throw "Unexpected data URL format."
   }
