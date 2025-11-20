@@ -1,15 +1,21 @@
 name: CI - child-process server tests
 
 on:
-  pull_request: {}
+  # Run this workflow for PRs targeting main (populates the "status checks" list)
+  pull_request:
+    branches: [main]
+
+  # Run when code lands on main (e.g., after merging a PR) to seed contexts on the default branch
+  push:
+    branches: [main]
+
+  # Manual run with optional debug flag
   workflow_dispatch:
     inputs:
       DEBUG_TESTS:
         description: 'Enable debug traces (set to "1" to enable)'
         required: false
         default: "0"
-  push:
-    branches: [feat/wiring-agent]
 
 permissions:
   contents: read
