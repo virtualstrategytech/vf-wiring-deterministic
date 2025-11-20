@@ -1,53 +1,89 @@
+# .github/workflows/ci-monitor.yml
 name: CI Monitor - collect failed run info
 
 on:
   workflow_run:
-    workflows:
-      - CI - child-process server tests
-      - Detect open handles
-    types: [completed]
+    types: [completed] # watch all workflows; we'll filter with "if"
 
 permissions:
-  contents: read
   issues: write
+  contents: read
+  actions: read
 
 jobs:
-  notify-on-failure:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 }}
+  file-issue:
+    name: File/merge CI failure issue
+    if: >
+      github.event.workflow_run.name != 'CI Monitor - collect failed run info' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
-      - name: GitHub Script — open an issue with run details
+      - name: De-duplicate and file issue
         uses: actions/github-script@v7
         with:
           script: |
             const run = context.payload.workflow_run;
-            const runId = run.id;
-            const runUrl = run.html_url ?? `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
+            const { owner, repo } = context.repo;
 
-            const res = await github.rest.actions.listWorkflowRunArtifacts({
-              owner, repo, run_id: runId
-            }).catch(() => null);
-            const artifacts = res?.data?.artifacts ?? [];
+            const title = `CI failure: ${run.name} (run ${run.id})`;
 
-            const artifactsMd = artifacts.length
-              ? artifacts.map(a => `- **${a.name}** (${a.size_in_bytes ?? 0} bytes)`).join('\n')
-              : '_none_';
+            // Find an existing open issue for this run id (avoids duplicates)
+            const existing = (await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'ci-monitor'
+            })).data.find(i => i.title.includes(`run ${run.id}`));
 
             const body = [
-              `### CI failure: ${run.name}`,
+              '### CI monitor',
+              `**Workflow:** ${run.name}`,
+              `**Event:** ${run.event}`,
+              `**Branch:** ${run.head_branch}`,
+              `**SHA:** ${run.head_sha}`,
+              `**Actor:** ${run.actor && run.actor.login ? run.actor.login : ''}`,
+              `**Run:** ${run.html_url}`,
               '',
-              `- **Run**: [${runId}](${runUrl})`,
-              `- **Branch**: \`${run.head_branch}\``,
-              `- **Commit**: \`${run.head_sha}\``,
-              `- **Actor**: @${run.actor?.login}`,
-              `- **Event**: \`${run.event}\``,
-              '',
-              `**Artifacts (${artifacts.length})**`,
-              artifactsMd
+              'Auto-filed by CI Monitor. A green run on the default branch will auto-close this.'
             ].join('\n');
 
-            await github.rest.issues.create({
-              owner, repo,
-              title: `CI failure: ${run.name} (${runId})`,
-              body
+            if (existing) {
+              core.info(`Found existing issue #${existing.number}; adding a comment`);
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number, body
+              });
+            } else {
+              core.info('Creating new CI monitor issue');
+              await github.rest.issues.create({
+                owner, repo, title, body, labels: ['ci-monitor','needs-triage']
+              });
+            }
+
+  close-on-success:
+    name: Auto-close on green
+    if: >
+      github.event.workflow_run.name != 'CI Monitor - collect failed run info' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale CI-monitor issues for this workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'ci-monitor'
             });
+
+            for (const issue of open.data) {
+              if (issue.title.includes(`CI failure: ${run.name}`)) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `Closing automatically: a subsequent run of **${run.name}** on the default branch succeeded.`
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: issue.number, state: 'closed'
+                });
+              }
+            }
