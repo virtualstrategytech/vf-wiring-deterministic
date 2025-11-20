@@ -1,7 +1,8 @@
 {
-  "name": "vf-webhook-service",
-  "version": "1.0.0",
-  "description": "Minimal webhook router for Voiceflow deterministic MVP",
+  "name": "vf-webhook-service-legacy",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Legacy webhook router for Voiceflow deterministic MVP",
   "main": "server.js",
   "type": "module",
   "scripts": {
