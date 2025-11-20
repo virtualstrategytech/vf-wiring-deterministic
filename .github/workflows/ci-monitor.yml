@@ -1,89 +1,96 @@
 # .github/workflows/ci-monitor.yml
-name: CI Monitor - collect failed run info
+name: CI Monitor - non-blocking
 
 on:
   workflow_run:
-    types: [completed] # watch all workflows; we'll filter with "if"
+    # Watch all workflows; we filter by default branch & success/failure below.
+    types: [completed]
 
 permissions:
-  issues: write
   contents: read
   actions: read
+  issues: write
 
 jobs:
-  file-issue:
-    name: File/merge CI failure issue
+  record-failure:
+    name: Record failure (comment / open issue)
     if: >
-      github.event.workflow_run.name != 'CI Monitor - collect failed run info' &&
       github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.name != github.workflow &&
       github.event.workflow_run.head_branch == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
-      - name: De-duplicate and file issue
+      - name: File or update CI-monitor issue
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             const run = context.payload.workflow_run;
             const { owner, repo } = context.repo;
 
-            const title = `CI failure: ${run.name} (run ${run.id})`;
-
-            // Find an existing open issue for this run id (avoids duplicates)
-            const existing = (await github.rest.issues.listForRepo({
-              owner, repo, state: 'open', labels: 'ci-monitor'
-            })).data.find(i => i.title.includes(`run ${run.id}`));
+            // We keep ONE open issue per workflow name to avoid spam.
+            const titlePrefix = `CI failure: ${run.name}`;
+            const openIssues = await github.paginate(
+              github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: 'ci-monitor' }
+            );
+            let issue = openIssues.find(i => i.title.startsWith(titlePrefix));
 
             const body = [
-              '### CI monitor',
               `**Workflow:** ${run.name}`,
+              `**Run:** ${run.html_url}`,
               `**Event:** ${run.event}`,
               `**Branch:** ${run.head_branch}`,
               `**SHA:** ${run.head_sha}`,
-              `**Actor:** ${run.actor && run.actor.login ? run.actor.login : ''}`,
-              `**Run:** ${run.html_url}`,
+              `**Actor:** ${run.actor?.login ?? ''}`,
+              `**Conclusion:** ${run.conclusion}`,
               '',
-              'Auto-filed by CI Monitor. A green run on the default branch will auto-close this.'
+              '_Artifacts (if any) are available on the run page._'
             ].join('\n');
 
-            if (existing) {
-              core.info(`Found existing issue #${existing.number}; adding a comment`);
+            if (issue) {
               await github.rest.issues.createComment({
-                owner, repo, issue_number: existing.number, body
+                owner, repo, issue_number: issue.number,
+                body: `New failing run detected.\n\n${body}`
               });
             } else {
-              core.info('Creating new CI monitor issue');
-              await github.rest.issues.create({
-                owner, repo, title, body, labels: ['ci-monitor','needs-triage']
-              });
+              issue = (await github.rest.issues.create({
+                owner, repo,
+                title: titlePrefix,
+                body: `First failing run observed.\n\n${body}`,
+                labels: ['ci-monitor','needs-triage']
+              })).data;
             }
 
   close-on-success:
     name: Auto-close on green
     if: >
-      github.event.workflow_run.name != 'CI Monitor - collect failed run info' &&
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name != github.workflow &&
       github.event.workflow_run.head_branch == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
-      - name: Close stale CI-monitor issues for this workflow
+      - name: Close CI-monitor issue for this workflow
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             const run = context.payload.workflow_run;
             const { owner, repo } = context.repo;
+            const titlePrefix = `CI failure: ${run.name}`;
 
-            const open = await github.rest.issues.listForRepo({
-              owner, repo, state: 'open', labels: 'ci-monitor'
-            });
+            const openIssues = await github.paginate(
+              github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: 'ci-monitor' }
+            );
+            const toClose = openIssues.filter(i => i.title.startsWith(titlePrefix));
 
-            for (const issue of open.data) {
-              if (issue.title.includes(`CI failure: ${run.name}`)) {
-                await github.rest.issues.createComment({
-                  owner, repo, issue_number: issue.number,
-                  body: `Closing automatically: a subsequent run of **${run.name}** on the default branch succeeded.`
-                });
-                await github.rest.issues.update({
-                  owner, repo, issue_number: issue.number, state: 'closed'
-                });
-              }
+            for (const issue of toClose) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: `Closing automatically: a subsequent run of **${run.name}** on \`${run.head_branch}\` succeeded.`
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed'
+              });
             }
