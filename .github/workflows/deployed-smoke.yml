@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Target environment name (informational)'
+        description: "Target environment name (informational)"
         required: false
       debug_tests:
         description: 'Set to "true" to enable DEBUG_TESTS=1 for verbose handle diagnostics (manual only)'
         required: false
-        default: 'false'
+        default: "false"
       debug_tests_level:
-        description: 'DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true'
+        description: "DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true"
         required: false
-        default: '3'
+        default: "3"
 
 # Explicit permissions reduce editor/schema warnings and limit token scope for the workflow
 permissions:
@@ -28,15 +28,13 @@ jobs:
     # Job-level env ensures GitHub Actions + VS Code language server
     # know all contexts exist (no more "context access might be invalid").
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+      DEBUG_WEBHOOK_ENABLED: "true" # only for debug runs
 
       # Stabilize socket and random handles during smoke tests
-      FORCE_PER_REQUEST_AGENT: '1'
-      FORCE_DETERMINISTIC_IDS: '1'
+      FORCE_PER_REQUEST_AGENT: "1"
+      FORCE_DETERMINISTIC_IDS: "1"
       # Patch AsyncResource in tests to avoid raw-body creating persistent native handles
-      TEST_PATCH_RAW_BODY: '1'
+      TEST_PATCH_RAW_BODY: "1"
 
       # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
       # dispatch can enable verbose diagnostics without changing other workflows.
@@ -60,6 +58,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -172,7 +175,7 @@ jobs:
 
       - name: Run deployed smoke tests
         env:
-          SKIP_SYNC_SECRET: 'true'
+          SKIP_SYNC_SECRET: "true"
         shell: bash
         run: |
           # Initialize persistent socket debug log so artifact is created even if tests time out early
@@ -229,7 +232,7 @@ jobs:
 
           exit "${EXIT_CODE}"
 
-      - name: 'Final cleanup: attempt to close any remaining sockets in this job'
+      - name: "Final cleanup: attempt to close any remaining sockets in this job"
         if: always()
         shell: bash
         run: |

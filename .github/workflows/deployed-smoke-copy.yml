@@ -25,8 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: "true" # only for debug runs
       # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
       # dispatch can enable verbose diagnostics without changing other workflows.
@@ -37,6 +35,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4

@@ -4,24 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       debug:
-        description: 'Set to true to enable DEBUG_WEBHOOK env in the job'
+        description: "Set to true to enable DEBUG_WEBHOOK env in the job"
         required: false
-        default: 'false'
+        default: "false"
 
 jobs:
   single-test:
     runs-on: ubuntu-latest
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      # Secrets will be injected into environment in an early step to avoid
+      # workflow-linter warnings about context access at job-level.
+      # Other job-level stable envs can be added here.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+
       - name: Use Node 18
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install deps
         run: npm ci
@@ -32,7 +38,7 @@ jobs:
           # Run the test in isolated child-process server mode to avoid
           # parent-process active-handle failures in CI. This environment
           # variable is observed by the test helpers.
-          USE_CHILD_PROCESS_SERVER: '1'
+          USE_CHILD_PROCESS_SERVER: "1"
         run: |
           echo "Running in-process test..."
           # Run the single test and capture stdout/stderr to a file. Allow failure but capture exit code.

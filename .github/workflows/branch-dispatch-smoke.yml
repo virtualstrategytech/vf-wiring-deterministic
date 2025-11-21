@@ -25,8 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      # Inject secrets via a dedicated step to avoid static validation warnings.
       DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
       DEBUG_TESTS_LEVEL: ${{ github.event.inputs.debug_tests_level || '' }}
     steps:
@@ -34,6 +33,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch_to_test }}
+
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4

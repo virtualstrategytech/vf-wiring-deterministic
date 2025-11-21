@@ -17,8 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      # Secrets are exported into the job environment in a dedicated step
+      # (below) so validators that parse static job-level contexts do not
+      # warn about unavailable secret contexts. Other stable envs may live here.
       DEBUG_WEBHOOK_ENABLED: ${{ github.event.inputs.debug_enabled || 'false' }}
       DEBUG_TESTS: "true" # enable extra handle-dump diagnostics in jest.setup.js
       SKIP_BODY_PARSER: "1"
@@ -33,6 +34,11 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4

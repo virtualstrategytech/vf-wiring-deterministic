@@ -13,11 +13,16 @@ jobs:
   run-smoke:
     runs-on: ubuntu-latest
 
-    # Make secrets and paths visible to all steps in a way the Actions
-    # language server understands.
+    # Make non-secret paths visible to all steps. Secrets are exported below
+    # to avoid static workflow validation warnings about secret context access.
     env:
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
+      DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
+      PING_CHECK: $RUNNER_TEMP/ping_check.txt
+      HEALTH_BODY: $RUNNER_TEMP/health_body.txt
+      HEALTH_ERR: $RUNNER_TEMP/health_err.txt
+      HEALTH_TRACE: $RUNNER_TEMP/health_trace.txt
+      PING_TRACE: $RUNNER_TEMP/ping_trace.txt
       SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
       DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
       PING_CHECK: $RUNNER_TEMP/ping_check.txt
@@ -29,6 +34,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
 
       - name: Verify required secrets are present
         shell: bash
