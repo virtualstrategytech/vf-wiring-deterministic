@@ -1,32 +1,41 @@
 ---
-name: CI - deployed smoke (copy)
+name: CI - deployed smoke
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
+
+permissions:
+  contents: read
 
 jobs:
   smoke:
+    name: smoke
     runs-on: ubuntu-latest
     env:
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
-
+      BASE_SECRET: ${{ secrets.WEBHOOK_BASE }}
+      API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      BASE_VAR: ""
     steps:
       - uses: actions/checkout@v4
-
-      - name: Call /version
+      - name: Probe deployed webhook
+        shell: bash
         run: |
           set -euo pipefail
-          test -n "$WEBHOOK_BASE"
-          curl -fsS --retry 2 --retry-delay 2 \
-            -H "Authorization: Bearer $WEBHOOK_API_KEY" \
-            "$WEBHOOK_BASE/version"
-
-      - name: Call /status
-        run: |
-          set -euo pipefail
-          curl -fsS --retry 2 --retry-delay 2 \
-            -H "Authorization: Bearer $WEBHOOK_API_KEY" \
-            "$WEBHOOK_BASE/status"
+          BASE="${BASE_SECRET:-$BASE_VAR}"
+          if [[ -z "${BASE}" ]]; then
+            echo "::notice title=Skip smoke::WEBHOOK_BASE not set; skipping."
+            exit 0
+          fi
+          [[ "$BASE" != http* ]] && BASE="https://${BASE}"
+          BASE="${BASE%/}"
+          endpoints=(/status /health)
+          for p in "${endpoints[@]}"; do
+            url="${BASE}${p}"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -H "X-API-KEY: ${API_KEY:-}" "$url" || true)"
+            echo "GET $url -> $code"
+            if [[ "$code" != "200" ]]; then
+              echo "::error title=Smoke check failed::$url returned $code"
+              exit 1
+            fi
+          done
+          echo "✅ Smoke checks passed."
