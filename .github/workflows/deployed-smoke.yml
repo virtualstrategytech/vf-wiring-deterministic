@@ -1,4 +1,4 @@
-﻿name: Deployed smoke (manual)
+name: Deployed smoke (manual)
 
 on:
   workflow_dispatch:
@@ -81,23 +81,23 @@ jobs:
             echo "ERROR: WEBHOOK_API_KEY secret is empty." >&2
             exit 1
           fi
-          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
+          echo "WEBHOOK_BASE is set to: "${WEBHOOK_BASE}""
 
       - name: Normalize WEBHOOK_BASE (log only)
         shell: bash
         run: |
           # Remove any trailing slash(es) from WEBHOOK_BASE so joining paths
           # like "$WEBHOOK_BASE/health" won't produce double-slashes ("//health").
-          NORMALIZED=${WEBHOOK_BASE%/}
+          NORMALIZED="${WEBHOOK_BASE}"%/}
           echo "Normalized WEBHOOK_BASE=${NORMALIZED}"
-          # We still use ${WEBHOOK_BASE%/} in subsequent steps; no need to
+          # We still use "${WEBHOOK_BASE}"%/} in subsequent steps; no need to
           # rewrite the env via $GITHUB_ENV, which keeps things simpler.
 
       - name: Quick readiness check (poll /ready then /health)
         id: health
         shell: bash
         run: |
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
           echo "Checking service readiness at ${BASE}/ready (fallback to /health)"
           attempts=0
           max=18
@@ -181,12 +181,12 @@ jobs:
           # Initialize persistent socket debug log so artifact is created even if tests time out early
           printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > "${SOCKET_DEBUG_LOG}" || true
           if [ -n "${WEBHOOK_BASE}" ]; then
-            BASE=${WEBHOOK_BASE%/}
+            BASE="${WEBHOOK_BASE}"%/}
             HOST=$(echo "${BASE}" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
             echo "WEBHOOK_BASE_HOST=${HOST}" >> "${SOCKET_DEBUG_LOG}" || true
           fi
 
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
           echo "Running smoke tests against ${BASE}"
 
           echo "Resolving target host for ${BASE}"
@@ -299,6 +299,6 @@ jobs:
       - name: Confirm webhook envs (non-secret)
         shell: bash
         run: |
-          echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+          echo "HAS_WEBHOOK_BASE="${WEBHOOK_BASE}":+yes}"
           echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"

@@ -36,5 +36,5 @@ jobs:
       - name: Run smoke tests (single file)
         run: |
           # normalize and print a masked base for logs
-          echo "TARGET_BASE=$WEBHOOK_BASE"
+          echo "TARGET_BASE="${WEBHOOK_BASE}""
           npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000

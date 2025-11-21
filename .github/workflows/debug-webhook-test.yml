@@ -1,4 +1,4 @@
-﻿name: Debug webhook test
+name: Debug webhook test
 
 on:
   workflow_dispatch:
@@ -66,7 +66,7 @@ jobs:
           if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
 
           # normalize base to avoid accidental double-slash when joining paths
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
           # Persist normalized value to subsequent steps so Node/Jest sees the trimmed WEBHOOK_BASE
           echo "WEBHOOK_BASE=${BASE}" >> "$GITHUB_ENV"
           echo "Resolving target host for $BASE"
@@ -122,9 +122,9 @@ jobs:
             /tmp/socket_debug.log
       - name: Confirm webhook envs (non-secret)
         run: |
-          echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+          echo "HAS_WEBHOOK_BASE="${WEBHOOK_BASE}":+yes}"
           echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"
-          echo "HAS_WEBHOOK_BASE=${WEBHOOK_BASE:+yes}"
+          echo "HAS_WEBHOOK_BASE="${WEBHOOK_BASE}":+yes}"
           echo "HAS_WEBHOOK_API_KEY=${WEBHOOK_API_KEY:+yes}"
           echo "DEBUG_WEBHOOK_ENABLED=${DEBUG_WEBHOOK_ENABLED:-<missing>}"

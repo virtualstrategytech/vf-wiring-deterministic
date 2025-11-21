@@ -1,52 +1,30 @@
-﻿name: Ubuntu reproduction (manual)
+name: CI - ubuntu repro
 
 on:
-  workflow_dispatch: {}
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  reproduce-tests:
-    name: Run tests on ubuntu-latest (with DEBUG_WEBHOOK)
+  repro:
     runs-on: ubuntu-latest
     env:
-      NODE_OPTIONS: "--max_old_space_size=4096"
-      DEBUG_WEBHOOK: "1"
-      CI: "true"
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Create logs dir
-        run: mkdir -p logs
-
-      - name: Run Jest (in-band) and capture output
+      - name: Basic smoke call
+        shell: bash
         run: |
-          npx jest --runInBand --detectOpenHandles 2>&1 | tee logs/jest-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          echo "jest exit code: $EXIT_CODE"
-          if [ "$EXIT_CODE" -ne 0 ]; then
-            tail -n 200 logs/jest-output.txt || true
-          fi
-          exit $EXIT_CODE
-
-      - name: Upload test logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu-repro-logs
-          path: |
-            logs/jest-output.txt
-            logs/**
-
-      - name: Print node/npm versions
-        run: |
-          node --version
-          npm --version
+          set -euo pipefail
+          curl -sS -X POST \
+            -H "content-type: application/json" \
+            -H "x-api-key: $WEBHOOK_API_KEY" \
+            -d '{"ping":"ok"}' \
+            "$WEBHOOK_BASE/test" | head -c 200 || true

@@ -44,7 +44,7 @@ jobs:
             echo "ERROR: WEBHOOK_API_KEY secret is not configured." >&2
             exit 1
           fi
-          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
+          echo "WEBHOOK_BASE is set to: "${WEBHOOK_BASE}""
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           # Normalize base to avoid accidental double-slash when joining paths
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
 
           echo "Using WEBHOOK_BASE=${BASE}"
 

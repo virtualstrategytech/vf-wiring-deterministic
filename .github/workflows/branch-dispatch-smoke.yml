@@ -49,7 +49,7 @@ jobs:
           SKIP_SYNC_SECRET: "true"
         run: |
           echo "Running smoke test from branch: ${{ github.event.inputs.branch_to_test }}"
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
           echo "Normalized base: $BASE"
           if [ "${DEBUG_TESTS}" = "1" ] || [ "${DEBUG_TESTS}" = "true" ]; then
             export NODE_OPTIONS="--require ${{ github.workspace }}/tests/jest.netblock.js --require ${{ github.workspace }}/tests/jest.instrumentation.js ${NODE_OPTIONS:-}"
