@@ -187,3 +187,12 @@ backup-do not commit/
 # legacy/unused (typos from previous file) — ignore safely
 ' n# local achive' nlocal_backups/
 ' n# allow checked-in example env' n!.env.example
+
+# =========================
+#   ADDITIONAL LOCAL ARTIFACTS
+# =========================
+# Heap snapshots and large runtime dumps
+*.heapsnapshot
+*.heapsnapshot.*
+# Backup files that include timestamps/suffixes
+*.bak*
