@@ -11,10 +11,10 @@ on:
 jobs:
   single-test:
     runs-on: ubuntu-latest
-    env:
-      # Secrets will be injected into environment in an early step to avoid
-      # workflow-linter warnings about context access at job-level.
-      # Other job-level stable envs can be added here.
+    # Secrets will be injected into environment in an early step to avoid
+    # workflow-linter warnings about context access at job-level.
+    # Other job-level stable envs can be added here.
+    env: {}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

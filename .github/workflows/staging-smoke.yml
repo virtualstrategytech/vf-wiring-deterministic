@@ -23,13 +23,6 @@ jobs:
       HEALTH_ERR: $RUNNER_TEMP/health_err.txt
       HEALTH_TRACE: $RUNNER_TEMP/health_trace.txt
       PING_TRACE: $RUNNER_TEMP/ping_trace.txt
-      SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
-      DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
-      PING_CHECK: $RUNNER_TEMP/ping_check.txt
-      HEALTH_BODY: $RUNNER_TEMP/health_body.txt
-      HEALTH_ERR: $RUNNER_TEMP/health_err.txt
-      HEALTH_TRACE: $RUNNER_TEMP/health_trace.txt
-      PING_TRACE: $RUNNER_TEMP/ping_trace.txt
 
     steps:
       - name: Checkout
