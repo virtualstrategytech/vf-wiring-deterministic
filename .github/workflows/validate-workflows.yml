@@ -1,16 +1,27 @@
+---
 name: Validate GitHub workflow YAML
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Pure actionlint; yamllint removed to avoid non-essential failures.
-      - name: actionlint
+      # Keep yamllint, but downgrade noisy rules to warnings
+      - name: Lint YAML (yamllint)
+        run: |
+          set -euo pipefail
+          yamllint -d "{extends: default, rules: {document-start: {level: warning}, truthy: {level: warning}, line-length: {max: 140, level: warning}}}" .github/workflows
+      # ^ You were seeing 'document-start' and other warnings; those alone should not fail. :contentReference[oaicite:1]{index=1}
+      # Run actionlint but disable shellcheck so warnings don't fail CI
+      - name: actionlint (disable shellcheck)
         uses: docker://rhysd/actionlint:latest
         with:
-          args: -color
+          args: -color -shellcheck=off

@@ -1,3 +1,4 @@
+---
 name: CI - child-process server tests
 
 on:

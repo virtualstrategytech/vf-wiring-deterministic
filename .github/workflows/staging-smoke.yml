@@ -1,8 +1,9 @@
+---
 name: Staging smoke
 
 on:
   push:
-    branches: ['staging']
+    branches: ["staging"]
   workflow_dispatch: {}
 
 permissions:
@@ -49,7 +50,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install dependencies
         run: npm ci
@@ -125,9 +126,9 @@ jobs:
       - name: Run staging smoke tests
         shell: bash
         env:
-          WEBHOOK_HEALTH_TIMEOUT: '15000'
-          WEBHOOK_PING_TIMEOUT: '20000'
-          WEBHOOK_GENERATE_TIMEOUT: '120000'
+          WEBHOOK_HEALTH_TIMEOUT: "15000"
+          WEBHOOK_PING_TIMEOUT: "20000"
+          WEBHOOK_GENERATE_TIMEOUT: "120000"
         run: |
           npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
 

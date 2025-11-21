@@ -1,13 +1,14 @@
+---
 name: Manual smoke (simple)
 
 on:
   workflow_dispatch:
     inputs:
       webhook_base:
-        description: 'Target webhook base URL (e.g. https://my-deploy.onrender.com)'
+        description: "Target webhook base URL (e.g. https://my-deploy.onrender.com)"
         required: true
       webhook_api_key:
-        description: 'Webhook API key'
+        description: "Webhook API key"
         required: true
 
 permissions:

@@ -1,10 +1,11 @@
+---
 name: Dispatch test (manual)
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Informational target'
+        description: "Informational target"
         required: false
 
 jobs:
