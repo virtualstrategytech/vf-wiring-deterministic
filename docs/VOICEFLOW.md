@@ -30,5 +30,6 @@
   - If the webhook returns `401 unauthorized`, verify `x-api-key` matches `WEBHOOK_API_KEY` in the environment.
   - Use `DEBUG_WEBHOOK=true` locally to enable verbose fetch and handler logs for debugging (do NOT enable in production).
 
-----
+---
+
 File: `novain-platform/webhook/server.js` contains the handlers and startup instructions.
