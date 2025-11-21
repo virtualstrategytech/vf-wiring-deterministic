@@ -1,25 +1,53 @@
 ---
-name: Validate GitHub workflow YAML
+name: CI - deployed smoke (copy) / smoke (pull_request)
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**"
-  push:
-    paths:
-      - ".github/workflows/**"
-
-permissions:
-  contents: read
+    branches: [main]
 
 jobs:
-  validate:
+  smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # actionlint + shellcheck; ignore noisy rules that aren't real bugs here
-      - name: actionlint (with shellcheck)
-        uses: docker://rhysd/actionlint:latest
+      - name: Probe deployed webhook
         env:
-          SHELLCHECK_OPTS: -e SC1083 -e SC2027 -e SC2086
+          BASE_SECRET: ${{ secrets.WEBHOOK_BASE }}
+          BASE_VAR: ${{ secrets.WEBHOOK_BASE }}
+          API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="${BASE_SECRET:-${BASE_VAR:-}}"
+          if [[ -z "$BASE" ]]; then
+            echo "::notice title=Skip smoke::WEBHOOK_BASE not set; skipping."
+            exit 0
+          fi
+
+          [[ "$BASE" != http* ]] && BASE="https://${BASE}"
+          BASE="${BASE%/}"
+
+          IFS=',' read -r -a CANDIDATES <<< "${PATHS:-/health}"
+
+          passed=0
+          for raw in "${CANDIDATES[@]}"; do
+            p="/${raw#/}"
+            url="${BASE}${p}"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                    -H "X-API-KEY: ${API_KEY:-}" "$url" || true)"
+            echo "GET $url -> $code"
+            if [[ "$code" =~ ^2[0-9]{2}$ ]]; then
+              passed=1
+              break
+            fi
+          done
+
+          if [[ "$passed" -eq 1 ]]; then
+            echo "✅ Smoke checks passed."
+          else
+            echo "::error title=Smoke check failed::None of the endpoints returned 2xx"
+            exit 1
+          fi
