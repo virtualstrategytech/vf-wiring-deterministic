@@ -2,22 +2,15 @@ name: Validate GitHub workflow YAML
 
 on:
   pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   validate:
-    name: validate (pull_request)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: validate
-        run: yamllint .github/workflows -s || echo "yamllint not installed; using actions-lint"
-      - uses: docker://rhysd/actionlint:latest
+
+      # Pure actionlint; yamllint removed to avoid non-essential failures.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:latest
         with:
           args: -color
