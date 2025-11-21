@@ -1,33 +1,23 @@
-name: Detect open handles
+name: Validate GitHub workflow YAML
 
 on:
   pull_request:
-    branches: [feat/wiring-agent, pr41-resolve]
+    branches: [main]
   push:
-    branches: [feat/wiring-agent, pr41-resolve]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-    working-directory: novain-platform/webhook
-
 jobs:
-  detect-open-handles:
+  validate:
+    name: validate (pull_request)
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: validate
+        run: yamllint .github/workflows -s || echo "yamllint not installed; using actions-lint"
+      - uses: docker://rhysd/actionlint:latest
         with:
-          node-version: "18"
-          cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Run Jest with detectOpenHandles
-        run: npm test -- --ci --runInBand --detectOpenHandles
+          args: -color

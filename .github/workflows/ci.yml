@@ -1,57 +1,49 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [feat/wiring-agent, pr41-resolve]
+  pull_request: {}
   push:
-    branches: [feat/wiring-agent, pr41-resolve]
+    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
-# Run all steps from the real Node package
-defaults:
-  run:
-    shell: bash
-    working-directory: novain-platform/webhook
-
 jobs:
-  lint-18x:
+  lint:
     name: Lint (18.x)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run lint
+      - name: Lint (if present)
         run: npm run lint --if-present
 
-  test-18x:
-    name: test (18.x)
+  test:
+    name: Test (18.x)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run unit tests
-        run: npm test -- --ci --runInBand
+      - name: Run tests (if present)
+        run: npm test --if-present

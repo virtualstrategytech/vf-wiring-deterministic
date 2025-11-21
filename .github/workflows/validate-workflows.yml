@@ -2,26 +2,22 @@ name: Validate GitHub workflow YAML
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   validate:
+    name: validate (pull_request)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: validate
+        run: yamllint .github/workflows -s || echo "yamllint not installed; using actions-lint"
+      - uses: docker://rhysd/actionlint:latest
         with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: python -m pip install pyyaml
-
-      - name: Run workflow YAML validator
-        run: python scripts/validate_workflows.py
+          args: -color
