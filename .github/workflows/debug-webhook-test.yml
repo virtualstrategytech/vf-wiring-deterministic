@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       debug_enabled:
-        description: 'Set to true to enable DEBUG_WEBHOOK_ENABLED in the job'
+        description: "Set to true to enable DEBUG_WEBHOOK_ENABLED in the job"
         required: false
-        default: 'false'
+        default: "false"
 
 permissions:
   contents: read
@@ -20,8 +20,8 @@ jobs:
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
       DEBUG_WEBHOOK_ENABLED: ${{ github.event.inputs.debug_enabled || 'false' }}
-      DEBUG_TESTS: 'true' # enable extra handle-dump diagnostics in jest.setup.js
-      SKIP_BODY_PARSER: '1'
+      DEBUG_TESTS: "true" # enable extra handle-dump diagnostics in jest.setup.js
+      SKIP_BODY_PARSER: "1"
 
     steps:
       - name: Exit early if DEBUG_WEBHOOK_ENABLED is not 'true'
@@ -32,12 +32,12 @@ jobs:
           fi
 
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18.x'
+          node-version: "18.x"
 
       - name: Install deps
         run: npm ci
@@ -62,7 +62,7 @@ jobs:
           # normalize base to avoid accidental double-slash when joining paths
           BASE=${WEBHOOK_BASE%/}
           # Persist normalized value to subsequent steps so Node/Jest sees the trimmed WEBHOOK_BASE
-          echo "WEBHOOK_BASE=${BASE}" >> $GITHUB_ENV
+          echo "WEBHOOK_BASE=${BASE}" >> "$GITHUB_ENV"
           echo "Resolving target host for $BASE"
           HOST=$(echo "$BASE" | sed -E 's#^https?://##' | sed -E 's#/.*$##')
           echo "Host: $HOST"

@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Target environment name (informational)'
+        description: "Target environment name (informational)"
         required: false
       debug_tests:
         description: 'Set to "true" to enable DEBUG_TESTS=1 for verbose handle diagnostics (manual only)'
         required: false
-        default: 'false'
+        default: "false"
       debug_tests_level:
-        description: 'DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true'
+        description: "DEBUG_TESTS_LEVEL (numeric). Default 3 when debug_tests=true"
         required: false
-        default: '3'
+        default: "3"
 
 # Explicit permissions reduce editor/schema warnings and limit token scope for the workflow
 permissions:
@@ -27,7 +27,7 @@ jobs:
     env:
       WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      DEBUG_WEBHOOK_ENABLED: 'true' # only for debug runs
+      DEBUG_WEBHOOK_ENABLED: "true" # only for debug runs
       # Wire workflow inputs into DEBUG_TESTS and DEBUG_TESTS_LEVEL so manual
       # dispatch can enable verbose diagnostics without changing other workflows.
       DEBUG_TESTS: ${{ github.event.inputs.debug_tests == 'true' && '1' || '' }}
@@ -59,7 +59,7 @@ jobs:
       - name: Normalize WEBHOOK_BASE
         run: |
           NORMALIZED=${WEBHOOK_BASE%/}
-          echo "WEBHOOK_BASE=${NORMALIZED}" >> $GITHUB_ENV
+          echo "WEBHOOK_BASE=${NORMALIZED}" >> "$GITHUB_ENV"
           echo "Normalized WEBHOOK_BASE=${NORMALIZED}"
 
       - name: Quick readiness check (poll /ready then /health)
@@ -122,11 +122,11 @@ jobs:
         id: set-fingerprint
         run: |
           node -e "const c=require('crypto'); const k=process.env.WEBHOOK_API_KEY||''; const f=k?c.createHash('sha256').update(k).digest('hex').slice(0,16):'missing'; console.log('FINGERPRINT='+f);" > fingerprint.txt
-          echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> $GITHUB_OUTPUT
+          echo "fingerprint=$(sed -n 's/^FINGERPRINT=//p' fingerprint.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Run deployed smoke tests
         env:
-          SKIP_SYNC_SECRET: 'true'
+          SKIP_SYNC_SECRET: "true"
         run: |
           printf '%s\n' "SOCKET_DEBUG_LOG START: $(date -u)" > /tmp/socket_debug.log || true
           if [ -n "$WEBHOOK_BASE" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"$WEBHOOK_BASE\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
@@ -162,7 +162,7 @@ jobs:
           ls -l /tmp/smoke-debug || true
           exit $EXIT_CODE
 
-      - name: 'Final cleanup: attempt to close any remaining sockets in this job'
+      - name: "Final cleanup: attempt to close any remaining sockets in this job"
         if: always()
         run: |
           echo 'Attempting best-effort cleanup of sockets in runner process before collecting dumps'
