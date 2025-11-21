@@ -13,12 +13,12 @@
 
    # PowerShell
 
-   $env:WEBHOOK_API_KEY = 'test123'; $env:PORT='3000'; node .\server.js
+$env:WEBHOOK_API_KEY = '{WEBHOOK_KEY}'; $env:PORT='3000'; node .\server.js
 
 4. Smoke tests (PowerShell):
    Invoke-RestMethod -Uri http://localhost:3000/health
    $body = @{ action='ping'; question='hello'; name='Bob' } | ConvertTo-Json
-   Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key'='test123' } -Body $body -ContentType 'application/json'
+   Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key'='{WEBHOOK_KEY}' } -Body $body -ContentType 'application/json'
 
 ````markdown
 # vf-webhook-services
@@ -34,12 +34,12 @@
 
 3. Start server (PowerShell example):
 
-   $env:WEBHOOK_API_KEY = 'test123'; $env:PORT='3000'; node .\server.js
+$env:WEBHOOK_API_KEY = '{WEBHOOK_KEY}'; $env:PORT='3000'; node .\server.js
 
 4. Quick request example (PowerShell):
    Invoke-RestMethod -Uri http://localhost:3000/health
    $body = @{ action='ping'; question='hello'; name='Bob' } | ConvertTo-Json
-   Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key'='test123' } -Body $body -ContentType 'application/json'
+   Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key'='{WEBHOOK_KEY}' } -Body $body -ContentType 'application/json'
 
 ---
 
