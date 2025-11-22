@@ -1,4 +1,4 @@
-﻿# .github/workflows/validate-workflows.yml
+# .github/workflows/validate-workflows.yml
 name: Validate GitHub workflows
 
 on:
