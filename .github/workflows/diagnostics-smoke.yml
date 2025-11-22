@@ -5,7 +5,7 @@ permissions:
   contents: read
   actions: read
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       WEBHOOK_BASE:

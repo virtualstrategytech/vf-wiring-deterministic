@@ -1,0 +1,13 @@
+extends: default
+
+rules:
+  # GitHub Actions uses `on:` at the top level; YAML 1.1 truthy can flag this.
+  truthy:
+    level: warning
+    allowed-values: ["on", "off", "yes", "no"]
+    check-keys: false
+
+  # Make CI quieter without losing signal
+  document-start: disable
+  line-length: disable
+  trailing-spaces: disable

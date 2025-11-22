@@ -1,7 +1,7 @@
 ---
 name: Dispatch test (manual)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       target:

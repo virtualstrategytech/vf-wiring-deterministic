@@ -1,7 +1,7 @@
 ---
 name: CI - deployed smoke / smoke (pull_request)
 
-on:
+"on":
   pull_request:
     branches: [main]
 

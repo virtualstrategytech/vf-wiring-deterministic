@@ -1,7 +1,7 @@
 ---
 name: Debug socket/TLS handles (manual)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       webhook_base:

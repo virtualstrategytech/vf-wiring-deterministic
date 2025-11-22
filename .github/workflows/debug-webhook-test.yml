@@ -1,7 +1,7 @@
 ---
 name: Debug webhook test
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       debug_enabled:

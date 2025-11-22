@@ -1,7 +1,7 @@
 ---
 name: Branch-dispatch smoke (manual)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       branch_to_test:

@@ -1,21 +1,27 @@
-# tools/fix-workflow-quoting.ps1
-$files = Get-ChildItem ".github/workflows" -Recurse -Include *.yml,*.yaml
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$wfRoot = Join-Path $PSScriptRoot '..\.github\workflows' | Resolve-Path
+$files  = Get-ChildItem -Path $wfRoot -Recurse -Include *.yml,*.yaml
+
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 foreach ($f in $files) {
-  $t = Get-Content $f.FullName -Raw
+    $raw = Get-Content -Raw -LiteralPath $f.FullName
 
-  # 1) echo VAR=$VAL >> $GITHUB_ENV  →  printf '%s\n' "VAR=$VAL" >> "$GITHUB_ENV"
-  $t = $t -replace '(?m)^\s*echo\s+([A-Z0-9_]+)=(.+?)\s*>>\s*\$GITHUB_ENV\s*$',
-                  "printf '%s`n' `"$1=$2`" >> `"$GITHUB_ENV`""
+    # Normalize newlines to LF and drop stray CR
+    $norm = $raw -replace "`r`n", "`n"
+    $norm = $norm -replace "`r", ""
 
-  # 2) Unquoted $GITHUB_ENV on redirection
-  $t = $t -replace '>>\s*\$GITHUB_ENV', '>> "$GITHUB_ENV"'
+    # Quote top-level `on:` keys (preserve indentation and trailing comments)
+    $pattern = '^(?<indent>\s*)on:(?<tail>\s*(?:#.*)?)$'
+    $norm = [Regex]::Replace($norm, $pattern, '${indent}"on":${tail}',
+                             [System.Text.RegularExpressions.RegexOptions]::Multiline)
 
-  # 3) Curl/common: quote simple URL envs if unquoted in obvious places
-  $t = $t -replace '(?<!")\$\{?URL\}?', '"${URL}"'
-  $t = $t -replace '(?<!")\$\{?WEBHOOK_BASE\}?', '"${WEBHOOK_BASE}"'
-
-  Set-Content -Path $f.FullName -Value $t -NoNewline
+    if ($norm -ne $raw) {
+        [IO.File]::WriteAllText($f.FullName, $norm, $utf8NoBom)
+        Write-Host "Updated $($f.FullName)"
+    }
 }
 
-Write-Host "Quoting pass complete."
+Write-Host "Done."

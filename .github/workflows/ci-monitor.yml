@@ -1,7 +1,7 @@
 ---
 name: CI Monitor - collect failed run info
 
-on:
+"on":
   workflow_run:
     workflows:
       - "CI - child-process server tests"

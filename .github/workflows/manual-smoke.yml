@@ -1,7 +1,7 @@
 ---
 name: Manual smoke (simple)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       webhook_base:

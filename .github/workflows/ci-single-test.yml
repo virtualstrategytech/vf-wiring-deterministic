@@ -1,7 +1,7 @@
 ---
 name: CI - single_in_process test
 
-on:
+"on":
   pull_request:
 
 jobs:
