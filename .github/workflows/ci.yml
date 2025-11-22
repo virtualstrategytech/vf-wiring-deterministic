@@ -2,10 +2,10 @@
 name: CI
 
 "on":
-  pull_request: {}
+  pull_request:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,36 +15,33 @@ jobs:
     name: Lint (18.x)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint (if present)
-        run: npm run lint --if-present
+      - run: npm ci
+      - run: npm run lint --if-present
 
   test:
     name: Test (18.x)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
+      - run: npm ci
+      - run: npm test --if-present
 
-      - name: Install dependencies
-        run: npm ci
+  actionlint:
+    name: actionlint (no ShellCheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.6
+        with:
+          args: -color -shellcheck=never
 
-      - name: Run tests (if present)
-        run: npm test --if-present

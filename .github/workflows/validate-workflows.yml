@@ -3,25 +3,23 @@ name: Validate GitHub workflows
 
 "on":
   pull_request:
-    paths:
-      - ".github/workflows/**"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   actionlint:
-    name: actionlint
+    name: actionlint (no ShellCheck)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      # Use the official container; pass args to disable ShellCheck
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.6
+        with:
+          args: -color -shellcheck=never
 
-      # Strict workflow validation, but without ShellCheck noise
-      - name: Lint workflows (actionlint)
-        run: |
-          set -euo pipefail
-          tmpdir=$(mktemp -d)
-          curl -sSL "https://github.com/rhysd/actionlint/releases/latest/download/actionlint_linux_amd64.tar.gz" -o "$tmpdir/actionlint.tar.gz"
-          tar -C "$tmpdir" -xzf "$tmpdir/actionlint.tar.gz"
-          "$tmpdir/actionlint" -color -shellcheck=never .github/workflows
-        env:
-          # Make output deterministic across runners/locales
-          LC_ALL: C
+

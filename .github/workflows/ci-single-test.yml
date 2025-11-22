@@ -26,5 +26,7 @@ jobs:
           if [ -f package.json ]; then
             npm test --if-present
           else
-            echo "No package.json – skipping tests."
+            echo "No package.json â€“ skipping tests."
           fi
+
+

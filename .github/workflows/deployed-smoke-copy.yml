@@ -45,8 +45,10 @@ jobs:
           done
 
           if [[ "$passed" -eq 1 ]]; then
-            echo "✅ Smoke checks passed."
+            echo "âœ… Smoke checks passed."
           else
             echo "::error title=Smoke check failed::None of the endpoints returned 2xx"
             exit 1
           fi
+
+
