@@ -1,4 +1,4 @@
----
+﻿---
 name: CI - deployed smoke / smoke (pull_request)
 
 "on":
@@ -50,10 +50,9 @@ jobs:
           done
 
           if [[ "$passed" -eq 1 ]]; then
-            echo "âœ… Smoke checks passed."
+            echo "Ã¢Å"â€¦ Smoke checks passed."
           else
             echo "::error title=Smoke check failed::None of the endpoints returned 2xx"
             exit 1
           fi
-
 

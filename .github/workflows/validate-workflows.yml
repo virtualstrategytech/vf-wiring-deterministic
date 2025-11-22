@@ -1,25 +1,36 @@
----
+﻿# .github/workflows/validate-workflows.yml
 name: Validate GitHub workflows
 
-"on":
+on:
   pull_request:
+    paths: [".github/workflows/**"]
   push:
     branches: [main]
-  workflow_dispatch:
+    paths: [".github/workflows/**"]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
-  actionlint:
-    name: actionlint (no ShellCheck)
+  validate:
+    name: Lint workflows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # Use the official container; pass args to disable ShellCheck
-      - name: Run actionlint
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install yamllint explicitly so the step is deterministic
+      - name: Install yamllint
+        run: pipx install yamllint || pip install --user yamllint
+
+      - name: Run yamllint
+        run: yamllint -s .github/workflows
+
+      # Run actionlint with ShellCheck disabled (this is the key fix)
+      - name: Run actionlint (ShellCheck disabled)
         uses: docker://rhysd/actionlint:1.7.6
         with:
-          args: -color -shellcheck=never
-
-
+          args: >-
+            -color
+            -shellcheck=never

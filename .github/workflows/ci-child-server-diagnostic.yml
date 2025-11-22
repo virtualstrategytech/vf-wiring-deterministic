@@ -1,4 +1,4 @@
----
+﻿---
 name: CI - Child-server diagnostic
 
 "on":
@@ -23,7 +23,7 @@ jobs:
       FORCE_DETERMINISTIC_IDS: "1"
       # Ensure AsyncResource shim is enabled during tests to avoid raw-body async handles
       TEST_PATCH_RAW_BODY: "1"
-      # NODE_DEBUG is noisy (net,tls) â€” keep enabled for this diagnostic workflow
+      # NODE_DEBUG is noisy (net,tls) Ã¢â‚¬â€ keep enabled for this diagnostic workflow
       NODE_DEBUG: "net,tls"
     steps:
       - name: Checkout repository
@@ -60,5 +60,4 @@ jobs:
           path: |
             test-logs/**
             tests/globalSetup.log
-
 

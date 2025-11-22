@@ -1,4 +1,4 @@
----
+﻿---
 name: CI - single_in_process test
 
 "on":
@@ -26,7 +26,6 @@ jobs:
           if [ -f package.json ]; then
             npm test --if-present
           else
-            echo "No package.json â€“ skipping tests."
+            echo "No package.json Ã¢â‚¬â€œ skipping tests."
           fi
-
 

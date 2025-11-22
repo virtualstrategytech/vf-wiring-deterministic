@@ -1,4 +1,4 @@
----
+﻿---
 name: Branch-dispatch smoke (manual)
 
 "on":
@@ -74,5 +74,4 @@ jobs:
             /tmp/active_handles.json
             /tmp/health_trace.txt
             /tmp/ping_trace.txt
-
 

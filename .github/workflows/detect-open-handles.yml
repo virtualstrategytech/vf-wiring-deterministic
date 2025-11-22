@@ -1,4 +1,4 @@
----
+﻿---
 name: Validate GitHub workflow YAML
 
 "on":
@@ -22,5 +22,4 @@ jobs:
       - uses: docker://rhysd/actionlint:latest
         with:
           args: -color
-
 

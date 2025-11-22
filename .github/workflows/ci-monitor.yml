@@ -1,4 +1,4 @@
----
+﻿---
 name: CI Monitor - collect failed run info
 
 "on":
@@ -25,5 +25,4 @@ jobs:
           script: |
             const run = context.payload.workflow_run;
             core.info(`Failed workflow: ${run.name} (id=${run.id}) conclusion=${run.conclusion}`);
-
 
