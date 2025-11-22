@@ -1,53 +1,34 @@
-name: CI - deployed smoke / smoke
+name: CI - deployed smoke
 
 on:
-  pull_request: {}
-  workflow_dispatch: {}
-
-permissions:
-  contents: read
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    env:
-      BASE_SECRET: ${{ secrets.WEBHOOK_BASE }} # prefer secret
-      BASE_VAR: '' # optional repo/org var fallback
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Probe deployed webhook
-        shell: bash
+        env:
+          BASE_SECRET: ${{ secrets.WEBHOOK_BASE }}
         run: |
           set -euo pipefail
 
-          # Prefer secret, then var
-          BASE="${BASE_SECRET:-${BASE_VAR:-}}"
-          if [ -z "${BASE:-}" ]; then
-            echo "::warning::WEBHOOK_BASE (secret or var) is not set. Skipping smoke."
+          BASE="${BASE_SECRET:-}"
+          if [ -z "$BASE" ]; then
+            echo "::warning::WEBHOOK_BASE (secret or var) not set; skipping smoke."
             exit 0
           fi
 
-          # Trim trailing slash to normalize
-          BASE="${BASE%/}"
-
-          endpoints=("/health" "/version" "/status")
-          got_200=0
-
+          endpoints=(/health /version /status)
           for p in "${endpoints[@]}"; do
             url="${BASE}${p}"
-            code="$(curl -sS -o /dev/null -w '%{http_code}' "$url" || true)"
-            echo "GET ${url#*//*/} -> ${code}"
-            if [ "$code" = "200" ]; then
-              got_200=1
+            code="$(curl -sS -o /dev/null -w "%{http_code}" "$url" || true)"
+            echo "GET ${url} -> ${code}"
+            if [ "$code" != "200" ]; then
+              echo "::error::Expected 200 from ${url}, got ${code}"
+              exit 1
             fi
           done
-
-          if [ "$got_200" != "1" ]; then
-            echo "::error::No endpoint returned 200"
-            exit 2
-          fi
-
-      - name: Complete
-        run: echo "Smoke OK"

@@ -1,37 +1,28 @@
-# tools/fix-workflows.ps1
-# Normalize all workflow YAML files: LF line endings, ASCII quotes, strip NBSP and control chars
-
-[CmdletBinding()]
-param(
-  [string]$Root = ".github/workflows"
+Param(
+  [string]$Root = '.github/workflows'
 )
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-# Characters we want to normalize
-$singleCurly = ([char]0x2018) + ([char]0x2019)   # ‘ ’
-$doubleCurly = ([char]0x201C) + ([char]0x201D)   # “ ”
+Get-ChildItem -Path $Root -Filter *.yml -Recurse | ForEach-Object {
+  $p = $_.FullName
+  $t = Get-Content -Raw -Encoding utf8 $p
 
-# Find all workflow YAMLs
-$files = Get-ChildItem -LiteralPath $Root -Include *.yml,*.yaml -Recurse -File
+  # Normalize newlines to LF and strip stray CR
+  $t = $t -replace "`r`n", "`n"
+  $t = $t -replace "`r", ''
 
-foreach ($f in $files) {
-  $t = Get-Content -LiteralPath $f.FullName -Raw -Encoding utf8
+  # Replace curly quotes with ASCII quotes
+  $t = $t -replace [char]0x2018, "'"  # ‘
+  $t = $t -replace [char]0x2019, "'"  # ’
+  $t = $t -replace [char]0x201C, '"'  # “
+  $t = $t -replace [char]0x201D, '"'  # ”
 
-  # Normalize CRLF -> LF
-  $t = $t -replace "`r", ""
+  # Strip invisible/bad whitespace
+  $t = $t -replace [char]0x00A0, ' '   # NBSP
+  $t = $t -replace [char]0x200B, ''    # Zero-width space
+  $t = $t -replace [char]0x000B, ''    # Vertical tab
 
-  # Replace curly quotes with straight ASCII
-  $t = $t -replace "[$singleCurly]", "'"
-  $t = $t -replace "[$doubleCurly]", '"'
-
-  # Replace NBSP with a normal space
-  $t = $t -replace [char]0x00A0, ' '
-
-  # Strip all control chars except TAB (0x09) and LF (0x0A)
-  $t = [regex]::Replace($t, '[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]', '')
-
-  Set-Content -LiteralPath $f.FullName -Value $t -Encoding utf8 -NoNewline
-  Write-Host "Fixed $($f.FullName)"
+  Set-Content -Path $p -Value $t -Encoding utf8 -NoNewline
 }
+Write-Host "Normalized workflow files."
