@@ -1,53 +1,54 @@
----
-name: CI - deployed smoke (copy) / smoke (pull_request)
+name: CI - deployed smoke / smoke - copy
 
-"on":
-  pull_request:
-    branches: [main]
+on:
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      BASE_SECRET: ${{ secrets.WEBHOOK_BASE }} # prefer secret
+      # optional repo/org var fallback - safely fallback to empty if repo var is missing
+      BASE_VAR: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Probe deployed webhook
-        env:
-          BASE_SECRET: ${{ secrets.WEBHOOK_BASE }}
-          API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
 
+          # Prefer secret, then var
           BASE="${BASE_SECRET:-${BASE_VAR:-}}"
-          if [[ -z "$BASE" ]]; then
-            echo "::notice title=Skip smoke::WEBHOOK_BASE not set; skipping."
+          if [ -z "${BASE:-}" ]; then
+            echo "::warning::WEBHOOK_BASE (secret or var) is not set. Skipping smoke."
             exit 0
           fi
 
-          [[ "$BASE" != http* ]] && BASE="https://${BASE}"
+          # Trim trailing slash to normalize
           BASE="${BASE%/}"
 
-          IFS=',' read -r -a CANDIDATES <<< "${PATHS:-/health}"
+          endpoints=("/health" "/version" "/status")
+          got_200=0
 
-          passed=0
-          for raw in "${CANDIDATES[@]}"; do
-            p="/${raw#/}"
+          for p in "${endpoints[@]}"; do
             url="${BASE}${p}"
-            code="$(curl -sS -o /dev/null -w '%{http_code}' \
-                    -H "X-API-KEY: ${API_KEY:-}" "$url" || true)"
-            echo "GET $url -> $code"
-            if [[ "$code" =~ ^2[0-9]{2}$ ]]; then
-              passed=1
-              break
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "$url" || true)"
+            echo "GET ${url#*//*/} -> ${code}"
+            if [ "$code" = "200" ]; then
+              got_200=1
             fi
           done
 
-          if [[ "$passed" -eq 1 ]]; then
-            echo "Ã¢Å"â€¦ Smoke checks passed."
-          else
-            echo "::error title=Smoke check failed::None of the endpoints returned 2xx"
-            exit 1
+          if [ "$got_200" != "1" ]; then
+            echo "::error::No endpoint returned 200"
+            exit 2
           fi
 
+      - name: Complete
+        run: echo "Smoke OK"
