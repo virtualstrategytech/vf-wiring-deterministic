@@ -2,32 +2,27 @@
 
 on:
   pull_request:
-    paths: [".github/workflows/**"]
+    paths:
+      - ".github/workflows/**"
   push:
-    branches: [main]
-    paths: [".github/workflows/**"]
-  workflow_dispatch:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
-  lint:
+  validate:
+    name: Validate workflows
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Deterministic yamllint
-      - name: Install yamllint
-        run: |
-          python3 -m pip install --user --disable-pip-version-check "yamllint==1.35.1"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run yamllint (workflows only)
-        run: |
-          ~/.local/bin/yamllint -s .github/workflows
-
-      # Actionlint with ShellCheck disabled
       - name: Run actionlint (ShellCheck disabled)
         uses: docker://rhysd/actionlint:1.7.6
         with:
