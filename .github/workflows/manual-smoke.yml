@@ -1,4 +1,3 @@
----
 name: Manual smoke (simple)
 
 "on":
@@ -39,4 +38,3 @@ jobs:
           # normalize and print a masked base for logs
           echo "TARGET_BASE="${WEBHOOK_BASE}""
           npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
-

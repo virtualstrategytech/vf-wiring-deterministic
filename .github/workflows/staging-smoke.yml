@@ -1,4 +1,3 @@
----
 name: Staging smoke
 
 "on":
@@ -143,4 +142,3 @@ jobs:
             ${{ env.SOCKET_DEBUG_LOG }}
             ${{ env.DNS_TRACE }}
             ${{ env.PING_CHECK }}
-

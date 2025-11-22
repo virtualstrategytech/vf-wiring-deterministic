@@ -1,7 +1,6 @@
----
 name: Validate GitHub workflow YAML
 
-"on":
+on:
   pull_request:
     branches: [main]
   push:
@@ -15,18 +14,16 @@ jobs:
   validate:
     name: validate (pull_request)
     runs-on: ubuntu-latest
-    env:
-      DEBUG_WEBHOOK_ENABLED: ${{ vars.DEBUG_WEBHOOK_ENABLED }}
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: validate
+      # YAML syntax/style check for workflow files
+      - name: yamllint (workflows only)
         run: yamllint .github/workflows -s || echo "yamllint not installed; using actions-lint"
 
+      # GitHub Actions workflow validator, with ShellCheck disabled
       - name: Run actionlint (ShellCheck disabled)
         uses: docker://rhysd/actionlint:1.7.6
         with:

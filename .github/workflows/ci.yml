@@ -1,4 +1,3 @@
----
 name: CI
 
 "on":
@@ -44,4 +43,3 @@ jobs:
         uses: docker://rhysd/actionlint:1.7.6
         with:
           args: -color -shellcheck=never
-

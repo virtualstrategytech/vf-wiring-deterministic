@@ -1,4 +1,3 @@
----
 name: CI - child-process server tests
 
 "on":
@@ -54,4 +53,3 @@ jobs:
             tests/prompt-mock.child.stderr.log
             tests/globalSetup.log
             tests/prompt-mock.json
-

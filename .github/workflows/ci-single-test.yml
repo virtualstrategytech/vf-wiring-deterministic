@@ -1,4 +1,3 @@
----
 name: CI - single_in_process test
 
 "on":
@@ -28,4 +27,3 @@ jobs:
           else
             echo "No package.json Ã¢â‚¬â€œ skipping tests."
           fi
-
