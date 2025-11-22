@@ -23,6 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Only actionlint, and ShellCheck explicitly disabled
       - name: Run actionlint (ShellCheck disabled)
         uses: docker://rhysd/actionlint:1.7.6
         with:
