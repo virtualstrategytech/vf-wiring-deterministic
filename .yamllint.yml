@@ -1,0 +1,22 @@
+extends: default
+
+rules:
+  # We don't want YAML 1.1 "truthy" gotchas flagged in actions files.
+  truthy: disable
+
+  # Allow a bit more vertical whitespace in long workflows
+  empty-lines:
+    max: 2
+    max-start: 1
+    max-end: 1
+    level: warning
+
+  # GitHub Actions don't require '---' at top
+  document-start: disable
+
+  # CI logs are easier without line-length noise
+  line-length: disable
+
+  # Enforce LF; pairs well with .gitattributes below
+  new-lines:
+    type: unix

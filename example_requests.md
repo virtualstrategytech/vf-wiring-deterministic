@@ -142,7 +142,7 @@ Guidance: replace `tenantId`, `WEBHOOK_API_KEY` and other placeholders with runt
 
 ```powershell
 $body = @{ action='ping'; question='hello'; name='Bob'; tenantId='default' } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key' = 'test123' } -Body $body -ContentType 'application/json'
+Invoke-RestMethod -Method Post -Uri http://localhost:3000/webhook -Headers @{ 'x-api-key' = '{WEBHOOK_KEY}' } -Body $body -ContentType 'application/json'
 ```
 
 ## Mapping flows → blocks (how to document your canvas)

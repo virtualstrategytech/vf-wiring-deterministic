@@ -1,13 +1,13 @@
 name: Debug socket/TLS handles (manual)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       webhook_base:
-        description: 'Optional override for WEBHOOK_BASE (falls back to repo secret)'
+        description: "Optional override for WEBHOOK_BASE (falls back to repo secret)"
         required: false
       webhook_api_key:
-        description: 'Optional override for WEBHOOK_API_KEY (falls back to repo secret)'
+        description: "Optional override for WEBHOOK_API_KEY (falls back to repo secret)"
         required: false
 permissions:
   contents: read
@@ -28,16 +28,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Export inputs and secrets to env
+        run: |
+          if [ -n "${{ github.event.inputs.webhook_base }}" ]; then
+            echo "WEBHOOK_BASE=${{ github.event.inputs.webhook_base }}" >> "$GITHUB_ENV"
+          else
+            echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ github.event.inputs.webhook_api_key }}" ]; then
+            echo "WEBHOOK_API_KEY=${{ github.event.inputs.webhook_api_key }}" >> "$GITHUB_ENV"
+          else
+            echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+          fi
+
       - name: Run tests with NODE_DEBUG and capture logs
         env:
-          WEBHOOK_BASE: ${{ github.event.inputs.webhook_base || secrets.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ github.event.inputs.webhook_api_key || secrets.WEBHOOK_API_KEY }}
           NODE_DEBUG: net,tls
-          NODE_OPTIONS: '--enable-source-maps --trace-warnings'
-          DEBUG_TESTS: '1'
-          FORCE_PER_REQUEST_AGENT: '1'
-          FORCE_DETERMINISTIC_IDS: '1'
-          TEST_PATCH_RAW_BODY: '1'
+          NODE_OPTIONS: "--enable-source-maps --trace-warnings"
+          DEBUG_TESTS: "1"
+          FORCE_PER_REQUEST_AGENT: "1"
+          FORCE_DETERMINISTIC_IDS: "1"
+          TEST_PATCH_RAW_BODY: "1"
         run: |
           set -euo pipefail
           mkdir -p /tmp

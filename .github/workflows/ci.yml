@@ -1,57 +1,45 @@
 name: CI
 
-on:
+"on":
   pull_request:
-    branches: [feat/wiring-agent, pr41-resolve]
   push:
-    branches: [feat/wiring-agent, pr41-resolve]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# Run all steps from the real Node package
-defaults:
-  run:
-    shell: bash
-    working-directory: novain-platform/webhook
-
 jobs:
-  lint-18x:
+  lint:
     name: Lint (18.x)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
 
-      - name: Install deps
-        run: npm ci
-
-      - name: Run lint
-        run: npm run lint --if-present
-
-  test-18x:
-    name: test (18.x)
+  test:
+    name: Test (18.x)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
-          cache-dependency-path: novain-platform/webhook/package-lock.json
+      - run: npm ci
+      - run: npm test --if-present
 
-      - name: Install deps
-        run: npm ci
-
-      - name: Run unit tests
-        run: npm test -- --ci --runInBand
+  actionlint:
+    name: actionlint (no ShellCheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.6
+        with:
+          args: -color -shellcheck=never

@@ -100,7 +100,7 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
       createdAgent = null;
     }
 
-    if (!IS_PROD || DEBUG_WEBHOOK)
+    if (DEBUG_WEBHOOK || DEBUG_TESTS)
       console.info("fetch start", opts.method || "GET", url);
     const start = Date.now();
     // Use the resolved fetch implementation captured during module init
@@ -116,7 +116,7 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
     } catch {
       /* ignore */
     }
-    if (!IS_PROD || DEBUG_WEBHOOK) {
+    if (DEBUG_WEBHOOK || DEBUG_TESTS) {
       console.info(
         `fetch ${opts.method || "GET"} ${url} => ${r.status} (${elapsed}ms)`
       );

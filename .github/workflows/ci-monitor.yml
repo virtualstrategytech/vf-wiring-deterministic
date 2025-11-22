@@ -1,96 +1,26 @@
-# .github/workflows/ci-monitor.yml
-name: CI Monitor - non-blocking
+name: CI Monitor - collect failed run info
 
-on:
+"on":
   workflow_run:
-    # Watch all workflows; we filter by default branch & success/failure below.
+    workflows:
+      - "CI - child-process server tests"
+      - "CI - child-process server stress"
+      - "CI - single_in_process test"
     types: [completed]
 
 permissions:
+  issues: write
   contents: read
   actions: read
-  issues: write
 
 jobs:
-  record-failure:
-    name: Record failure (comment / open issue)
-    if: >
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.name != github.workflow &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch
+  notify-on-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
-      - name: File or update CI-monitor issue
+      - name: Summarize failed run
         uses: actions/github-script@v7
-        continue-on-error: true
         with:
           script: |
             const run = context.payload.workflow_run;
-            const { owner, repo } = context.repo;
-
-            // We keep ONE open issue per workflow name to avoid spam.
-            const titlePrefix = `CI failure: ${run.name}`;
-            const openIssues = await github.paginate(
-              github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: 'ci-monitor' }
-            );
-            let issue = openIssues.find(i => i.title.startsWith(titlePrefix));
-
-            const body = [
-              `**Workflow:** ${run.name}`,
-              `**Run:** ${run.html_url}`,
-              `**Event:** ${run.event}`,
-              `**Branch:** ${run.head_branch}`,
-              `**SHA:** ${run.head_sha}`,
-              `**Actor:** ${run.actor?.login ?? ''}`,
-              `**Conclusion:** ${run.conclusion}`,
-              '',
-              '_Artifacts (if any) are available on the run page._'
-            ].join('\n');
-
-            if (issue) {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: issue.number,
-                body: `New failing run detected.\n\n${body}`
-              });
-            } else {
-              issue = (await github.rest.issues.create({
-                owner, repo,
-                title: titlePrefix,
-                body: `First failing run observed.\n\n${body}`,
-                labels: ['ci-monitor','needs-triage']
-              })).data;
-            }
-
-  close-on-success:
-    name: Auto-close on green
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name != github.workflow &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - name: Close CI-monitor issue for this workflow
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          script: |
-            const run = context.payload.workflow_run;
-            const { owner, repo } = context.repo;
-            const titlePrefix = `CI failure: ${run.name}`;
-
-            const openIssues = await github.paginate(
-              github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: 'ci-monitor' }
-            );
-            const toClose = openIssues.filter(i => i.title.startsWith(titlePrefix));
-
-            for (const issue of toClose) {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: issue.number,
-                body: `Closing automatically: a subsequent run of **${run.name}** on \`${run.head_branch}\` succeeded.`
-              });
-              await github.rest.issues.update({
-                owner, repo, issue_number: issue.number, state: 'closed'
-              });
-            }
+            core.info(`Failed workflow: ${run.name} (id=${run.id}) conclusion=${run.conclusion}`);

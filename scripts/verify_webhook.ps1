@@ -1,5 +1,5 @@
 param(
-  [string]$ApiKey = 'test123',
+  [string]$ApiKey = '{WEBHOOK_KEY}',
   [int]$WebhookPort = 3000,
   [int]$PromptsPort = 4001,
   [int]$MockBizPort = 4002,

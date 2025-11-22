@@ -1,15 +1,10 @@
 name: CI - child-process server tests
 
-on:
-  # Run this workflow for PRs targeting main (populates the "status checks" list)
+"on":
   pull_request:
     branches: [main]
-
-  # Run when code lands on main (e.g., after merging a PR) to seed contexts on the default branch
   push:
     branches: [main]
-
-  # Manual run with optional debug flag
   workflow_dispatch:
     inputs:
       DEBUG_TESTS:
@@ -24,7 +19,6 @@ jobs:
   child-server-tests:
     name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
-
     env:
       CI: "true"
       SKIP_SYNC_SECRET: "true"
@@ -36,29 +30,17 @@ jobs:
       TEST_PATCH_RAW_BODY: "1"
       JEST_OUTPUT_LOG: tests/jest-output.txt
       DEBUG_TESTS: ${{ inputs.DEBUG_TESTS || '0' }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
           cache-dependency-path: novain-platform/webhook/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint (if present)
-        run: npm run lint --if-present
-
-      - name: Run tests (child-process server)
-        run: bash ./scripts/ci_run_jest.sh
-
-      - name: Upload test logs and artifacts on failure
-        if: failure()
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: bash ./scripts/ci_run_jest.sh
+      - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs

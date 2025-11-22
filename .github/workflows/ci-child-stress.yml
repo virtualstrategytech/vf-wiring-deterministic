@@ -1,12 +1,12 @@
 name: CI - child-process server stress
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       runs:
-        description: 'Number of runs (matrix size)'
+        description: "Number of runs (matrix size)"
         required: false
-        default: '10'
+        default: "10"
 
 permissions:
   contents: read
@@ -20,14 +20,14 @@ jobs:
       matrix:
         idx: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
-      CI: 'true'
-      SKIP_SYNC_SECRET: 'true'
-      SKIP_BODY_PARSER: '1'
-      SKIP_SMOKE: 'false'
-      USE_CHILD_PROCESS_SERVER: '1'
-      FORCE_PER_REQUEST_AGENT: '1'
-      FORCE_DETERMINISTIC_IDS: '1'
-      TEST_PATCH_RAW_BODY: '1'
+      CI: "true"
+      SKIP_SYNC_SECRET: "true"
+      SKIP_BODY_PARSER: "1"
+      SKIP_SMOKE: "false"
+      USE_CHILD_PROCESS_SERVER: "1"
+      FORCE_PER_REQUEST_AGENT: "1"
+      FORCE_DETERMINISTIC_IDS: "1"
+      TEST_PATCH_RAW_BODY: "1"
       JEST_OUTPUT_LOG: tests/jest-output.txt
 
     steps:
@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install dependencies
         run: npm ci

@@ -4,15 +4,15 @@ permissions:
   contents: read
   actions: read
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       WEBHOOK_BASE:
-        description: 'Base URL to run smoke tests against (e.g. https://api.example)'
+        description: "Base URL to run smoke tests against (e.g. https://api.example)"
         required: false
         type: string
       SKIP_SMOKE:
-        description: 'Set to true to skip smoke test execution'
+        description: "Set to true to skip smoke test execution"
         required: false
         type: boolean
 
@@ -33,6 +33,15 @@ jobs:
         run: |
           npm ci
 
+      - name: Export secrets to env
+        run: |
+          if [ -n "${{ github.event.inputs.WEBHOOK_BASE }}" ]; then
+            echo "WEBHOOK_BASE=${{ github.event.inputs.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+          else
+            echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+          fi
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+
       - name: Run network diagnostics (non-secret-safe)
         if: ${{ github.event.inputs.WEBHOOK_BASE != '' }}
         run: |
@@ -50,9 +59,6 @@ jobs:
           if [ -n "${{ github.event.inputs.WEBHOOK_BASE }}" ]; then echo "WEBHOOK_BASE_HOST=$(echo \"${{ github.event.inputs.WEBHOOK_BASE }}\" | sed -E 's#^https?://([^/]+).*#\1#')" >> /tmp/socket_debug.log || true; fi
 
       - name: Run smoke test (jest)
-        env:
-          WEBHOOK_BASE: ${{ github.event.inputs.WEBHOOK_BASE }}
-          WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
         run: |
           # Run only the smoke test to keep runs fast and focused
           npx jest tests/webhook.smoke.test.js --runInBand --verbose || true

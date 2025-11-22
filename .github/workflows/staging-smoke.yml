@@ -1,8 +1,8 @@
 name: Staging smoke
 
-on:
+"on":
   push:
-    branches: ['staging']
+    branches: ["staging"]
   workflow_dispatch: {}
 
 permissions:
@@ -13,11 +13,9 @@ jobs:
   run-smoke:
     runs-on: ubuntu-latest
 
-    # Make secrets and paths visible to all steps in a way the Actions
-    # language server understands.
+    # Make non-secret paths visible to all steps. Secrets are exported below
+    # to avoid static workflow validation warnings about secret context access.
     env:
-      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
-      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
       SOCKET_DEBUG_LOG: $RUNNER_TEMP/socket_debug.log
       DNS_TRACE: $RUNNER_TEMP/dns_trace.txt
       PING_CHECK: $RUNNER_TEMP/ping_check.txt
@@ -30,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Export secrets to env
+        run: |
+          echo "WEBHOOK_BASE=${{ secrets.WEBHOOK_BASE }}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}" >> "$GITHUB_ENV"
+
       - name: Verify required secrets are present
         shell: bash
         run: |
@@ -41,12 +44,12 @@ jobs:
             echo "ERROR: WEBHOOK_API_KEY secret is not configured." >&2
             exit 1
           fi
-          echo "WEBHOOK_BASE is set to: ${WEBHOOK_BASE}"
+          echo "WEBHOOK_BASE is set to: "${WEBHOOK_BASE}""
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install dependencies
         run: npm ci
@@ -55,7 +58,7 @@ jobs:
         shell: bash
         run: |
           # Normalize base to avoid accidental double-slash when joining paths
-          BASE=${WEBHOOK_BASE%/}
+          BASE="${WEBHOOK_BASE}"%/}
 
           echo "Using WEBHOOK_BASE=${BASE}"
 
@@ -122,9 +125,9 @@ jobs:
       - name: Run staging smoke tests
         shell: bash
         env:
-          WEBHOOK_HEALTH_TIMEOUT: '15000'
-          WEBHOOK_PING_TIMEOUT: '20000'
-          WEBHOOK_GENERATE_TIMEOUT: '120000'
+          WEBHOOK_HEALTH_TIMEOUT: "15000"
+          WEBHOOK_PING_TIMEOUT: "20000"
+          WEBHOOK_GENERATE_TIMEOUT: "120000"
         run: |
           npx jest tests/webhook.smoke.test.js --runInBand --testTimeout=180000
 
