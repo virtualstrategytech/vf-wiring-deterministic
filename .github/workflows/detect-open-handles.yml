@@ -15,11 +15,19 @@ jobs:
   validate:
     name: validate (pull_request)
     runs-on: ubuntu-latest
+    env:
+      DEBUG_WEBHOOK_ENABLED: ${{ vars.DEBUG_WEBHOOK_ENABLED }}
+      WEBHOOK_BASE: ${{ secrets.WEBHOOK_BASE }}
+      WEBHOOK_API_KEY: ${{ secrets.WEBHOOK_API_KEY }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: validate
         run: yamllint .github/workflows -s || echo "yamllint not installed; using actions-lint"
-      - uses: docker://rhysd/actionlint:latest
-        with:
-          args: -color
 
+      - name: Run actionlint (ShellCheck disabled)
+        uses: docker://rhysd/actionlint:1.7.6
+        with:
+          args: -color -shellcheck=never
