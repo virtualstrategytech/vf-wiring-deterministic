@@ -1,3 +1,4 @@
+# actionlint: disable=expr-env
 name: CI - deployed smoke
 
 on:
