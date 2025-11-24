@@ -442,6 +442,46 @@ function makeMarkdownFromLesson(title, lesson) {
   ].join("");
 }
 
+// ---- Optimize Question (deterministic stub)
+app.post("/optimize_question", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { first_name, last_utterance, agent_persona, vf_memory } = body;
+
+    const raw = (last_utterance || "").toString().trim();
+
+    const optimized_question = raw;
+
+    const personaSuffix = agent_persona
+      ? ` (as ${String(agent_persona).slice(0, 40)})`
+      : "";
+    const memorySuffix = vf_memory
+      ? ` [memory: ${String(vf_memory).slice(0, 80)}]`
+      : "";
+
+    const agent_reply =
+      raw.length === 0
+        ? "I didn't quite catch the problem. In one sentence, what's the business issue you're dealing with?"
+        : `Got it, ${first_name || "there"}${personaSuffix}${memorySuffix}. So your core problem is: "${optimized_question}". Is that a fair summary, and who is the main audience you're working with?`;
+
+    return res.json({
+      component_result: "success",
+      debug_trace: "optimize_question_stub_v1",
+      optimized_question,
+      agent_reply,
+    });
+  } catch (err) {
+    console.error("optimize_question error", err);
+    return res.status(500).json({
+      component_result: "failure",
+      debug_trace: "optimize_question_error",
+      optimized_question: "",
+      agent_reply:
+        "Something went wrong on my side while processing that. Could you rephrase your problem in one sentence?",
+    });
+  }
+});
+
 // ---- export_lesson_file (download endpoint) - must be after express.json middleware
 app.post("/export_lesson_file", (req, res) => {
   try {
@@ -1134,4 +1174,5 @@ try {
   });
 } catch {}
 
+// default export
 module.exports = app;
