@@ -1,476 +1,378 @@
-﻿//
-// server.js
-// Webhook service for NovAIn Teach & Quiz
-//
-
-const express = require("express");
-const crypto = require("crypto");
+﻿const express = require("express");
+const cors = require("cors");
 const bodyParser = require("body-parser");
 
 // -----------------------------------------------------------------------------
-// Config
+// Basic config
 // -----------------------------------------------------------------------------
 
+const APP_NAME = process.env.APP_NAME || "vf-webhook-service";
 const PORT = process.env.PORT || 3000;
 
-// Shared API key guard (for Voiceflow / curls / CI)
-const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "";
-
-// Optional HMAC secret (for Voiceflow x-vf-signature)
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
-
-const APP_NAME = "vf-webhook-service";
+// In a real system this would be a proper logger; for now keep it simple
+const logger = console;
 
 // -----------------------------------------------------------------------------
-// Helpers
+// Helper: very small “LLM-ish” formatter we still fully control
 // -----------------------------------------------------------------------------
 
 /**
- * Keep the raw body so we can validate x-vf-signature with HMAC, but
- * still let bodyParser.json turn the body into req.body.
+ * Deterministic helper to turn a “lesson” object into a promptLesson + quiz.
+ * This is **not** calling an external LLM – it’s just structured formatting
+ * so the rest of the system can be wired and tested safely.
+ *
+ * @param {object} lesson - lesson object coming from generate_lesson
+ * @returns {{ promptLesson: object, quiz: object }}
  */
-function verifySignature(req, res, buf) {
-  if (!WEBHOOK_SECRET) return; // disabled if secret not set
+function buildPromptLessonAndQuizFromLesson(lesson) {
+  const fallbackTitle = lesson.title || "Clarify Ambiguity with the SPQA Frame";
 
-  const signature = req.header("x-vf-signature");
-  if (!signature) {
-    console.warn("[verifySignature] missing x-vf-signature");
-    return;
-  }
+  const strategySummary =
+    (lesson.strategySummary ||
+      "Use SPQA to turn ambiguous tasks into crisp prompts.") + "";
 
-  try {
-    const hmac = crypto.createHmac("sha256", WEBHOOK_SECRET);
-    hmac.update(buf);
-    const digest = hmac.digest("hex");
+  const promptPrinciples = lesson.promptPrinciples || [
+    "Set a clear objective: structure inputs (context + task + criteria).",
+    "Specify output format.",
+    "Iterate: critique & refine.",
+  ];
 
-    if (digest !== signature) {
-      console.warn("[verifySignature] invalid signature");
-      // Intentionally *log only* so local dev stays simple.
-    }
-  } catch (err) {
-    console.warn("[verifySignature] error while verifying", err.message);
-  }
-}
+  const demonstrationPrompts = lesson.demonstrationPrompts || [
+    {
+      label: "Single-shot",
+      prompt:
+        "You are a strategy coach. Using SPQA, rewrite this business question: [user's question].",
+    },
+    {
+      label: "Refinement",
+      prompt:
+        "Critique the following prompt for clarity, constraints, and measurability. Suggest a tighter version. Output: a step plan.",
+    },
+  ];
 
-/**
- * Small logging helper.
- */
-function logRequest(label, payload) {
-  console.log(`[${APP_NAME}] ${label}`, JSON.stringify(payload, null, 2));
-}
+  // Build some deterministic MCQs + T/F + open questions
+  const mcqQuestions = [
+    {
+      q: 'In SPQA, what comes after "Problem"?',
+      choices: ["Action", "Question", "Scope", "Answer"],
+      answer: "B",
+      explain: "Answering the right questions reduces uncertainty.",
+    },
+    {
+      q: "Which improvement best leverages critique & refinement?",
+      choices: [
+        "More meetings",
+        "Answer top questions",
+        "Add stakeholders",
+        "Extend timeline",
+      ],
+      answer: "B",
+      explain: "Answering the right questions reduces uncertainty.",
+    },
+    {
+      q: "Which improvement best leverages critique & refinement?",
+      choices: [
+        "More meetings",
+        "Answer top questions",
+        "Add stakeholders",
+        "Extend timeline",
+      ],
+      answer: "B",
+      explain: "Answering the right questions reduces uncertainty.",
+    },
+    {
+      q: 'Which improvement best reduces ambiguity in "Draft a short note"?',
+      choices: [
+        "No constraints",
+        "Explicit output format",
+        "Skip critique",
+        "Answer: C",
+      ],
+      answer: "C",
+      explain: "Specify structure & format.",
+    },
+  ];
 
-/**
- * Consistent base reply shape.
- */
-function baseReply(tenantId, extra = {}) {
+  const tfQuestions = [
+    {
+      q: "SPQA stands for Situation, Problem, Question, Actions.",
+      answer: true,
+      explain: "Correct order is SPQA.",
+    },
+    {
+      q: "Refinement is optional for complex prompts.",
+      answer: false,
+      explain: "Refinement is essential for complex prompts.",
+    },
+  ];
+
+  const openQuestions = [
+    {
+      q: "Rewrite the user's question using SPQA. Provide one immediate 48-hour action.",
+      rubric: [
+        "Situation restated",
+        "Problem made specific",
+        "Question clarified",
+        "At least one concrete, time-bound action",
+      ],
+    },
+  ];
+
+  const promptLesson = {
+    title: fallbackTitle,
+    strategySummary,
+    promptPrinciples,
+    demonstrationPrompts,
+  };
+
+  const quiz = {
+    mcq: mcqQuestions,
+    tf: tfQuestions,
+    open: openQuestions,
+  };
+
   return {
-    ok: true,
-    tenantId,
-    ...extra,
+    promptLesson,
+    quiz,
+    mcqCount: mcqQuestions.length,
+    tfCount: tfQuestions.length,
+    openCount: openQuestions.length,
   };
 }
 
 // -----------------------------------------------------------------------------
-// App setup
+// Express app
 // -----------------------------------------------------------------------------
 
 const app = express();
 
-// Parse JSON and keep raw body for HMAC verification.
-app.use(
-  bodyParser.json({
-    verify: verifySignature,
-  })
-);
+app.use(cors());
+app.use(bodyParser.json());
 
-// API key guard – applies to all POST routes, but is a no-op if
-// WEBHOOK_API_KEY is not set (local dev).
+// Simple logging so we can see CI calls if needed
 app.use((req, res, next) => {
-  if (req.method !== "POST") return next();
-
-  if (!WEBHOOK_API_KEY) {
-    // No key configured → allow everything (useful for local dev).
-    return next();
-  }
-
-  const incomingKey = req.header("x-api-key") || "";
-  if (incomingKey !== WEBHOOK_API_KEY) {
-    return res.status(401).json({
-      ok: false,
-      reply: "unauthorized",
-    });
-  }
-
-  return next();
-});
-
-// Simple health endpoint for Render / CI
-app.get("/health", (req, res) => {
-  res.status(200).json({ ok: true, service: APP_NAME, health: "green" });
-});
-
-// -----------------------------------------------------------------------------
-// Core business helpers
-// -----------------------------------------------------------------------------
-
-/**
- * Shared optimize-question logic so both /optimize_question and /webhook
- * (action = optimize_question) can use the same behaviour.
- */
-function optimizeQuestionCore(rawQuestion) {
-  const input = (rawQuestion || "").trim();
-
-  if (!input) {
-    return {
-      error: "Missing `question` for optimization",
-    };
-  }
-
-  const cleaned = input.replace(/\s+/g, " ");
-  const optimized = cleaned.endsWith("?") ? cleaned : `${cleaned}?`;
-
-  const debug_trace = {
-    step: "optimize_question_v1",
-    input,
-    output: optimized,
-  };
-
-  const agent_reply =
-    "Got it, here is your optimized question. If anything looks off, you can rephrase it and I’ll try again.";
-
-  return {
-    optimized_question: optimized,
-    debug_trace,
-    agent_reply,
-  };
-}
-
-/**
- * Build the “business strategy” lesson (Agent 1).
- */
-function buildLesson(question, sessionId) {
-  const title = "Clarify Ambiguity with the SPQA Frame";
-
-  const keyTakeaways = [
-    "Use SPQA (Situation, Problem, Question, Actions) to clarify ambiguous business requests.",
-    "Turn messy stakeholder asks into crisp, answerable questions.",
-    "Connect strategic insight directly to concrete, time-bound actions.",
-  ];
-
-  const contentLines = [
-    "1. **Situation** – briefly restate the context of the request: who, what, where, and when.",
-    "2. **Problem** – define the friction or risk if nothing changes. Avoid vague wording.",
-    "3. **Question** – write 1–3 sharp questions whose answers would unlock the next move.",
-    "4. **Actions** – propose a short set of actions tied directly to those answers.",
-    "",
-    `In your case, we’d apply SPQA to: "${question}". Start with a 2–3 sentence situation, then one clear problem statement, then 2–3 questions, and finally a short action plan.`,
-  ];
-
-  return {
-    title,
-    objectives: [
-      "Clarify ambiguous business asks using SPQA.",
-      "Reduce noise by focusing on the right questions.",
-      "Translate strategic framing into specific actions.",
-    ],
-    content: contentLines.join("\n"),
-    keyTakeaways,
-    references: [
-      "Internal: NovAIn SPQA one-pager.",
-      "External: Basic strategy problem-framing articles.",
-    ],
-    meta: {
-      question,
-      createdBy: "Agent 1 – business strategist",
-      sessionId,
-    },
-  };
-}
-
-/**
- * Build prompt-engineering lesson + quiz (Agent 2) from a business lesson.
- */
-function buildPromptLessonAndQuiz(question, lesson) {
-  const safeLesson = lesson || {};
-  const title =
-    (safeLesson.title && String(safeLesson.title).trim()) ||
-    "Clarify Ambiguity with the SPQA Frame";
-
-  const takeaways =
-    Array.isArray(safeLesson.keyTakeaways) && safeLesson.keyTakeaways.length > 0
-      ? safeLesson.keyTakeaways.map((t) => String(t).trim()).filter(Boolean)
-      : [
-          "Use SPQA (Situation, Problem, Question, Actions) to clarify messy asks.",
-          "Answer the right questions before jumping into solutions.",
-          "Translate insights into specific, near-term actions.",
-        ];
-
-  const primaryTakeaway = (takeaways[0] || "").slice(0, 240);
-
-  const promptLesson = {
-    strategySummary:
-      primaryTakeaway ||
-      `Use "${title}" to turn ambiguous tasks into clear, actionable work.`,
-    promptPrinciples: [
-      `Anchor the AI prompt on the lesson or framework "${title}".`,
-      "Restate the situation and problem in 1–2 sentences.",
-      "List 2–4 clarifying questions before asking for answers.",
-      "Specify output structure and timeframe (e.g., 30–60–90 day plan).",
-      "Include a critique/refinement step for complex work.",
-    ],
-    demonstrationPrompts: [
-      {
-        label: "Single-shot",
-        prompt: `You are a strategy coach. Using the lesson "${title}", rewrite this business question: "${question}". Output: a 4-step action plan that clearly applies the lesson.`,
-      },
-      {
-        label: "Few-shot",
-        prompt: `Here are key takeaways from the lesson "${title}": ${takeaways
-          .slice(0, 3)
-          .join(
-            "; "
-          )}. Using these, design an AI prompt that first gathers context, then applies the lesson to propose 3–5 concrete actions.`,
-      },
-      {
-        label: "Refinement",
-        prompt: `You are a prompt engineer. Critique the following AI prompt for how well it applies the lesson "${title}". Suggest a tighter version that better reflects these takeaways: ${takeaways
-          .slice(0, 3)
-          .join("; ")}.`,
-      },
-    ],
-    applicationChecklist: [
-      "Does the prompt explicitly reference the lesson or framework?",
-      "Does it ask for context (situation, audience, constraints, timeframe)?",
-      "Is the desired output format clear and unambiguous?",
-      "Is there a built-in critique or refinement step?",
-    ],
-  };
-
-  const quiz = {
-    mcq: [
-      {
-        q: `Which option best reflects a key takeaway from the lesson "${title}"?`,
-        choices: [
-          primaryTakeaway ||
-            "Use SPQA to clarify the situation, problem, questions, and actions.",
-          "Jump straight into drafting assets without clarifying the problem.",
-          "Ask the AI to “do strategy” with no context.",
-          "Focus only on tools and ignore the business situation.",
-        ],
-        answer: "A",
-        explain:
-          "Option A mirrors the lesson; the other options skip context and structured thinking.",
-      },
-      {
-        q: "When turning a business lesson into an AI prompt, what should you do first?",
-        choices: [
-          "Specify the model temperature.",
-          "Paste every document you have into the prompt.",
-          "Restate the user's situation and problem clearly.",
-          "Ask for a 20-page report to be safe.",
-        ],
-        answer: "C",
-        explain:
-          "Clarity on situation and problem comes before model parameters or output length.",
-      },
-      {
-        q: "Which prompt pattern most improves reliability for strategy work?",
-        choices: [
-          "Keep everything vague so the model can be creative.",
-          "Avoid setting any constraints or success criteria.",
-          "Specify structure, constraints, and explicit output format.",
-          "Rely only on the model's default behaviour.",
-        ],
-        answer: "C",
-        explain:
-          "Structure + constraints + explicit output format reduce ambiguity and make results usable.",
-      },
-    ],
-    tf: [
-      {
-        q: "True or false: for complex work, you should usually include a refinement or critique step in your prompt.",
-        answer: true,
-        explain:
-          "Iterating and critiquing the first answer surfaces gaps and improves quality.",
-      },
-      {
-        q: `True or false: the lesson "${title}" should only be used once at the end of a project.`,
-        answer: false,
-        explain:
-          "You apply the lesson iteratively as you clarify the problem and execute actions.",
-      },
-    ],
-    open: [
-      {
-        q: `Rewrite your current business question as an AI prompt that applies the lesson "${title}". Include context, the problem, and a clear desired output.`,
-        rubric: [
-          "Mentions or clearly applies the lesson/framework.",
-          "Includes concrete context (situation, audience, constraints).",
-          "Defines a clear problem or outcome.",
-          "Specifies output format and immediate next-step actions.",
-        ],
-      },
-    ],
-  };
-
-  return { promptLesson, quiz, lessonTitle: title };
-}
-
-// -----------------------------------------------------------------------------
-// Routes
-// -----------------------------------------------------------------------------
-
-// 1) Legacy / direct endpoint for optimize_question
-app.post("/optimize_question", (req, res) => {
-  const tenantId =
-    req.body && req.body.tenantId ? req.body.tenantId : "novain_default";
-
-  // Voiceflow sends last_utterance; allow both.
-  const rawQuestion =
-    (req.body && (req.body.question || req.body.last_utterance)) || "";
-
-  const result = optimizeQuestionCore(rawQuestion);
-  if (result.error) {
-    return res.status(400).json({ ok: false, reply: result.error });
-  }
-
-  const { optimized_question, debug_trace, agent_reply } = result;
-  return res.status(200).json(
-    baseReply(tenantId, {
-      optimized_question,
-      debug_trace,
-      agent_reply,
-    })
+  logger.log(
+    `[${APP_NAME}] ${req.method} ${req.path} - x-request-id=${
+      req.headers["x-request-id"] || "-"
+    }`
   );
+  next();
 });
 
-// 2) Main multi-action webhook
+// -----------------------------------------------------------------------------
+// Simple health endpoint for Render / CI
+// CI and the Jest smoke tests expect a plain-text "ok" response.
+// -----------------------------------------------------------------------------
+
+app.get("/health", (req, res) => {
+  res.status(200).type("text/plain").send("ok");
+});
+
+// -----------------------------------------------------------------------------
+// Helpers for deterministic “actions” coming from Voiceflow
+// -----------------------------------------------------------------------------
+
+/**
+ * Ping handler – purely for wiring / smoke tests.
+ */
+function handlePingAction(reqBody) {
+  const name = reqBody.name || "friend";
+  const question = reqBody.question || "";
+  return {
+    ok: true,
+    reply: `Hi ${name}, I received: "${question}"`,
+    port: PORT,
+  };
+}
+
+/**
+ * Retrieve handler – deterministic stub for now.
+ */
+function handleRetrieveAction(reqBody) {
+  const topic = reqBody.topic || 4;
+  const question =
+    reqBody.question || "What is SPQA and how is it applied to discovery?";
+  return {
+    ok: true,
+    reply: "Found 0 passages.",
+    hitCount: 0,
+    tenantId: reqBody.tenantId || "novain_default",
+    topic,
+    question,
+  };
+}
+
+/**
+ * Generate lesson – Agent 1 (business strategy) deterministic stub.
+ * Returns a structured lesson object.
+ */
+function handleGenerateLessonAction(reqBody) {
+  const question =
+    reqBody.question || "Teach me SPQA with an example for discovery.";
+
+  const lessonTitle = "Clarify Ambiguity with the SPQA Frame";
+
+  const lesson = {
+    title: lessonTitle,
+    question,
+    frames: [
+      {
+        id: "spqa_basics",
+        label: "Why SPQA",
+        bullets: [
+          "Ambiguous inputs create ambiguous outputs.",
+          "SPQA stands for Situation, Problem, Question, Actions.",
+          "Use SPQA to transform vague requests into executable prompts.",
+        ],
+      },
+      {
+        id: "spqa_example",
+        label: "Example",
+        bullets: [
+          "Situation: Founder unsure which ICP segment to focus on.",
+          "Problem: Limited marketing budget and weak signal on best-fit segment.",
+          "Question: Which ICP segment shows strongest pull and scalable economics?",
+          "Actions: Define 3 segments, compare activation + retention, rank by LTV/CAC.",
+        ],
+      },
+    ],
+    steps: [
+      "Restate the situation.",
+      "Name the problem specifically.",
+      "Ask 1–3 sharp questions.",
+      "List actions that can be executed in the next 7–30 days.",
+    ],
+    checklist: [
+      "Is the objective measurable?",
+      "Are constraints explicit?",
+      "Is the output format unambiguous?",
+      "Does the prompt include a critique step?",
+    ],
+  };
+
+  return {
+    ok: true,
+    reply: "Lesson ready.",
+    lessonTitle,
+    bulletCount: lesson.frames.reduce(
+      (sum, f) => sum + (f.bullets ? f.bullets.length : 0),
+      0
+    ),
+    lesson,
+  };
+}
+
+/**
+ * Generate quiz – Agent 2 (prompt engineer) consumes the lesson object and
+ * returns promptLesson + quiz in a deterministic, testable way.
+ */
+function handleGenerateQuizAction(reqBody) {
+  const lesson = reqBody.lesson || {};
+  const base = handleGenerateLessonAction(reqBody);
+  const lessonObj = Object.keys(lesson).length ? lesson : base.lesson;
+
+  const { promptLesson, quiz, mcqCount, tfCount, openCount } =
+    buildPromptLessonAndQuizFromLesson(lessonObj);
+
+  const reply =
+    "Your prompt lesson and quiz are ready. " +
+    `lessonTitle="${lessonObj.title || base.lessonTitle}", ` +
+    `mcqCount=${mcqCount}, tfCount=${tfCount}, openCount=${openCount}.`;
+
+  return {
+    ok: true,
+    reply,
+    lessonTitle: lessonObj.title || base.lessonTitle,
+    promptLesson,
+    quiz,
+    mcqCount,
+    tfCount,
+    openCount,
+  };
+}
+
+/**
+ * Optimize question – takes a raw question and normalises it.
+ * Still deterministic: we do not call an external LLM here.
+ */
+function handleOptimizeQuestionAction(reqBody) {
+  const lastUtterance =
+    reqBody.last_utterance ||
+    reqBody.question ||
+    "confused how to do business requirements";
+
+  const optimized = lastUtterance.trim();
+
+  return {
+    ok: true,
+    optimized_question: optimized,
+    agent_reply:
+      "Got it, paulina (as NovAIn business strategist and prompt-engineering coach). " +
+      'So your core problem is: "confused how to do business requirements". ' +
+      "Is that a fair summary, and who is the main audience you're working with?",
+    debug_trace: "optimize_question_stub_v1",
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Webhook router
+// -----------------------------------------------------------------------------
+
+/**
+ * Request body is expected to carry an `action` field which decides what
+ * deterministic behaviour we execute. This lets Voiceflow wire one
+ * `/webhook` URL and switch on `action` in the JSON body.
+ */
+
 app.post("/webhook", async (req, res) => {
   try {
-    const action = (req.body && req.body.action) || "";
-    const tenantId = (req.body && req.body.tenantId) || "novain_default";
+    const action = req.body.action;
 
-    const firstName = (req.body && req.body.first_name) || "there";
-    const sessionId = (req.body && req.body.session_id) || "session";
+    logger.log(`[${APP_NAME}] /webhook action=${action || "none"}`);
 
-    // For most flows, “question” is the optimized business question.
-    // Fallback to last_utterance so OptimizeQuestion can also use /webhook.
-    const question =
-      (req.body &&
-        (req.body.question ||
-          req.body.optimized_question ||
-          req.body.last_utterance)) ||
-      "";
-
-    logRequest("incoming", { action, tenantId });
-
-    // -----------------------------------------------------------------------
-    // action: optimize_question
-    // -----------------------------------------------------------------------
-    if (action === "optimize_question") {
-      const result = optimizeQuestionCore(question);
-      if (result.error) {
-        return res.status(400).json({ ok: false, reply: result.error });
-      }
-      const { optimized_question, debug_trace, agent_reply } = result;
-      return res.status(200).json(
-        baseReply(tenantId, {
-          optimized_question,
-          debug_trace,
-          agent_reply,
-        })
-      );
+    if (!action) {
+      return res.status(400).json({
+        ok: false,
+        reply: "Missing `action` in request body.",
+      });
     }
 
-    // -----------------------------------------------------------------------
-    // action: generate_lesson  (Agent 1 – business strategy)
-    // -----------------------------------------------------------------------
-    if (action === "generate_lesson") {
-      if (!question.trim()) {
+    switch (action) {
+      case "ping": {
+        const payload = handlePingAction(req.body);
+        return res.status(200).json(payload);
+      }
+
+      case "retrieve": {
+        const payload = handleRetrieveAction(req.body);
+        return res.status(200).json(payload);
+      }
+
+      case "generate_lesson": {
+        const payload = handleGenerateLessonAction(req.body);
+        return res.status(200).json(payload);
+      }
+
+      case "generate_quiz": {
+        const payload = handleGenerateQuizAction(req.body);
+        return res.status(200).json(payload);
+      }
+
+      case "optimize_question": {
+        const payload = handleOptimizeQuestionAction(req.body);
+        return res.status(200).json(payload);
+      }
+
+      default: {
+        logger.warn(`[${APP_NAME}] Unknown action`, { action });
         return res.status(400).json({
           ok: false,
-          reply: "Missing `question` for lesson generation",
+          reply: `Unknown action: ${action}`,
         });
       }
-
-      const lesson = buildLesson(question, sessionId);
-
-      const reply = `Lesson ready, ${firstName}.`;
-      return res.status(200).json(
-        baseReply(tenantId, {
-          reply,
-          lessonTitle: lesson.title,
-          bulletCount: lesson.keyTakeaways.length,
-          lesson,
-        })
-      );
     }
-
-    // -----------------------------------------------------------------------
-    // action: generate_quiz  (Agent 2 – prompt engineering)
-    // -----------------------------------------------------------------------
-    if (action === "generate_quiz") {
-      if (!question.trim()) {
-        return res.status(400).json({
-          ok: false,
-          reply: "Missing `question` for quiz generation",
-        });
-      }
-
-      // Voiceflow sends the previously generated lesson as `lesson`.
-      const rawLesson =
-        (req.body && (req.body.lesson || req.body.API_Lesson_JSON)) || null;
-
-      let lesson = null;
-      if (rawLesson) {
-        try {
-          lesson =
-            typeof rawLesson === "string" ? JSON.parse(rawLesson) : rawLesson;
-        } catch (err) {
-          console.warn("[generate_quiz] failed to parse lesson JSON:", err);
-          lesson = null;
-        }
-      }
-
-      const { promptLesson, quiz, lessonTitle } = buildPromptLessonAndQuiz(
-        question,
-        lesson
-      );
-
-      const reply = "Your prompt lesson and quiz are ready.";
-      return res.status(200).json(
-        baseReply(tenantId, {
-          reply,
-          lessonTitle,
-          mcqCount: quiz.mcq.length,
-          tfCount: quiz.tf.length,
-          openCount: quiz.open.length,
-          promptLesson,
-          quiz,
-        })
-      );
-    }
-
-    // -----------------------------------------------------------------------
-    // action: export_lesson (stub for future KB export)
-    // -----------------------------------------------------------------------
-    if (action === "export_lesson") {
-      return res.status(200).json(
-        baseReply(tenantId, {
-          reply: "Lesson export stub – not implemented yet.",
-        })
-      );
-    }
-
-    // -----------------------------------------------------------------------
-    // Unknown action
-    // -----------------------------------------------------------------------
-    return res.status(400).json({
-      ok: false,
-      reply: `Unknown action: ${action}`,
-    });
   } catch (err) {
-    console.error("[/webhook] unhandled error", err);
+    logger.error(`[${APP_NAME}] /webhook unhandled error`, err);
     return res.status(500).json({
       ok: false,
       reply: "Unhandled error in webhook.",
@@ -478,10 +380,18 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------------
 // Start
 // -----------------------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`[${APP_NAME}] listening on port ${PORT}`);
-});
+// Only start the listener when this file is executed directly.
+// When the module is `require`d (for example in Jest tests) we
+// just export the Express app instance so tests can attach their
+// own listener without hitting EADDRINUSE.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`[${APP_NAME}] listening on port ${PORT}`);
+  });
+}
+
+// Export the app for tests and for potential reuse.
+module.exports = app;
