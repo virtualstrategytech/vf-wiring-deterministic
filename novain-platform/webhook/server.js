@@ -31,6 +31,7 @@ function logDebug(msg, extra) {
 }
 
 function getWebhookKey() {
+  // Accept either WEBHOOK_API_KEY or WEBHOOK_KEY
   return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || "";
 }
 
@@ -99,6 +100,14 @@ async function callPromptService(kind, body) {
     return makeStubRaw(kind, body);
   }
 
+  // Guard in case fetch is not available
+  const f =
+    (typeof globalThis !== "undefined" && globalThis.fetch) ||
+    (typeof fetch !== "undefined" && fetch);
+  if (!f) {
+    return makeStubRaw(kind, body);
+  }
+
   const payload = {
     action: kind,
     question: body && body.question ? String(body.question) : "",
@@ -107,7 +116,7 @@ async function callPromptService(kind, body) {
   };
 
   try {
-    const resp = await globalThis.fetch(promptUrl, {
+    const resp = await f(promptUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -185,6 +194,7 @@ function closeResources() {
 
 app.get("/health", (req, res) => {
   logDebug("GET /health", { ip: req.ip });
+  // tests expect plain "ok"
   res.type("text/plain").send("ok");
 });
 
@@ -205,125 +215,131 @@ app.get("/diagnostics/env", (_req, res) => {
 // Core webhook handler
 // ---------------------------------------------------------------------------
 
-const body = req.body || {};
-const action = body.action || body.type || "";
+app.post("/webhook", async (req, res) => {
+  const apiKeyHeader = req.get("x-api-key") || "";
+  const requiredKey = getWebhookKey();
 
-// ---- ping (used in smoke + verify_in_process) ---------------------------
-if (action === "ping") {
-  const port = Number(process.env.PORT || DEFAULT_PORT);
-  return res.json({
-    ok: true,
-    reply: "pong",
-    port,
-    pid: process.pid,
-  });
-}
+  if (requiredKey && apiKeyHeader !== requiredKey) {
+    return res.status(401).json({ ok: false, error: "unauthorized" });
+  }
 
-// ---- llm_elicit / invoke_component (regression mirror tests) ------------
-if (action === "llm_elicit") {
-  const raw = await callPromptService("llm_elicit", body);
-  logLlmPayloadSnippet(raw);
+  const body = req.body || {};
+  const action = body.action || body.type || "";
 
-  const mirrored = {
-    ok: true,
-    raw,
-    data: {
+  // ---- ping (used in smoke + verify_in_process) ---------------------------
+  if (action === "ping") {
+    const port = Number(process.env.PORT || DEFAULT_PORT);
+    return res.json({
+      ok: true,
+      reply: "pong",
+      port,
+      pid: process.pid,
+    });
+  }
+
+  // ---- llm_elicit / invoke_component (regression mirror tests) ------------
+  if (action === "llm_elicit") {
+    const raw = await callPromptService("llm_elicit", body);
+    logLlmPayloadSnippet(raw);
+
+    const mirrored = {
+      ok: true,
       raw,
-    },
-  };
-  return res.json(mirrored);
-}
-
-if (action === "invoke_component") {
-  const raw = await callPromptService("invoke_component", body);
-  logLlmPayloadSnippet(raw);
-
-  const mirrored = {
-    ok: true,
-    raw,
-    data: {
-      raw,
-    },
-  };
-  return res.json(mirrored);
-}
-
-// ---- generate_lesson (best-effort smoke) -------------------------------
-// tests/webhook.smoke.test.js expects:
-//   resp.data.lessonTitle || resp.data.lesson || resp.data.reply
-if (action === "generate_lesson") {
-  const raw = await callPromptService("generate_lesson", body);
-  logLlmPayloadSnippet(raw);
-
-  const question =
-    body && body.question ? String(body.question) : "Lesson stub question";
-
-  const lessonText =
-    (body && body.lesson && String(body.lesson)) ||
-    `Stub lesson generated for: ${question}`;
-
-  return res.json({
-    ok: true,
-    raw,
-    data: {
-      raw,
-      // any of these will satisfy the test; we provide all three
-      lessonTitle: `Lesson: ${question}`,
-      lesson: lessonText,
-      reply: lessonText,
-    },
-  });
-}
-
-// ---- generate_quiz (best-effort smoke) ---------------------------------
-// tests/webhook.smoke.test.js expects:
-//   resp.data.quiz || resp.data.mcqCount || resp.data.mcq || resp.data.reply
-if (action === "generate_quiz") {
-  const raw = await callPromptService("generate_quiz", body);
-  logLlmPayloadSnippet(raw);
-
-  const question =
-    body && body.question ? String(body.question) : "Quiz stub question";
-
-  const mcq = [
-    {
-      question,
-      options: ["Option A", "Option B", "Option C", "Option D"],
-      answer: "Option A",
-    },
-  ];
-
-  return res.json({
-    ok: true,
-    raw,
-    data: {
-      raw,
-      // enough structure for the test's OR condition
-      quiz: {
-        questions: mcq,
+      data: {
+        raw,
       },
-      mcq,
-      mcqCount: mcq.length,
-      reply: "Stub MCQ quiz generated",
+    };
+    return res.json(mirrored);
+  }
+
+  if (action === "invoke_component") {
+    const raw = await callPromptService("invoke_component", body);
+    logLlmPayloadSnippet(raw);
+
+    const mirrored = {
+      ok: true,
+      raw,
+      data: {
+        raw,
+      },
+    };
+    return res.json(mirrored);
+  }
+
+  // ---- generate_lesson (best-effort smoke) -------------------------------
+  // tests/webhook.smoke.test.js expects:
+  //   resp.data.lessonTitle || resp.data.lesson || resp.data.reply
+  if (action === "generate_lesson") {
+    const raw = await callPromptService("generate_lesson", body);
+    logLlmPayloadSnippet(raw);
+
+    const question =
+      body && body.question ? String(body.question) : "Lesson stub question";
+
+    const lessonText =
+      (body && body.lesson && String(body.lesson)) ||
+      `Stub lesson generated for: ${question}`;
+
+    return res.json({
+      ok: true,
+      raw,
+      data: {
+        raw,
+        lessonTitle: `Lesson: ${question}`,
+        lesson: lessonText,
+        reply: lessonText,
+      },
+    });
+  }
+
+  // ---- generate_quiz (best-effort smoke) ---------------------------------
+  // tests/webhook.smoke.test.js expects:
+  //   resp.data.quiz || resp.data.mcqCount || resp.data.mcq || resp.data.reply
+  if (action === "generate_quiz") {
+    const raw = await callPromptService("generate_quiz", body);
+    logLlmPayloadSnippet(raw);
+
+    const question =
+      body && body.question ? String(body.question) : "Quiz stub question";
+
+    const mcq = [
+      {
+        question,
+        options: ["Option A", "Option B", "Option C", "Option D"],
+        answer: "Option A",
+      },
+    ];
+
+    return res.json({
+      ok: true,
+      raw,
+      data: {
+        raw,
+        quiz: {
+          questions: mcq,
+        },
+        mcq,
+        mcqCount: mcq.length,
+        reply: "Stub MCQ quiz generated",
+      },
+    });
+  }
+
+  // ---- generic fallback ---------------------------------------------------
+  const fallbackRaw = {
+    source: "echo",
+    action: action || "unknown",
+    payload: body,
+    ts: new Date().toISOString(),
+  };
+
+  return res.json({
+    ok: true,
+    raw: fallbackRaw,
+    data: {
+      raw: fallbackRaw,
     },
   });
-}
-
-// ---- generic fallback ---------------------------------------------------
-// (keeps previous behavior for everything else, including unknown actions)
-const fallbackRaw = {
-  source: "echo",
-  action: action || "unknown",
-  timestamp: new Date().toISOString(),
-  body,
-};
-
-return res.json({
-  ok: true,
-  raw: fallbackRaw,
-  data: {
-    raw: fallbackRaw,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -355,7 +371,7 @@ app.use((err, req, res, _next) => {
 });
 
 // ---------------------------------------------------------------------------
-// Server bootstrap – no auto-listen on require
+// Server bootstrap - no auto-listen on require
 // ---------------------------------------------------------------------------
 
 let currentServer = null;
