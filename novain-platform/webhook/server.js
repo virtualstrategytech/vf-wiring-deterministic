@@ -1,14 +1,5 @@
 "use strict";
 
-/**
- * Minimal, test-friendly webhook server.
- *
- * Design goals:
- * - Requiring this module never binds a TCP port.
- * - Export the Express app directly so tests can use supertest(app).
- * - Provide only the behaviours the Jest tests rely on.
- */
-
 const http = require("http");
 const https = require("https");
 const express = require("express");
@@ -67,7 +58,7 @@ function makeStubRaw(kind, body) {
   return { ...base, source: "stub" };
 }
 
-// In this deterministic CI server, we always use the stub – no network.
+// Deterministic: no real network calls in CI.
 async function callPromptService(kind, body) {
   return makeStubRaw(kind, body || {});
 }
@@ -151,7 +142,7 @@ app.post("/webhook", async (req, res) => {
 
   // generate_lesson ---------------------------------------------------------
   // tests/webhook.smoke.test.js expects:
-  //   resp.data.lessonTitle || resp.data.lesson || resp.data.reply
+  //   resp.data.lesson !== undefined || resp.data.reply !== undefined
   if (action === "generate_lesson") {
     const raw = await callPromptService("generate_lesson", body);
     logLlmPayloadSnippet(raw);
@@ -181,7 +172,7 @@ app.post("/webhook", async (req, res) => {
 
   // generate_quiz -----------------------------------------------------------
   // tests/webhook.smoke.test.js expects:
-  //   resp.data.quiz || resp.data.mcqCount || resp.data.mcq || resp.data.reply
+  //   resp.data.mcq !== undefined || resp.data.reply !== undefined
   if (action === "generate_quiz") {
     const raw = await callPromptService("generate_quiz", body);
     logLlmPayloadSnippet(raw);
@@ -251,7 +242,26 @@ app.use((err, req, res, _next) => {
   });
 });
 
-// Attach helpers for tests that want explicit cleanup.
+// ---------------------------------------------------------------------------
+// startServer helper and CLI entrypoint
+// ---------------------------------------------------------------------------
+
+function startServer(port) {
+  const listenPort = Number(port || process.env.PORT || 3000);
+  const server = http.createServer(app);
+  server.listen(listenPort, () => {
+    console.log("webhook server listening", { port: listenPort });
+  });
+  return server;
+}
+
+// When run directly: `node novain-platform/webhook/server.js`
+if (require.main === module) {
+  startServer();
+}
+
+// Attach helpers for tests
+app.startServer = startServer;
 app.closeResources = closeResources;
 
 // Default export is the Express app
