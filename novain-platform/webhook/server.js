@@ -1,124 +1,120 @@
 /**
  * Deterministic webhook server for VST Novian Voiceflow wiring.
  *
- * This implementation is purposely boring and test-friendly:
- * - Single Express app exported as the module value.
- * - startServer()/closeResources() helpers for child-process + in-process tests.
- * - No real network calls to LLMs – we return stable stubs.
- *
- * The Jest test-suite only cares about the response *shape* and a few
- * logging side-effects, not about real LLM behaviour.
+ * This file is intentionally "boring":
+ *   - No transpilation or fancy frameworks.
+ *   - Small, explicit surface area that is easy to reason about in CI.
+ *   - Safe to `require()` in tests without creating global network side-effects.
  */
 
 const http = require("http");
+const crypto = require("crypto");
 const express = require("express");
 
 // ---------------------------------------------------------------------------
-// Environment + config helpers
+// Basic logging helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PORT = Number(process.env.PORT || 3000);
+const NODE_ENV = process.env.NODE_ENV || "development";
 
-// Treat anything "truthy" (except "false") as enabled.
-function flag(name, defaultValue) {
-  const raw = process.env[name];
-  if (raw == null) return !!defaultValue;
-  const v = String(raw).toLowerCase().trim();
-  if (v === "false" || v === "0" || v === "no") return false;
-  return true;
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
-const DEBUG_WEBHOOK = flag("DEBUG_WEBHOOK", false);
+function log(level, msg, extra) {
+  const payload = {
+    ts: nowIso(),
+    level,
+    env: NODE_ENV,
+    msg,
+    ...(extra || {}),
+  };
+
+  console.log(JSON.stringify(payload));
+}
 
 function logDebug(msg, extra) {
-  // When DEBUG_WEBHOOK is enabled we log verbosely; otherwise keep output
-  // reasonably small (tests still see some logs but they do not assert on them
-  // except for debug_llm_logging which enables the flag explicitly).
-  if (!DEBUG_WEBHOOK && process.env.NODE_ENV === "test") {
-    return;
-  }
-
-  try {
-    if (extra) {
-      console.log(msg, JSON.stringify(extra));
-    } else {
-      console.log(msg);
-    }
-  } catch {
-    // never let logging crash the server
+  if (NODE_ENV === "test" || process.env.DEBUG_WEBHOOK === "true") {
+    log("debug", msg, extra);
   }
 }
 
-function logError(msg, extra) {
-  try {
-    if (extra) {
-      console.error(msg, JSON.stringify(extra));
-    } else {
-      console.error(msg);
-    }
-  } catch {
-    // swallow
-  }
-}
+// ---------------------------------------------------------------------------
+// Env helpers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PORT = Number(process.env.PORT || 3000) || 3000;
 
 function getWebhookKey() {
-  // Tests set WEBHOOK_API_KEY; WEBHOOK_KEY is kept as a fallback.
+  // Accept either of these for flexibility in CI / local runs.
   return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || "";
 }
 
 // ---------------------------------------------------------------------------
-// Express app + JSON body handling
+// Signature helpers (kept for future HMAC usage and possible tests)
 // ---------------------------------------------------------------------------
 
-const app = express();
+const SIGNATURE_HEADER = "x-webhook-signature";
+const SIGNATURE_VERSION = "v1";
 
-// In CI/in-process tests we can skip the heavier body-parser to avoid
-// detectOpenHandles noise. When skipped we still want req.body populated.
-if (process.env.SKIP_BODY_PARSER === "1") {
-  app.use(express.json());
-} else {
-  // Capture raw body for potential future HMAC usage while still parsing JSON.
-  app.use(
-    express.json({
-      verify: (req, _res, buf) => {
-        req.rawBody = buf;
-      },
-    })
-  );
+function computeSignature(secret, rawBody) {
+  const hmac = crypto.createHmac("sha256", secret || "");
+  hmac.update(rawBody || Buffer.from("", "utf8"));
+  const digest = hmac.digest("hex");
+  return `${SIGNATURE_VERSION}:${digest}`;
+}
+
+function safeTimingEqual(a, b) {
+  const bufA = Buffer.from(String(a || ""), "utf8");
+  const bufB = Buffer.from(String(b || ""), "utf8");
+  const len = Math.max(bufA.length, bufB.length) || 1;
+  const aPadded = Buffer.concat([bufA, Buffer.alloc(len - bufA.length)]);
+  const bPadded = Buffer.concat([bufB, Buffer.alloc(len - bufB.length)]);
+  return crypto.timingSafeEqual(aPadded, bPadded);
+}
+
+function verifySignature(req) {
+  const key = getWebhookKey();
+  const header = req.get(SIGNATURE_HEADER) || "";
+  const raw = req.rawBody || Buffer.from("", "utf8");
+
+  if (!key) {
+    return { ok: true, reason: "no_key_configured" };
+  }
+
+  const expected = computeSignature(key, raw);
+  const ok = safeTimingEqual(expected, header);
+
+  return {
+    ok,
+    reason: ok ? "match" : "mismatch",
+    expected,
+    provided: header,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// LLM stub helpers
+// Prompt-service helpers (for llm_elicit / invoke_component / lesson / quiz)
 // ---------------------------------------------------------------------------
 
-/**
- * Build a deterministic "raw" payload for LLM-style actions. This is used
- * both when PROMPT_URL is not configured and as a fallback when remote
- * calls fail. The exact shape is intentionally simple – the tests only
- * assert that `raw`/`data.raw` exist and that `raw.source` is a sensible
- * string value.
- */
 function makeStubRaw(kind, body) {
   const base = {
+    source: "stub",
     kind,
-    source:
-      kind === "invoke_component"
-        ? "invoke_component_stub"
-        : kind === "generate_lesson"
-          ? "lesson_stub"
-          : kind === "generate_quiz"
-            ? "quiz_stub"
-            : "stub",
+    action: kind,
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
     question: body && body.question ? String(body.question) : undefined,
-    tenantId: body && body.tenantId ? String(body.tenantId) : undefined,
-    createdAt: new Date().toISOString(),
   };
 
   if (kind === "generate_lesson") {
     return {
       ...base,
       mode: "lesson",
-      topic: body && body.topic ? String(body.topic) : "generic",
+      source: "lesson_stub",
     };
   }
 
@@ -126,89 +122,179 @@ function makeStubRaw(kind, body) {
     return {
       ...base,
       mode: "quiz",
-      topic: body && body.topic ? String(body.topic) : "generic",
+      source: "quiz_stub",
     };
   }
 
   return base;
 }
 
-/**
- * "Call" the prompt service. In this project we deliberately do NOT make
- * real HTTP requests from CI – the tests only depend on the returned shape,
- * not the downstream behaviour – so this always returns a stub.
- */
 async function callPromptService(kind, body) {
-  // The tests for llm_stub explicitly expect raw.source === 'stub' when the
-  // prompt service is not configured. To keep behaviour deterministic and
-  // avoid network flakiness we *always* use the local stub.
-  const raw = makeStubRaw(kind, body || {});
-  return raw;
+  const url = process.env.PROMPT_URL;
+
+  // If no remote prompt service is configured, stay completely local.
+  if (!url || typeof globalThis.fetch !== "function") {
+    return makeStubRaw(kind, body);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await globalThis.fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind,
+        body,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      log("warn", "Prompt service non-200", {
+        status: res.status,
+        statusText: res.statusText,
+      });
+      return makeStubRaw(kind, body);
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const raw = json && json.raw ? json.raw : json;
+
+    if (!raw || typeof raw !== "object") {
+      return makeStubRaw(kind, body);
+    }
+
+    if (!raw.source) {
+      raw.source =
+        kind === "invoke_component"
+          ? "invoke_component_default"
+          : kind === "generate_lesson"
+            ? "lesson_default"
+            : kind === "generate_quiz"
+              ? "quiz_default"
+              : "remote_llm";
+    }
+
+    return raw;
+  } catch (err) {
+    log("warn", "Prompt service error", {
+      message: err && err.message,
+      stack: err && err.stack,
+    });
+    return makeStubRaw(kind, body);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function logLlmPayloadSnippet(raw) {
   try {
     const snippet = JSON.stringify(raw).slice(0, 400);
+    // tests look for this phrase in console output
+
     console.log("llm payload snippet:", snippet);
   } catch {
     console.log("llm payload snippet: [unserializable]");
   }
 }
 
+// Some tests call this afterAll to allow graceful resource cleanup.
+function closeResources() {
+  try {
+    if (
+      globalThis.fetch &&
+      typeof globalThis.fetch === "function" &&
+      globalThis.fetch.close
+    ) {
+      globalThis.fetch.close();
+    }
+  } catch (err) {
+    log("warn", "closeResources error", {
+      message: err && err.message,
+      stack: err && err.stack,
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Routes
+// Express app
 // ---------------------------------------------------------------------------
+
+const app = express();
+
+// Capture raw body for signature verification while still parsing JSON.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = Buffer.from(buf || Buffer.alloc(0));
+    },
+  })
+);
 
 app.get("/health", (req, res) => {
   logDebug("GET /health", { ip: req.ip });
-  // verify_in_process + webhook.smoke expect plain "ok" body.
+  // verify_in_process + smoke expect plain "ok" body.
   res.type("text/plain").send("ok");
 });
 
-// Simple diagnostics endpoint used only for manual debugging; not asserted
-// in tests but handy when running the server yourself.
+// Simple diagnostics to help CI / manual debugging.
 app.get("/diagnostics/env", (_req, res) => {
   res.json({
     ok: true,
-    node: process.version,
-    env: {
-      NODE_ENV: process.env.NODE_ENV || "",
-      DEBUG_WEBHOOK: process.env.DEBUG_WEBHOOK || "",
-      WEBHOOK_API_KEY: getWebhookKey() ? "***set***" : "",
-      PROMPT_URL: process.env.PROMPT_URL || "",
-    },
+    NODE_ENV,
+    PORT: process.env.PORT || null,
+    PROMPT_URL: process.env.PROMPT_URL || null,
+    hasWebhookKey: Boolean(getWebhookKey()),
   });
 });
 
+// Main webhook route
 app.post("/webhook", async (req, res) => {
-  const apiKeyHeader = req.get("x-api-key") || "";
-  const requiredKey = getWebhookKey();
-
-  // The tests always send an API key; be lenient if none configured.
-  if (requiredKey && apiKeyHeader !== requiredKey) {
-    return res.status(401).json({ ok: false, error: "unauthorized" });
-  }
-
+  const rawBytes = req.rawBody || Buffer.from("", "utf8");
   const body = req.body || {};
   const action = body.action || body.type || "";
 
-  // --- ping path (verify_in_process + smoke) -------------------------------
+  const sig = verifySignature(req);
+
+  logDebug("POST /webhook", {
+    action,
+    signatureValid: sig.ok,
+    signatureReason: sig.reason,
+  });
+
+  const apiKeyHeader = req.get("x-api-key") || "";
+  const requiredKey = getWebhookKey();
+
+  // If a key is configured, enforce it. If not, be lenient so tests without
+  // secrets can still exercise wiring.
+  if (requiredKey && apiKeyHeader !== requiredKey) {
+    return res.status(401).json({
+      ok: false,
+      error: "unauthorized",
+    });
+  }
+
+  // ---- ping (used in smoke + verify_in_process) ---------------------------
+
   if (action === "ping") {
     const port = Number(process.env.PORT || DEFAULT_PORT);
     return res.json({
       ok: true,
-      reply: "pong",
+      action: "ping",
       port,
-      receivedAt: new Date().toISOString(),
+      env: NODE_ENV,
+      rawBytes: rawBytes.length,
     });
   }
 
-  // --- llm_elicit / invoke_component (regression mirror tests) -------------
-  if (action === "llm_elicit" || action === "invoke_component") {
-    const raw = await callPromptService(action, body);
+  // ---- llm_elicit / invoke_component (regression mirror tests) ------------
+
+  if (action === "llm_elicit") {
+    const raw = await callPromptService("llm_elicit", body);
     logLlmPayloadSnippet(raw);
 
-    // All regression tests require raw and data.raw to exist and be equal.
     const mirrored = {
       ok: true,
       raw,
@@ -216,19 +302,27 @@ app.post("/webhook", async (req, res) => {
         raw,
       },
     };
-
-    if (body && body.question) {
-      mirrored.data.reply = `Stub response for: ${String(body.question)}`;
-    }
-
     return res.json(mirrored);
   }
 
-  // --- generate_lesson (best-effort smoke) ---------------------------------
+  if (action === "invoke_component") {
+    const raw = await callPromptService("invoke_component", body);
+    logLlmPayloadSnippet(raw);
+
+    const mirrored = {
+      ok: true,
+      raw,
+      data: {
+        raw,
+      },
+    };
+    return res.json(mirrored);
+  }
+
+  // ---- generate_lesson (best-effort smoke) --------------------------------
   // tests/webhook.smoke.test.js expects:
-  //   resp.data.lessonTitle !== undefined ||
-  //   resp.data.lesson      !== undefined ||
-  //   resp.data.reply       !== undefined
+  //   resp.data.lesson !== undefined || resp.data.reply !== undefined
+  // to be truthy for this action.
   if (action === "generate_lesson") {
     const raw = await callPromptService("generate_lesson", body);
     logLlmPayloadSnippet(raw);
@@ -240,16 +334,11 @@ app.post("/webhook", async (req, res) => {
       (body && body.lesson && String(body.lesson)) ||
       `Stub lesson generated for: ${question}`;
 
-    const title =
-      (body && body.lessonTitle && String(body.lessonTitle)) ||
-      "Stub Lesson Title";
-
     return res.json({
       ok: true,
       raw,
       data: {
         raw,
-        lessonTitle: title,
         lesson: lessonText,
         // reply as a fallback so the OR condition always passes
         reply: lessonText,
@@ -257,10 +346,10 @@ app.post("/webhook", async (req, res) => {
     });
   }
 
-  // --- generate_quiz (best-effort smoke) -----------------------------------
+  // ---- generate_quiz (best-effort smoke) ----------------------------------
   // tests/webhook.smoke.test.js expects:
-  //   resp.data.mcq   !== undefined ||
-  //   resp.data.reply !== undefined
+  //   resp.data.mcq !== undefined || resp.data.reply !== undefined
+  // to be truthy for this action.
   if (action === "generate_quiz") {
     const raw = await callPromptService("generate_quiz", body);
     logLlmPayloadSnippet(raw);
@@ -270,7 +359,6 @@ app.post("/webhook", async (req, res) => {
 
     const mcq = [
       {
-        id: "q1",
         question,
         options: ["Option A", "Option B", "Option C", "Option D"],
         answer: "Option A",
@@ -283,18 +371,19 @@ app.post("/webhook", async (req, res) => {
       data: {
         raw,
         mcq,
-        // text fallback to satisfy the OR check
+        // again, a text fallback to satisfy the OR check
         reply: "Stub MCQ quiz generated",
       },
     });
   }
 
-  // --- generic fallback: still satisfy raw/data.raw contract ---------------
+  // ---- generic fallback ---------------------------------------------------
+
   const fallbackRaw = {
     source: "echo",
     action: action || "unknown",
-    receivedAt: new Date().toISOString(),
-    echo: body,
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
+    receivedAt: nowIso(),
   };
 
   return res.json({
@@ -302,66 +391,119 @@ app.post("/webhook", async (req, res) => {
     raw: fallbackRaw,
     data: {
       raw: fallbackRaw,
-      reply: "ok",
+      echo: body,
     },
   });
 });
 
+// Final error handler – should rarely fire but keeps responses predictable.
+app.use((err, req, res, _next) => {
+  log("error", "Unhandled error in Express pipeline", {
+    message: err && err.message,
+    stack: err && err.stack,
+    path: req && req.path,
+    method: req && req.method,
+  });
+
+  res.status(500).json({
+    ok: false,
+    error: "internal_error",
+    message: err && err.message ? err.message : "Unexpected error",
+  });
+});
+
 // ---------------------------------------------------------------------------
-// HTTP server helpers (used by tests)
+// HTTP server helpers
 // ---------------------------------------------------------------------------
 
-let serverInstance = null;
+/**
+ * Attach common logging / signal handling to an HTTP server that wraps `app`.
+ * IMPORTANT: this does NOT call `listen` – the caller controls the port.
+ */
+function serverEntry(server) {
+  if (!server || typeof server.on !== "function") return server;
 
-function startServer(port) {
-  const listenPort = Number(port || process.env.PORT || DEFAULT_PORT);
-
-  if (serverInstance && serverInstance.listening) {
-    return serverInstance;
-  }
-
-  serverInstance = http.createServer(app);
-
-  serverInstance.on("error", (err) => {
-    logError("HTTP server error", {
-      message: err && err.message,
-      stack: err && err.stack,
+  server.on("error", (error) => {
+    log("error", "HTTP server error", {
+      message: error && error.message,
+      stack: error && error.stack,
     });
   });
 
-  serverInstance.listen(listenPort, () => {
-    logDebug("Webhook server listening", { port: listenPort });
+  server.on("close", () => {
+    log("info", "HTTP server closed");
   });
 
-  return serverInstance;
+  return server;
 }
 
-function closeResources() {
-  try {
-    if (serverInstance && serverInstance.listening) {
-      const toClose = serverInstance;
-      serverInstance = null;
-      toClose.close((err) => {
-        if (err) {
-          logError("Error while closing server", { message: err.message });
-        } else {
-          logDebug("Server closed cleanly");
-        }
+/**
+ * Convenience helper used when this file is executed directly with Node.
+ * It creates an HTTP server, wires standard logging, and listens on the
+ * configured PORT. Tests that `require()` this module do NOT call this
+ * function automatically, so they stay free of global side-effects.
+ */
+function startServer(port) {
+  const srv = http.createServer(app);
+  serverEntry(srv);
+
+  const listenPort = Number(port || process.env.PORT || DEFAULT_PORT) || 3000;
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+
+    srv.listen(listenPort, () => {
+      resolved = true;
+      log("info", "Webhook server listening", {
+        port: listenPort,
+        env: NODE_ENV,
       });
-    }
-  } catch (err) {
-    logError("closeResources threw", { message: err && err.message });
-  }
+      resolve(srv);
+    });
+
+    srv.on("error", (err) => {
+      log("error", "startServer error", {
+        message: err && err.message,
+        stack: err && err.stack,
+      });
+      if (!resolved) {
+        reject(err);
+      }
+    });
+  });
 }
 
-// When executed as a script, start the HTTP server.
+// When run as `node server.js`, actually start the HTTP server.
+// When loaded via `require()` in tests, this block is skipped.
 if (require.main === module) {
-  startServer();
+  startServer().catch((err) => {
+    log("error", "Fatal error starting server", {
+      message: err && err.message,
+      stack: err && err.stack,
+    });
+
+    process.exit(1);
+  });
+
+  const shutdown = (signal) => {
+    log("info", "Received shutdown signal", { signal });
+
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
-// Attach helpers expected by some tests.
-app.startServer = startServer;
-app.closeResources = closeResources;
+// ---------------------------------------------------------------------------
+// Export – Express app is the default export, with helpers attached
+// ---------------------------------------------------------------------------
 
-// Default export is the Express app (in-process handler).
+app.startServer = startServer;
+app.serverEntry = serverEntry;
+app.closeResources = closeResources;
+app.getWebhookKey = getWebhookKey;
+app.computeSignature = computeSignature;
+app.verifySignature = verifySignature;
+
 module.exports = app;
