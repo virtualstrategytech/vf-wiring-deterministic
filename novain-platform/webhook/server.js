@@ -1,123 +1,64 @@
-﻿/**
- * Deterministic webhook server for VST Novian Voiceflow wiring.
- *
- * Goals:
- * - Be boring and predictable.
- * - Provide very explicit logging for CI and manual debugging.
- * - Expose a small set of test / diagnostics endpoints that do NOT depend
- *   on any external services so that CI can reliably validate process wiring.
- *
- * This file is intentionally self-contained: no transpilation, no framework
- * beyond Express, no dynamic imports, and no clever abstractions.
- */
+﻿// novain-platform/webhook/server.js
+// Deterministic webhook server with CI-friendly behaviour.
+
+"use strict";
 
 const http = require("http");
 const crypto = require("crypto");
 const express = require("express");
 
 // ---------------------------------------------------------------------------
-// Environment and configuration helpers
+// Env + logging
 // ---------------------------------------------------------------------------
 
-/**
- * Required env vars for *production* webhook usage. The CI diagnostic runs are
- * intentionally able to pass even if these are missing, as long as the
- * "basic" server wiring works. The tests that rely on the webhook key will
- * explicitly check behaviour when it is absent.
- */
-const REQUIRED_ENV_FOR_WEBHOOK = ["WEBHOOK_KEY"];
-
-/**
- * Optional env vars:
- * - PORT: which port to listen on (default 3000).
- * - LOG_LEVEL: "debug" for very verbose output, anything else for normal.
- * - NODE_ENV: used only for labelling logs.
- */
-const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10);
-const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const NODE_ENV = process.env.NODE_ENV || "local";
+const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
-/**
- * Basic structured logger. This keeps logs machine-parseable for CI while
- * still being readable by humans.
- */
-function log(level, message, extra) {
+function log(level, msg, extra) {
   const payload = {
     ts: new Date().toISOString(),
     level,
     env: NODE_ENV,
-    msg: message,
+    msg,
     ...(extra || {}),
   };
-  // Log as single-line JSON so GitHub actions and other systems can parse it.
   console.log(JSON.stringify(payload));
 }
 
-function logDebug(message, extra) {
-  if (LOG_LEVEL === "debug") {
-    log("debug", message, extra);
-  }
+function logDebug(msg, extra) {
+  if (LOG_LEVEL === "debug") log("debug", msg, extra);
 }
 
-function validateEnv(requiredKeys) {
-  const missing = [];
-  for (const key of requiredKeys) {
-    if (!process.env[key]) {
-      missing.push(key);
-    }
-  }
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      missing,
-    };
-  }
-  return { ok: true, missing: [] };
-}
-
-/**
- * We intentionally read the webhook key via a function instead of capturing it
- * at module load time so that tests can override process.env in-process and
- * observe changes.
- */
 function getWebhookKey() {
   return process.env.WEBHOOK_KEY || "";
 }
 
 // ---------------------------------------------------------------------------
-// Express app setup
+// Express app
 // ---------------------------------------------------------------------------
 
 const app = express();
 
-// Capture raw body for signature verification while still letting Express
-// parse JSON for normal handlers.
+// capture raw body for HMAC while still parsing JSON
 app.use(
   express.json({
-    verify: (req, res, buf) => {
+    verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
 
 // ---------------------------------------------------------------------------
-// Helper utilities
+// HMAC helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Compute an HMAC SHA-256 hex digest of the raw request body using the current
- * webhook key.
- */
 function computeSignature(rawBody) {
   const key = getWebhookKey();
   if (!key) return "";
   return crypto.createHmac("sha256", key).update(rawBody).digest("hex");
 }
 
-/**
- * Validates the signature from the "x-webhook-signature" header against the
- * raw request body. Returns a boolean and a diagnostic description.
- */
 function verifySignature(req) {
   const provided = req.get("x-webhook-signature") || "";
   const raw = req.rawBody || Buffer.from("", "utf8");
@@ -126,7 +67,7 @@ function verifySignature(req) {
   if (!getWebhookKey()) {
     return {
       ok: false,
-      reason: "WEBHOOK_KEY missing in environment",
+      reason: "WEBHOOK_KEY missing",
       expected: "",
       provided,
     };
@@ -144,142 +85,48 @@ function verifySignature(req) {
   const providedBuf = Buffer.from(provided, "utf8");
   const expectedBuf = Buffer.from(expected, "utf8");
 
-  const equal =
+  const ok =
     providedBuf.length === expectedBuf.length &&
     crypto.timingSafeEqual(providedBuf, expectedBuf);
 
   return {
-    ok: equal,
-    reason: equal ? "valid" : "signature mismatch",
+    ok,
+    reason: ok ? "valid" : "signature mismatch",
     expected,
     provided,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Basic / health endpoints used by CI
+// Basic diagnostics endpoints (used by CI)
 // ---------------------------------------------------------------------------
 
-/**
- * Simple ping endpoint: used by CI smoke tests to verify that the process
- * started, Express bound to a port, and routes are registered.
- *
- * NOTE: The Jest smoke test expects plain "ok" (lowercase) as the response
- * body, not JSON.
- */
 app.get("/health", (req, res) => {
-  logDebug("GET /health", {
-    ip: req.ip,
-    userAgent: req.get("user-agent") || "",
-  });
-
+  logDebug("GET /health", { ip: req.ip });
+  // smoke test expects *plain text* "ok"
   res.type("text/plain").send("ok");
 });
 
-/**
- * Returns the current environment configuration relevant to this server.
- * Sensitive values are not returned; presence is indicated instead.
- *
- * This is mainly for CI diagnostics and should not be exposed publicly in
- * production without additional authentication.
- */
-app.get("/diagnostics/env", (req, res) => {
-  const requiredCheck = validateEnv(REQUIRED_ENV_FOR_WEBHOOK);
-
-  const snapshot = {
-    NODE_ENV,
-    PORT: DEFAULT_PORT,
-    LOG_LEVEL,
-    requiredEnv: {
-      ok: requiredCheck.ok,
-      missing: requiredCheck.missing,
+app.get("/diagnostics/env", (_req, res) => {
+  res.json({
+    ok: true,
+    env: {
+      NODE_ENV,
+      LOG_LEVEL,
+      hasWebhookKey: Boolean(getWebhookKey()),
     },
-    hasWebhookKey: Boolean(getWebhookKey()),
-  };
-
-  logDebug("GET /diagnostics/env", snapshot);
-
-  res.json({
-    ok: true,
-    env: snapshot,
   });
-});
-
-/**
- * Endpoint that intentionally delays response. This allows CI to verify that
- * long-running requests are handled correctly and that timeouts are only
- * applied where expected.
- */
-app.get("/diagnostics/timeout", async (req, res) => {
-  const delayMs = Number.parseInt(req.query.ms || "1000", 10);
-  const capped = Number.isFinite(delayMs)
-    ? Math.max(0, Math.min(delayMs, 30_000))
-    : 1000;
-
-  logDebug("GET /diagnostics/timeout begin", { delayMs: capped });
-
-  await new Promise((resolve) => setTimeout(resolve, capped));
-
-  logDebug("GET /diagnostics/timeout end", { delayMs: capped });
-
-  res.json({
-    ok: true,
-    waitedMs: capped,
-  });
-});
-
-/**
- * Endpoint that triggers an unhandled rejection to verify that the global
- * process handler works and that CI can collect logs.
- */
-app.get("/diagnostics/unhandled-rejection", (req, res) => {
-  log("warn", "Triggering unhandled rejection for diagnostics");
-  // Intentionally forget to `catch`.
-  new Promise((_resolve, reject) => {
-    reject(new Error("Intentional unhandled rejection (diagnostics)"));
-  });
-
-  res.json({
-    ok: true,
-    triggered: "unhandled-rejection",
-  });
-});
-
-/**
- * Endpoint that forces the process to exit with a non-zero code, to confirm
- * that CI detects the failure and that logs are flushed first.
- */
-app.get("/diagnostics/exit", (req, res) => {
-  const code = Number.parseInt(req.query.code || "1", 10) || 1;
-  log("warn", "Diagnostics exit requested", { code });
-
-  res.json({
-    ok: false,
-    exiting: true,
-    code,
-  });
-
-  // Give the response a chance to flush.
-  setTimeout(() => {
-    process.exit(code);
-  }, 50);
 });
 
 // ---------------------------------------------------------------------------
-// Webhook handling (core behaviour used by Voiceflow / other callers)
+// Normalisation + deterministic responses
 // ---------------------------------------------------------------------------
 
-/**
- * Shared function to normalise incoming webhook payloads. Voiceflow or other
- * callers can send arbitrary JSON; for now we simply echo back structured
- * data, but the handler is written so you can plug in your real logic later.
- */
 function normaliseWebhookPayload(body) {
   if (!body || typeof body !== "object") {
     return { type: "unknown", raw: body };
   }
 
-  // Recognise a couple of shapes we expect to see.
   if (body.type === "lesson_export_request") {
     return {
       type: "lesson_export_request",
@@ -292,90 +139,45 @@ function normaliseWebhookPayload(body) {
   if (body.type === "teach_quiz_request") {
     return {
       type: "teach_quiz_request",
-      topic: body.topic || "",
+      topic: body.topic || "business strategy basics",
       difficulty: body.difficulty || "mixed",
-      attemptsAllowed:
-        typeof body.attemptsAllowed === "number"
-          ? body.attemptsAllowed
-          : undefined,
     };
   }
 
-  // Fall-through: treat as opaque envelope.
   return { type: "generic", raw: body };
 }
 
-/**
- * Example transformation logic for a "lesson export" style payload. This is
- * intentionally simple and deterministic; you can later replace this with RAG
- * lookups, agent collaboration, etc.
- */
-function makeLessonExportResponse(envelope) {
-  const lessonId = envelope.lessonId || "unknown";
-  const userId = envelope.userId || "anonymous";
-  const format = envelope.format || "json";
-
-  const base = {
-    lessonId,
-    userId,
-    exportedAt: new Date().toISOString(),
-    summary: `Exported lesson ${lessonId} for user ${userId}`,
-    content: {
-      sections: [
-        {
-          id: "intro",
-          title: "Lesson export (deterministic stub)",
-          body: [
-            `This is a deterministic placeholder export for lesson "${lessonId}".`,
-            "You can replace this implementation with your real export logic.",
-          ],
-        },
-        {
-          id: "next-steps",
-          title: "Next steps",
-          body: [
-            "Wire this endpoint to your two-agent pipeline (business + prompt).",
-            "Persist exports to your knowledge base or deliver them to the user.",
-          ],
-        },
-      ],
-    },
-  };
-
-  if (format === "markdown") {
-    const lines = [];
-    lines.push(`# Lesson export: ${lessonId}`);
-    lines.push("");
-    lines.push(`- User: \`${userId}\``);
-    lines.push(`- Exported at: \`${base.exportedAt}\``);
-    lines.push("");
-    for (const section of base.content.sections) {
-      lines.push(`## ${section.title}`);
-      lines.push("");
-      for (const para of section.body) {
-        lines.push(para);
-        lines.push("");
-      }
-    }
-    return {
-      format: "markdown",
-      body: lines.join("\n"),
-    };
-  }
+function makeLessonExportResponse(env) {
+  const lessonId = env.lessonId || "unknown";
+  const userId = env.userId || "anonymous";
+  const exportedAt = new Date().toISOString();
 
   return {
     format: "json",
-    body: base,
+    body: {
+      lessonId,
+      userId,
+      exportedAt,
+      summary: `Exported lesson ${lessonId} for user ${userId}`,
+      content: {
+        sections: [
+          {
+            id: "intro",
+            title: "Deterministic lesson export",
+            body: [
+              `This is a placeholder export for lesson "${lessonId}".`,
+              "Wire this to your real two-agent pipeline later.",
+            ],
+          },
+        ],
+      },
+    },
   };
 }
 
-/**
- * Example transformation logic for a "teach & quiz" style payload. This
- * returns deterministic questions so CI can perform golden-file testing.
- */
-function makeTeachQuizResponse(envelope) {
-  const topic = envelope.topic || "business strategy basics";
-  const difficulty = envelope.difficulty || "mixed";
+function makeTeachQuizResponse(env) {
+  const topic = env.topic || "business strategy basics";
+  const difficulty = env.difficulty || "mixed";
 
   const questions = [
     {
@@ -384,41 +186,28 @@ function makeTeachQuizResponse(envelope) {
       difficulty: "easy",
       prompt: `Which of the following best describes the core objective of "${topic}"?`,
       options: [
-        "Randomly experiment with tactics without a hypothesis.",
-        "Align resources and decisions to a coherent long-term direction.",
-        "Focus exclusively on short-term cost cutting.",
-        "Avoid measuring outcomes to preserve optionality.",
+        "Randomly try tactics with no hypothesis.",
+        "Align decisions to a coherent long-term direction.",
+        "Focus only on short-term cost cutting.",
+        "Avoid measuring outcomes.",
       ],
       correctIndex: 1,
     },
-    {
-      id: "q2",
-      type: "open",
-      difficulty: "medium",
-      prompt:
-        "Describe a simple experiment you could run this week to test one assumption in your current strategy.",
-    },
   ];
-
-  const filtered =
-    difficulty === "easy" || difficulty === "hard"
-      ? questions.filter((q) => q.difficulty === difficulty)
-      : questions;
 
   return {
     topic,
     difficulty,
-    questionCount: filtered.length,
-    questions: filtered,
+    questionCount: questions.length,
+    questions,
     generatedAt: new Date().toISOString(),
   };
 }
 
-/**
- * Legacy/test behaviour to satisfy existing smoke tests that:
- * - send x-api-key (no HMAC),
- * - use "action" fields like "ping", "generate_lesson", "generate_quiz".
- */
+// ---------------------------------------------------------------------------
+// Legacy x-api-key behaviour for webhook.smoke.test.js
+// ---------------------------------------------------------------------------
+
 function handleLegacyApiKeyWebhook(req, res) {
   const body = req.body || {};
   const action = body.action || "";
@@ -441,8 +230,8 @@ function handleLegacyApiKeyWebhook(req, res) {
       lesson: {
         title: `Deterministic lesson for: ${question}`,
         bullets: [
-          "This is a placeholder lesson generated by the deterministic webhook.",
-          "Replace this with your real two-agent lesson generation pipeline.",
+          "This is a deterministic placeholder lesson.",
+          "Replace this with your real two-agent logic.",
         ],
       },
     });
@@ -450,32 +239,30 @@ function handleLegacyApiKeyWebhook(req, res) {
 
   if (action === "generate_quiz") {
     const question = body.question || "quiz topic";
-    const quiz = {
-      topic: question,
-      questions: [
-        {
-          id: "mcq1",
-          type: "mcq",
-          prompt: `Which option best reflects "${question}"?`,
-          options: [
-            "Do everything at once with no priorities.",
-            "Apply a clear strategy with focused experiments.",
-            "Ignore data and hope for the best.",
-            "Avoid making any decisions.",
-          ],
-          correctIndex: 1,
-        },
-      ],
-    };
     return res.json({
       ok: true,
       kind: "generate_quiz",
-      quiz,
-      mcqCount: quiz.questions.length,
+      quiz: {
+        topic: question,
+        questions: [
+          {
+            id: "mcq1",
+            type: "mcq",
+            prompt: `Which option best reflects "${question}"?`,
+            options: [
+              "Do everything at once.",
+              "Apply a clear strategy with focused experiments.",
+              "Ignore data.",
+              "Avoid making decisions.",
+            ],
+            correctIndex: 1,
+          },
+        ],
+      },
     });
   }
 
-  // Fallback echo for unknown actions.
+  // fallback echo
   return res.json({
     ok: true,
     kind: "legacy_echo",
@@ -483,49 +270,39 @@ function handleLegacyApiKeyWebhook(req, res) {
   });
 }
 
-/**
- * POST /webhook
- *
- * This is the main webhook entry point.
- *
- * It supports two modes:
- * - Legacy/test mode driven by "x-api-key" and "action" (for existing smoke tests).
- * - HMAC mode driven by "x-webhook-signature" and structured "type" envelopes.
- */
+// ---------------------------------------------------------------------------
+// POST /webhook
+// ---------------------------------------------------------------------------
+
 app.post("/webhook", (req, res) => {
   const raw = req.rawBody || Buffer.from("", "utf8");
 
-  const hasApiKey = Boolean(req.get("x-api-key"));
-
-  // 1) Legacy/test path (no HMAC) – used by webhook.smoke.test.js
-  if (hasApiKey) {
+  // 1) legacy smoke-test path: x-api-key header present
+  if (req.get("x-api-key")) {
     logDebug("POST /webhook (legacy api-key mode)", {
       action: req.body && req.body.action,
     });
     return handleLegacyApiKeyWebhook(req, res);
   }
 
-  // 2) HMAC path (current deterministic behaviour)
-  const sigResult = verifySignature(req);
+  // 2) HMAC path
+  const sig = verifySignature(req);
   const envelope = normaliseWebhookPayload(req.body);
 
-  logDebug("POST /webhook received", {
+  logDebug("POST /webhook (hmac mode)", {
     envelopeType: envelope.type,
-    signatureValid: sigResult.ok,
-    signatureReason: sigResult.reason,
+    signatureValid: sig.ok,
+    reason: sig.reason,
   });
 
-  if (!sigResult.ok) {
-    // For now we return 401 instead of 500 so callers can distinguish
-    // authentication misconfiguration from internal errors.
+  if (!sig.ok) {
     return res.status(401).json({
       ok: false,
       error: "invalid_signature",
       details: {
-        reason: sigResult.reason,
-        // Do not echo expected signature in production; this is mainly for CI.
-        expected: sigResult.expected,
-        provided: sigResult.provided,
+        reason: sig.reason,
+        expected: sig.expected,
+        provided: sig.provided,
         hasKey: Boolean(getWebhookKey()),
       },
     });
@@ -553,7 +330,6 @@ app.post("/webhook", (req, res) => {
     });
   }
 
-  // Generic echo response for unknown shapes.
   return res.json({
     ok: true,
     kind: "echo",
@@ -563,12 +339,9 @@ app.post("/webhook", (req, res) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Fallback 404 handler (keep it JSON and explicit)
-// ---------------------------------------------------------------------------
-
+// 404 + error handlers
 app.use((req, res) => {
-  logDebug("404 handler", { method: req.method, path: req.path });
+  logDebug("404", { method: req.method, path: req.path });
   res.status(404).json({
     ok: false,
     error: "not_found",
@@ -577,18 +350,13 @@ app.use((req, res) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Error handler (last middleware)
-// ---------------------------------------------------------------------------
-
 app.use((err, req, res, _next) => {
-  log("error", "Unhandled error in request pipeline", {
+  log("error", "Unhandled error in request", {
     path: req.path,
     method: req.method,
     message: err && err.message,
     stack: err && err.stack,
   });
-
   res.status(500).json({
     ok: false,
     error: "internal_error",
@@ -597,67 +365,29 @@ app.use((err, req, res, _next) => {
 });
 
 // ---------------------------------------------------------------------------
-// HTTP server bootstrap (start ONLY when run as a script)
+// Server bootstrap – IMPORTANT: no auto-listen on require.
 // ---------------------------------------------------------------------------
 
 let currentServer = null;
 
 function startServer(port) {
+  if (currentServer) return currentServer;
+
   const listenPort = Number.parseInt(
     port != null ? String(port) : String(DEFAULT_PORT),
     10
   );
 
-  if (currentServer) {
-    return currentServer;
-  }
-
   const server = http.createServer(app);
 
   server.listen(listenPort, () => {
-    log("info", "Webhook server listening", {
-      port: listenPort,
-      env: NODE_ENV,
-    });
+    log("info", "Webhook server listening", { port: listenPort });
   });
 
-  server.on("error", (error) => {
+  server.on("error", (err) => {
     log("error", "HTTP server error", {
-      message: error.message,
-      stack: error.stack,
-    });
-  });
-
-  // Process-level diagnostics
-  process.on("uncaughtException", (err) => {
-    log("error", "Uncaught exception", {
       message: err && err.message,
       stack: err && err.stack,
-    });
-  });
-
-  process.on("unhandledRejection", (reason) => {
-    log("error", "Unhandled promise rejection", {
-      reason:
-        reason instanceof Error
-          ? { message: reason.message, stack: reason.stack }
-          : { raw: String(reason) },
-    });
-  });
-
-  process.on("SIGTERM", () => {
-    log("info", "SIGTERM received, shutting down gracefully");
-    server.close(() => {
-      log("info", "HTTP server closed after SIGTERM");
-      process.exit(0);
-    });
-  });
-
-  process.on("SIGINT", () => {
-    log("info", "SIGINT received, shutting down gracefully");
-    server.close(() => {
-      log("info", "HTTP server closed after SIGINT");
-      process.exit(0);
     });
   });
 
@@ -665,14 +395,13 @@ function startServer(port) {
   return server;
 }
 
-// If invoked directly via "node server.js", start listening.
-// When required from tests, this block does NOT run, avoiding EADDRINUSE.
+// If started as "node server.js", bind to DEFAULT_PORT.
+// When required from Jest, this block does NOT run.
 if (require.main === module) {
   startServer();
 }
 
-// Default export is a function so tests can treat it as a "local app" target.
-// We also attach helpers as properties for unit tests.
+// default export is a function so tests/helpers can treat it as a local app
 function serverEntry(options) {
   const port = options && options.port;
   return startServer(port);
