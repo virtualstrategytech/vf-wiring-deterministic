@@ -401,22 +401,15 @@ if (require.main === module) {
   startServer();
 }
 
-// default export is a function so tests/helpers can treat it as a local app
-function serverEntry(options) {
-  const port = options && options.port;
-  return startServer(port);
-}
+// Attach helpers on the app function so tests can import a *handler*
+// without binding a port, but still access the helpers if needed.
+app.startServer = startServer;
+app.getWebhookKey = getWebhookKey;
+app.computeSignature = computeSignature;
+app.verifySignature = verifySignature;
+app.normaliseWebhookPayload = normaliseWebhookPayload;
+app.makeLessonExportResponse = makeLessonExportResponse;
+app.makeTeachQuizResponse = makeTeachQuizResponse;
 
-module.exports = Object.assign(serverEntry, {
-  app,
-  startServer,
-  getWebhookKey,
-  computeSignature,
-  verifySignature,
-  normaliseWebhookPayload,
-  makeLessonExportResponse,
-  makeTeachQuizResponse,
-  get server() {
-    return currentServer;
-  },
-});
+// Default export is the Express app (request handler), NOT a running server.
+module.exports = app;
