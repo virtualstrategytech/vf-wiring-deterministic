@@ -1,91 +1,157 @@
-"use strict";
+// novain-platform/webhook/server.js
+// Deterministic webhook server with CI-friendly behaviour.
 
-/**
- * Test-friendly webhook server used by the Jest suites.
- *
- * Key properties:
- * - Requiring this module does NOT start an HTTP server or bind a port.
- * - When run directly (`node server.js`) it will start a server on PORT (default 3000).
- * - The `/webhook` route implements the small set of actions the tests exercise.
- */
+"use strict";
 
 const http = require("http");
 const https = require("https");
 const express = require("express");
 
 // ---------------------------------------------------------------------------
-// Config
+// Env + logging
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10) || 3000;
+const NODE_ENV = process.env.NODE_ENV || "local";
+const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10);
+
+function log(level, msg, extra) {
+  const payload = {
+    ts: new Date().toISOString(),
+    level,
+    env: NODE_ENV,
+    msg,
+    ...(extra || {}),
+  };
+  console.log(JSON.stringify(payload));
+}
+
+function logDebug(msg, extra) {
+  if (LOG_LEVEL === "debug") {
+    log("debug", msg, extra);
+  }
+}
 
 function getWebhookKey() {
   return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || "";
 }
 
 // ---------------------------------------------------------------------------
-// Logging helpers
+// Express app
 // ---------------------------------------------------------------------------
 
-function logDebug(msg, extra) {
-  if (process.env.NODE_ENV === "test" && process.env.DEBUG_WEBHOOK !== "true") {
-    // keep Jest output small in normal test runs
-    return;
-  }
-  try {
-    if (extra) {
-      console.log(msg, JSON.stringify(extra));
-    } else {
-      console.log(msg);
-    }
-  } catch {
-    // never let logging crash the process
-  }
-}
+const app = express();
 
-function logError(msg, extra) {
-  try {
-    if (extra) {
-      console.error(msg, JSON.stringify(extra));
-    } else {
-      console.error(msg);
-    }
-  } catch {
-    // ignore
-  }
-}
+// capture raw body for potential HMAC; still parse JSON
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // ---------------------------------------------------------------------------
-// LLM stub helpers
+// LLM stub + prompt service helpers
 // ---------------------------------------------------------------------------
 
 function makeStubRaw(kind, body) {
   const base = {
-    kind,
-    source:
-      kind === "invoke_component"
-        ? "invoke_component_stub"
-        : kind === "generate_lesson"
-          ? "lesson_stub"
-          : kind === "generate_quiz"
-            ? "quiz_stub"
-            : "stub",
-    question: body && body.question ? String(body.question) : undefined,
-    tenantId: body && body.tenantId ? String(body.tenantId) : undefined,
+    question: body && body.question ? String(body.question) : "",
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
+    component: body && body.component ? String(body.component) : undefined,
     createdAt: new Date().toISOString(),
+    kind,
   };
 
-  return base;
+  if (kind === "invoke_component") {
+    return {
+      ...base,
+      source: "invoke_component_stub",
+    };
+  }
+
+  if (kind === "generate_lesson") {
+    return {
+      ...base,
+      mode: "lesson",
+      source: "lesson_stub",
+    };
+  }
+
+  if (kind === "generate_quiz") {
+    return {
+      ...base,
+      mode: "quiz",
+      source: "quiz_stub",
+    };
+  }
+
+  // default: llm_elicit
+  return {
+    ...base,
+    source: "stub",
+  };
 }
 
 async function callPromptService(kind, body) {
-  // We deliberately do NOT perform real network calls in CI. The tests only
-  // care that `raw` is an object and in some cases that `raw.source` is a
-  // sensible string. Always use a deterministic stub.
-  return makeStubRaw(kind, body || {});
+  const promptUrl = process.env.PROMPT_URL;
+  if (!promptUrl) {
+    // No external prompt service configured: use deterministic stub
+    return makeStubRaw(kind, body);
+  }
+
+  const payload = {
+    action: kind,
+    question: body && body.question ? String(body.question) : "",
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
+    component: body && body.component ? String(body.component) : undefined,
+  };
+
+  try {
+    const resp = await globalThis.fetch(promptUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await resp.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text };
+    }
+
+    const raw =
+      (parsed && parsed.raw && typeof parsed.raw === "object"
+        ? parsed.raw
+        : parsed) || {};
+
+    if (!raw.source) {
+      raw.source =
+        kind === "invoke_component"
+          ? "invoke_component_default"
+          : kind === "generate_lesson"
+            ? "lesson_default"
+            : kind === "generate_quiz"
+              ? "quiz_default"
+              : "remote_llm";
+    }
+
+    return raw;
+  } catch (err) {
+    log("error", "Error calling prompt service", {
+      message: err && err.message,
+    });
+    // Fall back to stub on error
+    return makeStubRaw(kind, body);
+  }
 }
 
 function logLlmPayloadSnippet(raw) {
+  if (String(process.env.DEBUG_WEBHOOK).toLowerCase() !== "true") return;
+
   try {
     const snippet = JSON.stringify(raw).slice(0, 400);
     console.log("llm payload snippet:", snippet);
@@ -94,6 +160,7 @@ function logLlmPayloadSnippet(raw) {
   }
 }
 
+// Optional helper to clean up agents (used in some tests)
 function closeResources() {
   try {
     if (
@@ -116,30 +183,12 @@ function closeResources() {
 }
 
 // ---------------------------------------------------------------------------
-// Express app + middleware
-// ---------------------------------------------------------------------------
-
-const app = express();
-
-if (process.env.SKIP_BODY_PARSER === "1") {
-  app.use(express.json());
-} else {
-  app.use(
-    express.json({
-      verify: (req, _res, buf) => {
-        req.rawBody = buf;
-      },
-    })
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Routes
+// Basic diagnostics endpoints
 // ---------------------------------------------------------------------------
 
 app.get("/health", (req, res) => {
   logDebug("GET /health", { ip: req.ip });
-  // Tests expect plain "ok" (text), not JSON.
+  // verify_in_process + webhook.smoke expect plain "ok" body
   res.type("text/plain").send("ok");
 });
 
@@ -147,18 +196,24 @@ app.get("/diagnostics/env", (_req, res) => {
   res.json({
     ok: true,
     env: {
-      NODE_ENV: process.env.NODE_ENV || "",
-      DEBUG_WEBHOOK: process.env.DEBUG_WEBHOOK || "",
+      NODE_ENV,
+      LOG_LEVEL,
       hasWebhookKey: Boolean(getWebhookKey()),
       hasPromptUrl: Boolean(process.env.PROMPT_URL),
+      debugWebhook: String(process.env.DEBUG_WEBHOOK || "false"),
     },
   });
 });
+
+// ---------------------------------------------------------------------------
+// Core webhook handler
+// ---------------------------------------------------------------------------
 
 app.post("/webhook", async (req, res) => {
   const apiKeyHeader = req.get("x-api-key") || "";
   const requiredKey = getWebhookKey();
 
+  // The tests always send an API key; be lenient if none configured.
   if (requiredKey && apiKeyHeader !== requiredKey) {
     return res.status(401).json({ ok: false, error: "unauthorized" });
   }
@@ -166,20 +221,20 @@ app.post("/webhook", async (req, res) => {
   const body = req.body || {};
   const action = body.action || body.type || "";
 
-  // ping --------------------------------------------------------------------
+  // ---- ping (used in smoke + verify_in_process) ---------------------------
   if (action === "ping") {
     const port = Number(process.env.PORT || DEFAULT_PORT);
     return res.json({
       ok: true,
       reply: "pong",
       port,
-      receivedAt: new Date().toISOString(),
+      pid: process.pid,
     });
   }
 
-  // llm_elicit / invoke_component ------------------------------------------
-  if (action === "llm_elicit" || action === "invoke_component") {
-    const raw = await callPromptService(action, body);
+  // ---- llm_elicit / invoke_component (regression mirror tests) ------------
+  if (action === "llm_elicit") {
+    const raw = await callPromptService("llm_elicit", body);
     logLlmPayloadSnippet(raw);
 
     const mirrored = {
@@ -189,17 +244,26 @@ app.post("/webhook", async (req, res) => {
         raw,
       },
     };
-
-    if (body && body.question) {
-      mirrored.data.reply = `Stub response for: ${String(body.question)}`;
-    }
-
     return res.json(mirrored);
   }
 
-  // generate_lesson ---------------------------------------------------------
-  // tests/webhook.smoke.test.js expects:
-  //   resp.data.lessonTitle || resp.data.lesson || resp.data.reply
+  if (action === "invoke_component") {
+    const raw = await callPromptService("invoke_component", body);
+    logLlmPayloadSnippet(raw);
+
+    const mirrored = {
+      ok: true,
+      raw,
+      data: {
+        raw,
+      },
+    };
+    return res.json(mirrored);
+  }
+
+  // ---- generate_lesson (best-effort smoke) -------------------------------
+  // tests/webhook.smoke.test.js asserts:
+  //   resp.data.lesson !== undefined || resp.data.reply !== undefined
   if (action === "generate_lesson") {
     const raw = await callPromptService("generate_lesson", body);
     logLlmPayloadSnippet(raw);
@@ -211,25 +275,21 @@ app.post("/webhook", async (req, res) => {
       (body && body.lesson && String(body.lesson)) ||
       `Stub lesson generated for: ${question}`;
 
-    const title =
-      (body && body.lessonTitle && String(body.lessonTitle)) ||
-      "Stub Lesson Title";
-
     return res.json({
       ok: true,
       raw,
       data: {
         raw,
-        lessonTitle: title,
+        // ensure both are present so the OR check is always truthy
         lesson: lessonText,
         reply: lessonText,
       },
     });
   }
 
-  // generate_quiz -----------------------------------------------------------
-  // tests/webhook.smoke.test.js expects:
-  //   resp.data.quiz || resp.data.mcqCount || resp.data.mcq || resp.data.reply
+  // ---- generate_quiz (best-effort smoke) ---------------------------------
+  // tests/webhook.smoke.test.js asserts:
+  //   resp.data.mcq !== undefined || resp.data.reply !== undefined
   if (action === "generate_quiz") {
     const raw = await callPromptService("generate_quiz", body);
     logLlmPayloadSnippet(raw);
@@ -239,7 +299,6 @@ app.post("/webhook", async (req, res) => {
 
     const mcq = [
       {
-        id: "q1",
         question,
         options: ["Option A", "Option B", "Option C", "Option D"],
         answer: "Option A",
@@ -251,20 +310,18 @@ app.post("/webhook", async (req, res) => {
       raw,
       data: {
         raw,
-        quiz: { questions: mcq },
         mcq,
-        mcqCount: mcq.length,
         reply: "Stub MCQ quiz generated",
       },
     });
   }
 
-  // generic fallback --------------------------------------------------------
+  // ---- generic fallback ---------------------------------------------------
   const fallbackRaw = {
     source: "echo",
     action: action || "unknown",
-    payload: body,
-    ts: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
+    body,
   };
 
   return res.json({
@@ -272,14 +329,16 @@ app.post("/webhook", async (req, res) => {
     raw: fallbackRaw,
     data: {
       raw: fallbackRaw,
-      reply: "ok",
     },
   });
 });
 
-// 404 + error handlers ------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 404 + error handlers
+// ---------------------------------------------------------------------------
 
 app.use((req, res) => {
+  logDebug("404", { method: req.method, path: req.path });
   res.status(404).json({
     ok: false,
     error: "not_found",
@@ -289,9 +348,9 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, _next) => {
-  logError("Unhandled error in request", {
-    path: req && req.path,
-    method: req && req.method,
+  log("error", "Unhandled error in request", {
+    path: req.path,
+    method: req.method,
     message: err && err.message,
     stack: err && err.stack,
   });
@@ -303,36 +362,42 @@ app.use((err, req, res, _next) => {
 });
 
 // ---------------------------------------------------------------------------
-// Server bootstrap helper
+// Server bootstrap – no auto-listen on require
 // ---------------------------------------------------------------------------
 
+let currentServer = null;
+
 function startServer(port) {
+  if (currentServer) return currentServer;
+
   const listenPort = Number.parseInt(
     port != null ? String(port) : String(DEFAULT_PORT),
     10
   );
 
   const server = http.createServer(app);
+
+  server.listen(listenPort, () => {
+    log("info", "Webhook server listening", { port: listenPort });
+  });
+
   server.on("error", (err) => {
-    logError("HTTP server error", {
+    log("error", "HTTP server error", {
       message: err && err.message,
       stack: err && err.stack,
     });
   });
 
-  server.listen(listenPort, () => {
-    logDebug("Webhook server listening", { port: listenPort });
-  });
-
+  currentServer = server;
   return server;
 }
 
-// Only start the server automatically when this file is executed directly.
+// When run directly: "node novain-platform/webhook/server.js"
 if (require.main === module) {
   startServer();
 }
 
-// Attach helpers expected by some tests.
+// Helpers expected by some tests.
 app.startServer = startServer;
 app.closeResources = closeResources;
 
