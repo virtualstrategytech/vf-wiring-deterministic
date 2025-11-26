@@ -10,6 +10,7 @@
  */
 
 const http = require("http");
+const https = require("https");
 const express = require("express");
 
 // ---------------------------------------------------------------------------
@@ -95,21 +96,19 @@ function logLlmPayloadSnippet(raw) {
 
 function closeResources() {
   try {
-    const httpMod = require("http");
-    const httpsMod = require("https");
     if (
-      httpMod &&
-      httpMod.globalAgent &&
-      typeof httpMod.globalAgent.destroy === "function"
+      http &&
+      http.globalAgent &&
+      typeof http.globalAgent.destroy === "function"
     ) {
-      httpMod.globalAgent.destroy();
+      http.globalAgent.destroy();
     }
     if (
-      httpsMod &&
-      httpsMod.globalAgent &&
-      typeof httpsMod.globalAgent.destroy === "function"
+      https &&
+      https.globalAgent &&
+      typeof https.globalAgent.destroy === "function"
     ) {
-      httpsMod.globalAgent.destroy();
+      https.globalAgent.destroy();
     }
   } catch {
     // best-effort only
@@ -140,6 +139,7 @@ if (process.env.SKIP_BODY_PARSER === "1") {
 
 app.get("/health", (req, res) => {
   logDebug("GET /health", { ip: req.ip });
+  // Tests expect plain "ok" (text), not JSON.
   res.type("text/plain").send("ok");
 });
 
@@ -198,6 +198,8 @@ app.post("/webhook", async (req, res) => {
   }
 
   // generate_lesson ---------------------------------------------------------
+  // tests/webhook.smoke.test.js expects:
+  //   resp.data.lessonTitle || resp.data.lesson || resp.data.reply
   if (action === "generate_lesson") {
     const raw = await callPromptService("generate_lesson", body);
     logLlmPayloadSnippet(raw);
@@ -226,6 +228,8 @@ app.post("/webhook", async (req, res) => {
   }
 
   // generate_quiz -----------------------------------------------------------
+  // tests/webhook.smoke.test.js expects:
+  //   resp.data.quiz || resp.data.mcqCount || resp.data.mcq || resp.data.reply
   if (action === "generate_quiz") {
     const raw = await callPromptService("generate_quiz", body);
     logLlmPayloadSnippet(raw);
