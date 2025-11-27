@@ -1,0 +1,6 @@
+{
+  "action": "retrieve",
+  "question": "What is the NovAIn SPQA frame?",
+  "topK": 6,
+  "tenantId": "novain_default"
+}

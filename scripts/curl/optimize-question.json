@@ -1,0 +1,26 @@
+{
+  "session_id": "curl-test-session-001",
+  "user_id": "curl-test-user-001",
+  "first_name": "paulina",
+  "customer_email": "paulina@ibm.com",
+  "last_utterance": "confused how to do business requirements",
+  "agent_persona": "NovAIn business strategist and prompt-engineering coach.",
+  "vf_memory": [
+    {
+      "role": "assistant",
+      "content": "Hello and welcome! I am NovAIn, it's great to meet you. I am here as your prompt engineering coach..."
+    },
+    {
+      "role": "user",
+      "content": "Yes, sounds good!"
+    },
+    {
+      "role": "assistant",
+      "content": "Tell me what business problem you're dealing with."
+    },
+    {
+      "role": "user",
+      "content": "confused how to do business requirements"
+    }
+  ]
+}

@@ -1,45 +1,112 @@
-name: CI
+name: CI / Lint & test (Node 18.x)
 
-"on":
+on:
   pull_request:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
-  lint:
+  lint_18:
     name: Lint (18.x)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: npm
-      - run: npm ci
-      - run: npm run lint --if-present
 
-  test:
-    name: Test (18.x)
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: npm
-      - run: npm ci
-      - run: npm test --if-present
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  actionlint:
-    name: actionlint (no ShellCheck)
+      - name: Setup Node 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Lint (if script exists)
+        run: npm run lint --if-present
+
+  tests_child_process:
+    name: Run tests with USE_CHILD_PROCESS_SERVER=1
     runs-on: ubuntu-latest
+    needs: lint_18
+    env:
+      USE_CHILD_PROCESS_SERVER: "1"
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run tests with child-process server
+        run: npm test --if-present
+
+  single_test:
+    name: single-test
+    runs-on: ubuntu-latest
+    needs: lint_18
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Generic test run; you can tighten this later if you add a dedicated script.
+      - name: Run focused tests (no-op if none)
+        run: npm test --if-present
+
+  repro_job:
+    name: repro
+    runs-on: ubuntu-latest
+    needs: lint_18
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Hook this up to your repro script if/when you add one.
+      - name: Run repro tests (generic)
+        run: npm test --if-present
+
+  validate_workflows:
+    name: validate (pull_request)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Run actionlint
-        uses: docker://rhysd/actionlint:1.7.6
+        uses: reviewdog/action-actionlint@v1
         with:
-          args: -color -shellcheck=never
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
