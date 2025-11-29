@@ -85,6 +85,22 @@ function makeStubRaw(kind, body) {
     };
   }
 
+  if (kind === "optimize_question") {
+    return {
+      ...base,
+      mode: "optimize_question",
+      source: "optimize_question_stub",
+    };
+  }
+
+  if (kind === "teach_and_quiz") {
+    return {
+      ...base,
+      mode: "teach_and_quiz",
+      source: "teach_and_quiz_stub",
+    };
+  }
+
   // default: llm_elicit
   return {
     ...base,
@@ -134,7 +150,11 @@ async function callPromptService(kind, body) {
             ? "lesson_default"
             : kind === "generate_quiz"
               ? "quiz_default"
-              : "remote_llm";
+              : kind === "optimize_question"
+                ? "optimize_question_default"
+                : kind === "teach_and_quiz"
+                  ? "teach_and_quiz_default"
+                  : "remote_llm";
     }
 
     return raw;
@@ -180,7 +200,7 @@ function closeResources() {
 }
 
 // ---------------------------------------------------------------------------
-/* Basic diagnostics endpoints */
+// Basic diagnostics endpoints
 // ---------------------------------------------------------------------------
 
 app.get("/health", (req, res) => {
@@ -323,6 +343,169 @@ app.post("/webhook", async (req, res) => {
         reply: "Stub MCQ quiz generated",
       },
     });
+  }
+
+  // ---- optimize_question (C_OptimizeQuestion) ----------------------------
+
+  if (action === "optimize_question") {
+    const raw = await callPromptService("optimize_question", body);
+    logLlmPayloadSnippet(raw);
+
+    // Prefer explicit question field, fall back to last_utterance.
+    const original =
+      (body && body.question) ||
+      (body && body.last_utterance) ||
+      (body && body.lastUtterance) ||
+      "";
+
+    const trimmed = String(original || "").trim();
+
+    let component_result;
+    let optimized_question = trimmed;
+    let agent_reply;
+    let clarify_reason = null;
+
+    if (!trimmed || trimmed.length < 10) {
+      component_result = "needs_clarify";
+      agent_reply =
+        "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
+      clarify_reason = "too_short_or_empty";
+    } else {
+      component_result = "success";
+
+      // Simple, deterministic clean-up: ensure it ends with a question mark
+      // and remove excess whitespace.
+      const normalized = trimmed.replace(/\s+/g, " ");
+      optimized_question = normalized.endsWith("?")
+        ? normalized
+        : normalized + "?";
+
+      agent_reply =
+        "Got it, let me work on that now. I’ll turn this into a lesson and a quiz for you.";
+    }
+
+    const payload = {
+      ok: true,
+      raw,
+      component_result,
+      optimized_question,
+      agent_reply,
+      clarify_reason,
+      data: {
+        raw,
+        component_result,
+        optimized_question,
+        agent_reply,
+        clarify_reason,
+      },
+    };
+
+    return res.json(payload);
+  }
+
+  // ---- teach_and_quiz (C_TeachAndQuiz orchestrator) ----------------------
+
+  if (action === "teach_and_quiz") {
+    const raw = await callPromptService("teach_and_quiz", body);
+    logLlmPayloadSnippet(raw);
+
+    const question =
+      (body && body.question) ||
+      (body && body.optimized_question) ||
+      (body && body.last_utterance) ||
+      "your business question";
+
+    const trimmedQuestion = String(question || "").trim() || "your question";
+
+    const strategy_answer =
+      `Here is a simple, high-level way I would approach "${trimmedQuestion}". ` +
+      "First, clarify the objective and success metrics. Second, analyze the current state " +
+      "and constraints. Third, identify 2-3 strategic options, compare impact vs. effort, " +
+      "and choose one to test. Finally, define concrete next steps for the next 2–4 weeks.";
+
+    const lessonTitle = `Strategy lesson for: ${trimmedQuestion}`;
+    const lessonContent =
+      `In this lesson, we’ll walk through a structured way to think about "${trimmedQuestion}". ` +
+      "We’ll cover: (1) clarifying the business goal, (2) mapping stakeholders and constraints, " +
+      "(3) generating strategic options, and (4) choosing a focused experiment you can run quickly.";
+    const promptLesson =
+      `You are a business strategy co-pilot. Help me reason about "${trimmedQuestion}" step-by-step. ` +
+      "Ask clarifying questions where needed, then propose a simple plan with next actions.";
+
+    // Very small, deterministic quiz stub.
+    const mcq = [
+      {
+        type: "mcq",
+        question:
+          "What is the FIRST thing you should clarify when tackling this strategy question?",
+        options: [
+          "The tools and software you will use",
+          "The business objective and success metrics",
+          "The colour of the slide deck",
+          "The company logo guidelines",
+        ],
+        answer: "The business objective and success metrics",
+      },
+    ];
+
+    const tf = [
+      {
+        type: "tf",
+        question:
+          "True or false: You should pick as many strategic options as possible and try them all at once.",
+        answer: "False",
+      },
+    ];
+
+    const open = [
+      {
+        type: "open",
+        question:
+          "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks related to this question.",
+      },
+    ];
+
+    const quizEnvelope = {
+      question: trimmedQuestion,
+      mcq,
+      tf,
+      open,
+    };
+
+    const APL_MCQ = mcq.length;
+    const APL_TF = tf.length;
+    const APL_OPEN = open.length;
+    const APL_Quiz_JSON = JSON.stringify(quizEnvelope);
+
+    const component_result = "success";
+
+    const payload = {
+      ok: true,
+      raw,
+      component_result,
+      strategy_answer,
+      APL_LessonTitle: lessonTitle,
+      APL_lesson_content: lessonContent,
+      APL_PromptLesson: promptLesson,
+      APL_MCQ,
+      APL_TF,
+      APL_OPEN,
+      APL_Quiz_JSON,
+      data: {
+        raw,
+        component_result,
+        strategy_answer,
+        APL_LessonTitle: lessonTitle,
+        APL_lesson_content: lessonContent,
+        APL_PromptLesson: promptLesson,
+        APL_MCQ,
+        APL_TF,
+        APL_OPEN,
+        APL_Quiz_JSON,
+      },
+    };
+
+    return res.json(payload);
   }
 
   // ---- generic fallback ---------------------------------------------------
