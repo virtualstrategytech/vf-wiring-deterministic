@@ -1,20 +1,21 @@
 // debug_call_llm2.js - reproduce failing test with captured console.error
-process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
-process.env.NODE_ENV = 'development';
-process.env.DEBUG_WEBHOOK = 'true';
-process.env.PROMPT_URL = process.env.PROMPT_URL || 'http://example.local/prompt';
+process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "{WEBHOOK_KEY}";
+process.env.NODE_ENV = "development";
+process.env.DEBUG_WEBHOOK = "true";
+process.env.PROMPT_URL =
+  process.env.PROMPT_URL || "http://example.local/prompt";
 
 const origErr = console.error;
 console.error = (...args) => {
-  origErr('ERR_CAPTURE:', ...args);
+  origErr("ERR_CAPTURE:", ...args);
 };
 
 globalThis.fetch = async () => {
   const payload = {
-    summary: 'Test summary',
+    summary: "Test summary",
     needs_clarify: false,
-    followup_question: '',
-    debug_meta: 'sensitive-llm-output',
+    followup_question: "",
+    debug_meta: "sensitive-llm-output",
   };
   return {
     ok: true,
@@ -27,17 +28,17 @@ globalThis.fetch = async () => {
 
 (async () => {
   try {
-    const app = require('../novain-platform/webhook/server');
-    const { requestApp } = require('../tests/helpers/request-helper');
+    const app = require("../novain-platform/webhook/server");
+    const { requestApp } = require("../tests/helpers/request-helper");
     const resp = await requestApp(app, {
-      method: 'post',
-      path: '/webhook',
-      body: { action: 'llm_elicit', question: 'Q', tenantId: 't' },
-      headers: { 'x-api-key': process.env.WEBHOOK_API_KEY },
+      method: "post",
+      path: "/webhook",
+      body: { action: "llm_elicit", question: "Q", tenantId: "t" },
+      headers: { "x-api-key": process.env.WEBHOOK_API_KEY },
       timeout: 5000,
     });
-    console.log('RESP:', resp);
+    console.log("RESP:", resp);
   } catch (err) {
-    console.error('ERR:', err && err.stack ? err.stack : err);
+    console.error("ERR:", err && err.stack ? err.stack : err);
   }
 })();

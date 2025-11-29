@@ -2,11 +2,11 @@
 // Best-effort tracer to capture async_hooks creation stacks and active handles
 // for a single in-process POST /webhook call. Writes a JSON file to artifacts/.
 
-const fs = require('fs');
-const path = require('path');
-const async_hooks = require('async_hooks');
+const fs = require("fs");
+const path = require("path");
+const async_hooks = require("async_hooks");
 
-const outDir = path.resolve(__dirname, '..', 'artifacts');
+const outDir = path.resolve(__dirname, "..", "artifacts");
 try {
   fs.mkdirSync(outDir, { recursive: true });
 } catch {}
@@ -15,7 +15,7 @@ const handleMap = new Map();
 const hooks = async_hooks.createHook({
   init(asyncId, type, _triggerAsyncId, _resource) {
     try {
-      const info = { type, stack: new Error('handle-init').stack };
+      const info = { type, stack: new Error("handle-init").stack };
       handleMap.set(asyncId, info);
     } catch {}
   },
@@ -29,9 +29,11 @@ hooks.enable();
 
 function getActiveHandlesSummary() {
   const handles =
-    typeof process._getActiveHandles === 'function' ? process._getActiveHandles() : [];
+    typeof process._getActiveHandles === "function"
+      ? process._getActiveHandles()
+      : [];
   return handles.map((h) => {
-    let ctor = 'unknown';
+    let ctor = "unknown";
     try {
       ctor = (h && h.constructor && h.constructor.name) || ctor;
     } catch {}
@@ -43,7 +45,7 @@ function getActiveHandlesSummary() {
     // best-effort socket info
     const socketInfo = {};
     try {
-      if (ctor === 'Socket' || ctor === 'TLSSocket') {
+      if (ctor === "Socket" || ctor === "TLSSocket") {
         socketInfo.localAddress = h.localAddress;
         socketInfo.localPort = h.localPort;
         socketInfo.remoteAddress = h.remoteAddress;
@@ -57,25 +59,28 @@ function getActiveHandlesSummary() {
 }
 
 async function run() {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const outFile = path.join(outDir, `handle_trace_${ts}.json`);
 
   // require the app under test
-  // ensure environment matches test conditions
-  process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || 'test123';
+  // ensure environment matches test conditions (use placeholder fallback)
+  process.env.WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "{WEBHOOK_KEY}";
 
   // require the app module (same as tests)
   let mod;
   try {
-    mod = require('../novain-platform/webhook/server');
+    mod = require("../novain-platform/webhook/server");
   } catch (e) {
-    console.error('Failed to require server module:', (e && e.stack) || e);
+    console.error("Failed to require server module:", (e && e.stack) || e);
     process.exit(2);
   }
 
   // build an in-process dispatcher similar to tests/dispatch
-  const { Readable } = require('stream');
-  const dispatch = (app, { method = 'GET', path = '/', headers = {}, body } = {}) =>
+  const { Readable } = require("stream");
+  const dispatch = (
+    app,
+    { method = "GET", path = "/", headers = {}, body } = {}
+  ) =>
     new Promise((resolve, reject) => {
       try {
         const req = new Readable({ read() {} });
@@ -83,9 +88,9 @@ async function run() {
         req.url = path;
         req.headers = Object.assign({}, headers);
         if (body !== undefined && body !== null) {
-          const s = typeof body === 'string' ? body : JSON.stringify(body);
+          const s = typeof body === "string" ? body : JSON.stringify(body);
           try {
-            req.headers['content-length'] = Buffer.byteLength(s).toString();
+            req.headers["content-length"] = Buffer.byteLength(s).toString();
           } catch {}
           req.push(s);
         }
@@ -102,20 +107,27 @@ async function run() {
             return headersOut[String(name).toLowerCase()];
           },
           write(chunk) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+            chunks.push(
+              Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+            );
           },
           end(chunk) {
             if (chunk) this.write(chunk);
             const bodyBuf = Buffer.concat(chunks);
-            const text = bodyBuf.toString('utf8');
-            const ct = headersOut['content-type'] || '';
+            const text = bodyBuf.toString("utf8");
+            const ct = headersOut["content-type"] || "";
             let parsed = null;
-            if (ct.includes('application/json')) {
+            if (ct.includes("application/json")) {
               try {
                 parsed = JSON.parse(text);
               } catch {}
             }
-            resolve({ status: statusCode, headers: headersOut, text, body: parsed || text });
+            resolve({
+              status: statusCode,
+              headers: headersOut,
+              text,
+              body: parsed || text,
+            });
           },
           writeHead(code) {
             statusCode = code;
@@ -126,11 +138,11 @@ async function run() {
           },
           json(obj) {
             const s = JSON.stringify(obj);
-            this.setHeader('content-type', 'application/json');
+            this.setHeader("content-type", "application/json");
             this.end(s);
           },
           send(v) {
-            if (typeof v === 'object') return this.json(v);
+            if (typeof v === "object") return this.json(v);
             this.end(String(v));
           },
         };
@@ -138,17 +150,18 @@ async function run() {
         try {
           // Express app may be exported as function (app) or as module with createServer
           const appToCall =
-            typeof mod === 'function'
+            typeof mod === "function"
               ? mod
-              : mod && typeof mod === 'object' && mod.app
+              : mod && typeof mod === "object" && mod.app
                 ? mod.app
                 : mod;
-          if (!appToCall) return reject(new Error('Unable to locate app to dispatch to'));
+          if (!appToCall)
+            return reject(new Error("Unable to locate app to dispatch to"));
           // call app(req,res)
           appToCall(req, res);
         } catch (err) {
           try {
-            if (mod && typeof mod.handle === 'function') {
+            if (mod && typeof mod.handle === "function") {
               mod.handle(req, res);
             } else {
               return reject(err);
@@ -164,16 +177,22 @@ async function run() {
 
   // make one POST /webhook request to exercise the code path
   try {
-    console.log('Running in-process POST /webhook to exercise handler...');
+    console.log("Running in-process POST /webhook to exercise handler...");
     const result = await dispatch(mod, {
-      method: 'POST',
-      path: '/webhook',
-      headers: { 'x-api-key': 'test123', 'content-type': 'application/json' },
-      body: { action: 'ping', name: 'Tracer', tenantId: 'default' },
+      method: "POST",
+      path: "/webhook",
+      headers: {
+        "x-api-key": "{WEBHOOK_KEY}",
+        "content-type": "application/json",
+      },
+      body: { action: "ping", name: "Tracer", tenantId: "default" },
     });
-    console.log('dispatch result:', { status: result.status, bodyType: typeof result.body });
+    console.log("dispatch result:", {
+      status: result.status,
+      bodyType: typeof result.body,
+    });
   } catch (e) {
-    console.error('Dispatch error:', (e && e.stack) || e);
+    console.error("Dispatch error:", (e && e.stack) || e);
   }
 
   // give the runtime some time for async handles to be created/settle
@@ -186,17 +205,17 @@ async function run() {
     asyncEntries.push({
       id,
       type: info.type,
-      stack: info.stack && info.stack.split('\n').slice(0, 10),
+      stack: info.stack && info.stack.split("\n").slice(0, 10),
     });
   }
 
   const dump = { timestamp: new Date().toISOString(), active, asyncEntries };
 
   try {
-    fs.writeFileSync(outFile, JSON.stringify(dump, null, 2), 'utf8');
-    console.log('Wrote trace file:', outFile);
+    fs.writeFileSync(outFile, JSON.stringify(dump, null, 2), "utf8");
+    console.log("Wrote trace file:", outFile);
   } catch (e) {
-    console.error('Failed to write trace file:', (e && e.stack) || e);
+    console.error("Failed to write trace file:", (e && e.stack) || e);
   }
 
   // small delay then exit
@@ -205,6 +224,6 @@ async function run() {
 }
 
 run().catch((e) => {
-  console.error('Run failed', (e && e.stack) || e);
+  console.error("Run failed", (e && e.stack) || e);
   process.exit(2);
 });

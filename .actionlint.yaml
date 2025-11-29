@@ -1,0 +1,8 @@
+secrets:
+  - MONITOR_TOKEN
+  - OPENAI_API_KEY
+  - WEBHOOK_API_KEY
+  - WEBHOOK_BASE
+
+env:
+  DEBUG_WEBHOOK_ENABLED: true

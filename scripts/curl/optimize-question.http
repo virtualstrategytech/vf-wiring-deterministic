@@ -1,0 +1,25 @@
+
+### Optimize Question – prod webhook
+
+POST https://vf-webhook-service.onrender.com/optimize_question
+Content-Type: application/json
+x-api-key: {{$processEnv WEBHOOK_API_KEY}}
+
+{
+  "session_id": "curl-test-session-001",
+  "user_id": "curl-test-user-001",
+  "first_name": "paulina",
+  "customer_email": "paulina@ibm.com",
+  "last_utterance": "confused how to do business requirements",
+  "agent_persona": "NovAIn business strategist and prompt engineering coach.",
+  "vf_memory": [
+    {
+      "role": "assistant",
+      "content": "In a few sentences tell me what business problem you’re dealing with."
+    },
+    {
+      "role": "user",
+      "content": "confused how to do business requirements"
+    }
+  ]
+}
