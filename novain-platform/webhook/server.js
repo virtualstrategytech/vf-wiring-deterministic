@@ -1,10 +1,17 @@
-﻿// server.js
-// vf-webhook-service — Voiceflow-friendly deterministic webhook
-// Key goals:
-// 1) NEVER crash on invalid JSON from Voiceflow variable injection
-// 2) Always return HTTP 200 with a component_result so Voiceflow can route
-// 3) Support base64 transport for "question" (question_encoding="base64")
-// 4) Provide the exact response fields your Voiceflow capture tables expect
+﻿// novain-platform/webhook/server.js
+// Deterministic webhook server with CI-friendly behaviour.
+//
+// Consolidated endpoints:
+//   POST /webhook           (action router; tests + legacy flows)
+//   POST /optimize_question (Voiceflow C_OptimizeQuestion)
+//   POST /teach_and_quiz    (Voiceflow C_TeachAndQuiz)
+//   POST /generate_quiz     (optional)
+//   POST /generate_lesson   (optional)
+//
+// Notes:
+// - Auth is via x-api-key header if WEBHOOK_API_KEY or WEBHOOK_KEY is set.
+// - Robust against invalid JSON from clients (Voiceflow raw body glitches).
+// - Supports base64 transport: question_for_api + question_encoding=base64
 
 "use strict";
 
@@ -17,8 +24,8 @@ const express = require("express");
 // ---------------------------------------------------------------------------
 
 const NODE_ENV = process.env.NODE_ENV || "local";
-const LOG_LEVEL = (process.env.LOG_LEVEL || "info").toLowerCase();
-const PORT = Number.parseInt(process.env.PORT || "3000", 10);
+const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
 function log(level, msg, extra) {
   const payload = {
@@ -31,13 +38,182 @@ function log(level, msg, extra) {
   console.log(JSON.stringify(payload));
 }
 
-function debug(msg, extra) {
+function logDebug(msg, extra) {
   if (LOG_LEVEL === "debug") log("debug", msg, extra);
 }
 
 function getWebhookKey() {
-  // Support both names; Voiceflow uses WEBHOOK_API_KEY in your screenshots
   return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || "";
+}
+
+function requireApiKey(req, res, next) {
+  const requiredKey = getWebhookKey();
+  if (!requiredKey) return next();
+
+  const apiKeyHeader = req.get("x-api-key") || "";
+  if (apiKeyHeader !== requiredKey) {
+    return res
+      .status(401)
+      .json({ ok: false, API_OK: "false", error: "unauthorized" });
+  }
+  return next();
+}
+
+// ---------------------------------------------------------------------------
+// Express app + body parsing (with invalid-JSON recovery)
+// ---------------------------------------------------------------------------
+
+const app = express();
+
+// Capture raw body (useful for debugging/HMAC) and attempt JSON parse.
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
+// If JSON parsing failed, don’t hard-fail the request.
+// Instead, continue with a “safe” body so Voiceflow doesn’t drop into failure path.
+app.use((err, req, _res, next) => {
+  // body-parser uses `type: 'entity.parse.failed'` for invalid JSON
+  if (err && err.type === "entity.parse.failed") {
+    const rawText = req.rawBody ? req.rawBody.toString("utf8") : "";
+    req.body = {
+      action: extractJsonStringField(rawText, "action") || "",
+      _json_parse_error: err.message || "invalid_json",
+      _raw_text: rawText,
+    };
+    return next();
+  }
+  return next(err);
+});
+
+function extractJsonStringField(rawText, fieldName) {
+  if (!rawText) return "";
+  const re = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*)"`);
+  const m = rawText.match(re);
+  return m && m[1] ? m[1] : "";
+}
+
+// ---------------------------------------------------------------------------
+// LLM stub + prompt service helpers
+// ---------------------------------------------------------------------------
+
+function makeStubRaw(kind, body) {
+  const base = {
+    question: body && body.question ? String(body.question) : "",
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
+    component: body && body.component ? String(body.component) : undefined,
+    ts: new Date().toISOString(),
+    kind,
+  };
+
+  if (kind === "invoke_component")
+    return { ...base, source: "invoke_component_stub" };
+  if (kind === "generate_lesson")
+    return { ...base, mode: "lesson", source: "lesson_stub" };
+  if (kind === "generate_quiz")
+    return { ...base, mode: "quiz", source: "quiz_stub" };
+  if (kind === "optimize_question")
+    return {
+      ...base,
+      mode: "optimize_question",
+      source: "optimize_question_stub",
+    };
+  if (kind === "teach_and_quiz")
+    return { ...base, mode: "teach_and_quiz", source: "teach_and_quiz_stub" };
+
+  return { ...base, source: "stub" };
+}
+
+function resolvePromptUrl(kind) {
+  const promptUrl = process.env.PROMPT_URL;
+  if (!promptUrl) return "";
+
+  // If user set a full endpoint path, respect it as-is.
+  try {
+    const u = new URL(promptUrl);
+    const hasPath = u.pathname && u.pathname !== "/";
+    if (hasPath) return promptUrl;
+
+    // If it’s just a base URL, append a sensible default for teach_and_quiz.
+    if (kind === "teach_and_quiz") {
+      u.pathname = "/v1/teach-and-quiz";
+      return u.toString();
+    }
+    // Otherwise leave it base; your prompt service can route by action if it supports that.
+    return promptUrl;
+  } catch {
+    return promptUrl;
+  }
+}
+
+async function callPromptService(kind, body) {
+  const promptUrl = resolvePromptUrl(kind);
+  if (!promptUrl) return makeStubRaw(kind, body);
+
+  const payload = {
+    action: kind,
+    question: body && body.question ? String(body.question) : "",
+    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
+    component: body && body.component ? String(body.component) : undefined,
+  };
+
+  try {
+    const resp = await globalThis.fetch(promptUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await resp.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text };
+    }
+
+    const raw =
+      parsed && parsed.raw && typeof parsed.raw === "object"
+        ? parsed.raw
+        : parsed || {};
+
+    if (!raw.source) {
+      raw.source =
+        kind === "invoke_component"
+          ? "invoke_component_default"
+          : kind === "generate_lesson"
+            ? "lesson_default"
+            : kind === "generate_quiz"
+              ? "quiz_default"
+              : kind === "optimize_question"
+                ? "optimize_question_default"
+                : kind === "teach_and_quiz"
+                  ? "teach_and_quiz_default"
+                  : "remote_llm";
+    }
+
+    return raw;
+  } catch (err) {
+    log("error", "Error calling prompt service", {
+      message: err && err.message,
+    });
+    return makeStubRaw(kind, body);
+  }
+}
+
+function logLlmPayloadSnippet(raw) {
+  if (String(process.env.DEBUG_WEBHOOK).toLowerCase() !== "true") return;
+  try {
+    const snippet = JSON.stringify(raw).slice(0, 400);
+    console.log("llm payload snippet:", snippet);
+  } catch {
+    console.log("llm payload snippet: [unserializable]");
+  }
 }
 
 function closeResources() {
@@ -45,344 +221,292 @@ function closeResources() {
     if (http?.globalAgent?.destroy) http.globalAgent.destroy();
     if (https?.globalAgent?.destroy) https.globalAgent.destroy();
   } catch {
-    // best effort
+    // best-effort only
   }
 }
 
 // ---------------------------------------------------------------------------
-// Body parsing: accept ANY content-type as text, then parse ourselves.
-// This avoids Express throwing SyntaxError before your route runs.
+// Core helpers (input decoding + response builders)
 // ---------------------------------------------------------------------------
 
-const app = express();
+function pickQuestionFromBody(body) {
+  const candidates = [
+    body && body.question_for_api, // preferred (safe transport)
+    body && body.question,
+    body && body.user_message,
+    body && body.userMessage,
+    body && body.last_utterance,
+    body && body.lastUtterance,
+    body && body.optimized_question,
+    body && body.optimizedQuestion,
+  ];
 
-app.use(
-  express.text({
-    type: "*/*",
-    limit: "2mb",
-    verify: (req, _res, buf) => {
-      req.rawBody = buf; // if you later add signatures/HMAC
-    },
-  })
-);
+  for (const c of candidates) {
+    const s = String(c || "").trim();
+    if (s) return s;
+  }
+  return "";
+}
 
-function parseIncoming(req) {
-  // express.text() gives us a string (or undefined)
-  const raw = typeof req.body === "string" ? req.body : "";
-  const trimmed = raw.trim();
-
-  if (!trimmed) return { body: {}, raw, parseError: null };
+function decodeQuestionIfNeeded(body, q) {
+  const encoding = String(body?.question_encoding || "")
+    .trim()
+    .toLowerCase();
+  if (encoding !== "base64") return q;
 
   try {
-    const body = JSON.parse(trimmed);
-    return { body, raw, parseError: null };
-  } catch (err) {
+    return Buffer.from(String(q || ""), "base64").toString("utf8");
+  } catch {
+    return q;
+  }
+}
+
+function buildOptimizeQuestionResponse(body, raw) {
+  // If we hit invalid JSON, force a clean “needs_clarify” response instead of failing the request.
+  if (body && body._json_parse_error) {
+    const clarify_question =
+      "Your request JSON couldn’t be parsed (usually due to quotes/newlines in the question). " +
+      "Please retry — or use the base64 flow (question_for_api + question_encoding=base64).";
+
     return {
-      body: {},
+      ok: true,
+      API_OK: "true",
       raw,
-      parseError: {
-        message: err?.message || "Invalid JSON",
+      component_result: "needs_clarify",
+      optimized_question: "",
+      agent_reply: clarify_question,
+      clarify_reason: "invalid_json",
+      needs_clarify: true,
+      clarify_question,
+      API_Response: clarify_question,
+      data: {
+        raw,
+        component_result: "needs_clarify",
+        optimized_question: "",
+        agent_reply: clarify_question,
+        clarify_reason: "invalid_json",
+        needs_clarify: true,
+        clarify_question,
       },
     };
   }
-}
 
-function normalizeWhitespace(s) {
-  return String(s || "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+  const original = decodeQuestionIfNeeded(body, pickQuestionFromBody(body));
+  const trimmed = String(original || "").trim();
 
-function ensureQuestionMark(s) {
-  const t = normalizeWhitespace(s);
-  if (!t) return "";
-  if (t.endsWith("?")) return t;
-  // If it ends with a period/exclamation, replace with '?', else append '?'
-  if (/[.!]$/.test(t)) return t.slice(0, -1) + "?";
-  return t + "?";
-}
-
-function tryDecodeBase64(maybeB64) {
-  try {
-    return Buffer.from(String(maybeB64 || ""), "base64").toString("utf8");
-  } catch {
-    return String(maybeB64 || "");
-  }
-}
-
-// Derive the user question from multiple possible fields
-function getInboundQuestion(body) {
-  // Your Voiceflow variants:
-  // - /optimize_question uses last_utterance
-  // - /webhook optimize_question uses question
-  const q =
-    body.question ??
-    body.last_utterance ??
-    body.lastUtterance ??
-    body.unoptimized_question ??
-    "";
-
-  const enc = String(body.question_encoding || "").toLowerCase();
-  if (enc === "base64") return tryDecodeBase64(q);
-  return String(q || "");
-}
-
-function okFailPayload(message, extra) {
-  // IMPORTANT: return 200 and let Voiceflow route on component_result
-  return {
-    ok: false,
-    API_OK: false,
-    component_result: "api_failed",
-    agent_reply: message || "API failed.",
-    clarify_reason: "api_failed",
-    needs_clarify: false,
-    clarify_question: "",
-    ...(extra || {}),
-  };
-}
-
-function optimizeQuestionPayload(body) {
-  const decoded = getInboundQuestion(body);
-  const trimmed = normalizeWhitespace(decoded);
-
-  const debug_trace = "optimize_question_stub_v1";
-
-  // Defaults (your Voiceflow capture table includes these keys)
-  let component_result = "success";
+  let component_result;
+  let optimized_question = trimmed;
+  let agent_reply;
+  let clarify_reason = null;
   let needs_clarify = false;
-  let clarify_reason = "";
   let clarify_question = "";
-  let optimized_question = "";
-  let agent_reply = "";
 
   if (!trimmed || trimmed.length < 10) {
     component_result = "needs_clarify";
     needs_clarify = true;
     clarify_reason = "too_short_or_empty";
     clarify_question =
-      "Quick check—can you restate your question in one clear sentence, with a bit more detail?";
+      "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
     agent_reply = clarify_question;
-    optimized_question = trimmed; // keep for debugging
   } else {
     component_result = "success";
-    optimized_question = ensureQuestionMark(trimmed);
+    const normalized = trimmed.replace(/\s+/g, " ");
+    optimized_question = normalized.endsWith("?")
+      ? normalized
+      : normalized + "?";
     agent_reply =
       "Got it — I’ll turn this into a clean lesson and (optionally) a quiz.";
   }
 
   return {
     ok: true,
-    API_OK: true,
+    API_OK: "true",
+    raw,
     component_result,
-    debug_trace,
     optimized_question,
     agent_reply,
-
-    // fields your Voiceflow API block is capturing
-    needs_clarify,
     clarify_reason,
+    needs_clarify,
     clarify_question,
-  };
-}
-
-function generateLessonPayload(body) {
-  const question =
-    normalizeWhitespace(getInboundQuestion(body)) || "your question";
-  const tenantId = String(body.tenantId || "novain_default");
-
-  // Schema aligned with your mapping doc (lessonTitle, bulletCount, lesson, reply)
-  const lesson = {
-    title: `Clarify Ambiguity with the SPQA Frame`,
-    objectives: [
-      "Restate the situation and problem clearly",
-      "Identify the top questions that unblock action",
-      "Define one SPQA-aligned next step",
-    ],
-    content: [
-      `We’ll apply SPQA (Situation → Problem → Questions → Actions) to:`,
-      `"${question}"`,
-      "",
-      "1) Situation: what’s the context, who’s involved, what constraints matter?",
-      "2) Problem: what breaks or stays stuck if nothing changes?",
-      "3) Questions: the 2–4 unknowns that unlock action.",
-      "4) Actions: the next 48 hours + next 2 weeks.",
-    ].join("\n"),
-    keyTakeaways: [
-      "Ambiguity usually hides missing questions.",
-      "SPQA = Situation, Problem, Questions, Actions.",
-      "Good strategy ends in time-bound actions.",
-    ],
-    references: [{ label: "SPQA explainer", url: "https://example.com/spqa" }],
-    meta: {
-      question,
-      tenantId,
-      createdBy: "novain.business.agent",
-      createdAt: new Date().toISOString(),
+    API_Response: agent_reply,
+    data: {
+      raw,
+      component_result,
+      optimized_question,
+      agent_reply,
+      clarify_reason,
+      needs_clarify,
+      clarify_question,
     },
   };
+}
 
+function buildQuizEnvelope(question) {
+  const trimmedQuestion = String(question || "").trim() || "your question";
   return {
-    ok: true,
-    reply: "Lesson ready.",
-    lessonTitle: lesson.title,
-    bulletCount: lesson.keyTakeaways.length,
-    lesson,
-  };
-}
-
-function safeJsonParse(maybeJson) {
-  if (!maybeJson) return null;
-  if (typeof maybeJson === "object") return maybeJson;
-  if (typeof maybeJson !== "string") return null;
-  const t = maybeJson.trim();
-  if (!t) return null;
-  try {
-    return JSON.parse(t);
-  } catch {
-    return null;
-  }
-}
-
-function generateQuizPayload(body) {
-  const question =
-    normalizeWhitespace(getInboundQuestion(body)) || "your question";
-
-  // Voiceflow often passes lesson as a JSON string from the previous step
-  const lessonObj =
-    safeJsonParse(body.lesson) ||
-    safeJsonParse(body.API_Lesson_JSON) ||
-    body.lesson ||
-    {};
-
-  const lessonTitle =
-    normalizeWhitespace(lessonObj?.title) ||
-    "Clarify Ambiguity with the SPQA Frame";
-
-  const takeaways = Array.isArray(lessonObj?.keyTakeaways)
-    ? lessonObj.keyTakeaways.map((x) => normalizeWhitespace(x)).filter(Boolean)
-    : [];
-
-  const topTakeaway =
-    takeaways[0] ||
-    "Use SPQA to clarify situation, problem, questions, and actions.";
-
-  const promptLesson = {
-    strategySummary: topTakeaway,
-    promptPrinciples: [
-      `Reference the framework "${lessonTitle}" explicitly.`,
-      "Ask clarifying questions before generating outputs.",
-      "State constraints (time, audience, resources).",
-      "Specify output format (bullets, table, steps).",
-      "Add a critique/refinement pass for quality.",
-    ],
-    demonstrationPrompts: [
-      {
-        label: "Single-shot",
-        style: "single-shot",
-        prompt: `You are a strategy coach. Using "${lessonTitle}", answer: "${question}". Output: SPQA + a 48-hour action plan.`,
-      },
-      {
-        label: "Few-shot",
-        style: "few-shot",
-        prompt: `Key takeaways: ${takeaways.slice(0, 3).join(" | ") || topTakeaway}\nNow produce a prompt that gathers context then outputs SPQA + recommendations for: "${question}".`,
-      },
-      {
-        label: "Refinement",
-        style: "refinement",
-        prompt: `Critique this prompt for clarity, constraints, and measurability. Then propose a tighter version.\nPROMPT: (paste prompt here)`,
-      },
-    ],
-    applicationChecklist: [
-      "Is the Situation explicit?",
-      "Is the Problem measurable?",
-      "Are the key Questions listed?",
-      "Is the Action clear within 48 hours?",
-    ],
-    meta: { sourceLessonTitle: lessonTitle, question },
-  };
-
-  const quiz = {
+    question: trimmedQuestion,
     mcq: [
       {
-        id: "mcq1",
-        q: "In SPQA, what comes after Problem?",
-        choices: ["Action", "Question", "Scope", "Answer"],
-        answer: "B",
-        explain: "SPQA = Situation, Problem, Questions, Actions.",
-      },
-      {
-        id: "mcq2",
-        q: "When turning a business lesson into a prompt, what should you do first?",
-        choices: [
-          "Set temperature",
-          "Restate situation + problem",
-          "Ask for a 50-page report",
-          "Skip constraints",
+        type: "mcq",
+        question:
+          "What is the FIRST thing you should clarify when tackling a strategy question?",
+        options: [
+          "The tools and software you will use",
+          "The business objective and success metrics",
+          "The colour of the slide deck",
+          "The company logo guidelines",
         ],
-        answer: "B",
-        explain: "Clarity on situation/problem comes before everything else.",
-      },
-      {
-        id: "mcq3",
-        q: "Which makes prompts more reliable?",
-        choices: [
-          "Vague instructions",
-          "No output format",
-          "Structure + constraints + explicit output format",
-          "Rely on defaults",
-        ],
-        answer: "C",
-        explain: "Structure reduces ambiguity and boosts usability.",
+        answer: "The business objective and success metrics",
       },
     ],
     tf: [
       {
-        id: "tf1",
-        q: "Refinement/critique loops usually improve complex outputs.",
-        answer: true,
-        explain: "Iteration reveals gaps and improves quality.",
-      },
-      {
-        id: "tf2",
-        q: "You should skip clarifying questions to move faster.",
-        answer: false,
-        explain: "Clarifying questions prevent rework and wrong answers.",
+        type: "tf",
+        question:
+          "True or false: You should pick as many strategic options as possible and try them all at once.",
+        answer: "False",
       },
     ],
     open: [
       {
-        id: "open1",
-        q: `Rewrite your question using SPQA and propose one 48-hour action.`,
-        rubric: [
-          "Situation restated",
-          "Problem measurable",
-          "Questions listed",
-          "Action within 48 hours",
-        ],
+        type: "open",
+        question:
+          "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks.",
       },
     ],
   };
+}
+
+function buildTeachAndQuizResponse(body, raw) {
+  const q0 =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "your business question";
+  const trimmedQuestion = String(q0).trim() || "your question";
+
+  const strategy_answer =
+    `Here is a simple, high-level way I would approach "${trimmedQuestion}". ` +
+    "First, clarify the objective and success metrics. Second, analyze the current state and constraints. " +
+    "Third, identify 2–3 strategic options, compare impact vs. effort, and choose one to test. " +
+    "Finally, define concrete next steps for the next 2–4 weeks.";
+
+  const lessonTitle = `Strategy lesson for: ${trimmedQuestion}`;
+  const lessonContent =
+    `In this lesson, we’ll walk through a structured way to think about "${trimmedQuestion}". ` +
+    "We’ll cover: (1) clarifying the business goal, (2) mapping stakeholders and constraints, " +
+    "(3) generating strategic options, and (4) choosing a focused experiment you can run quickly.";
+
+  const promptLesson =
+    `You are a business strategy co-pilot. Help me reason about "${trimmedQuestion}" step-by-step. ` +
+    "Ask clarifying questions where needed, then propose a simple plan with next actions.";
+
+  const quizEnvelope = buildQuizEnvelope(trimmedQuestion);
+
+  const API_MCQ = quizEnvelope.mcq.length;
+  const API_TF = quizEnvelope.tf.length;
+  const API_OPEN = quizEnvelope.open.length;
+  const API_Quiz_JSON = JSON.stringify(quizEnvelope);
+
+  const component_result = "success";
+
+  // Back-compat fields (older flow versions)
+  const APL_MCQ = API_MCQ;
+  const APL_TF = API_TF;
+  const APL_OPEN = API_OPEN;
+  const APL_Quiz_JSON = API_Quiz_JSON;
 
   return {
     ok: true,
-    reply: "Your prompt lesson and quiz are ready.",
-    lessonTitle,
-    mcqCount: quiz.mcq.length,
-    tfCount: quiz.tf.length,
-    openCount: quiz.open.length,
-    promptLesson,
-    quiz,
+    API_OK: "true",
+    raw,
+    component_result,
+    strategy_answer,
+
+    // Canonical fields for Voiceflow blocks (API_*)
+    API_LessonTitle: lessonTitle,
+    API_LessonContent: lessonContent,
+    API_PromptLesson: promptLesson,
+    API_MCQ,
+    API_TF,
+    API_OPEN,
+    API_Quiz_JSON,
+    API_Response: strategy_answer,
+
+    // Optional JSON slots
+    API_Lesson_JSON: JSON.stringify({
+      title: lessonTitle,
+      content: lessonContent,
+      promptLesson,
+    }),
+    API_PromptLesson_JSON: JSON.stringify({ promptLesson }),
+
+    // Back-compat (APL_*)
+    APL_LessonTitle: lessonTitle,
+    APL_lesson_content: lessonContent,
+    APL_PromptLesson: promptLesson,
+    APL_MCQ,
+    APL_TF,
+    APL_OPEN,
+    APL_Quiz_JSON,
+
+    data: {
+      raw,
+      component_result,
+      strategy_answer,
+      API_LessonTitle: lessonTitle,
+      API_LessonContent: lessonContent,
+      API_PromptLesson: promptLesson,
+      API_MCQ,
+      API_TF,
+      API_OPEN,
+      API_Quiz_JSON,
+    },
   };
 }
 
-function retrievePayload(body) {
-  const tenantId = String(body.tenantId || "novain_default");
-  const hitCount = 3; // deterministic stub
+function buildGenerateQuizResponse(body, raw) {
+  const question =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "Quiz stub question";
+  const quizEnvelope = buildQuizEnvelope(question);
+  const mcqCount = quizEnvelope.mcq.length;
+
   return {
     ok: true,
-    reply: `Found ${hitCount} passages.`,
-    hitCount,
-    tenantId,
+    API_OK: "true",
+    raw,
+    mcq: quizEnvelope.mcq,
+    mcqCount,
+    reply: "Stub MCQ quiz generated",
+    API_MCQ: quizEnvelope.mcq.length,
+    API_TF: quizEnvelope.tf.length,
+    API_OPEN: quizEnvelope.open.length,
+    API_Quiz_JSON: JSON.stringify(quizEnvelope),
+    data: {
+      raw,
+      quiz: quizEnvelope,
+      mcq: quizEnvelope.mcq,
+      mcqCount,
+      reply: "Stub MCQ quiz generated",
+    },
+  };
+}
+
+function buildGenerateLessonResponse(body, raw) {
+  const question =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "Lesson stub question";
+  const lessonText =
+    (body && body.lesson && String(body.lesson)) ||
+    `Stub lesson generated for: ${question}`;
+
+  return {
+    ok: true,
+    API_OK: "true",
+    raw,
+    lesson: lessonText,
+    reply: lessonText,
+    API_Response: lessonText,
+    data: { raw, lesson: lessonText, reply: lessonText },
   };
 }
 
@@ -390,7 +514,8 @@ function retrievePayload(body) {
 // Diagnostics
 // ---------------------------------------------------------------------------
 
-app.get("/health", (_req, res) => {
+app.get("/health", (req, res) => {
+  logDebug("GET /health", { ip: req.ip });
   res.type("text/plain").send("ok");
 });
 
@@ -400,173 +525,198 @@ app.get("/diagnostics/env", (_req, res) => {
     env: {
       NODE_ENV,
       LOG_LEVEL,
-      port: PORT,
       hasWebhookKey: Boolean(getWebhookKey()),
+      hasPromptUrl: Boolean(process.env.PROMPT_URL),
+      debugWebhook: String(process.env.DEBUG_WEBHOOK || "false"),
     },
   });
 });
 
 // ---------------------------------------------------------------------------
-// Auth middleware for POST endpoints
+// Direct endpoints (Voiceflow API blocks)
 // ---------------------------------------------------------------------------
 
-function requireApiKey(req, res) {
-  const required = getWebhookKey();
-  if (!required) return true; // allow if unset (local/dev)
-
-  const got = req.get("x-api-key") || "";
-  if (got !== required) {
-    res.status(401).json({ ok: false, error: "unauthorized" });
-    return false;
-  }
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
-// Voiceflow C_OptimizeQuestion → POST /optimize_question
-app.post("/optimize_question", (req, res) => {
-  if (!requireApiKey(req, res)) return;
-
-  const { body, raw, parseError } = parseIncoming(req);
-  if (parseError) {
-    log("error", "Invalid JSON on /optimize_question", {
-      message: parseError.message,
-      rawSnippet: raw.slice(0, 240),
-    });
-    return res.status(200).json(
-      okFailPayload(
-        "Your request body was not valid JSON (likely unescaped quotes/newlines).",
-        {
-          debug_trace: "optimize_question_invalid_json",
-        }
-      )
-    );
-  }
-
-  return res.status(200).json(optimizeQuestionPayload(body));
+app.post("/optimize_question", requireApiKey, async (req, res) => {
+  const body = req.body || {};
+  const raw = await callPromptService("optimize_question", body); // will stub if PROMPT_URL missing
+  logLlmPayloadSnippet(raw);
+  return res.json(buildOptimizeQuestionResponse(body, raw));
 });
 
-// Main router → POST /webhook with { action: "..." }
-app.post("/webhook", (req, res) => {
-  if (!requireApiKey(req, res)) return;
+app.post("/teach_and_quiz", requireApiKey, async (req, res) => {
+  const body = req.body || {};
+  const raw = await callPromptService("teach_and_quiz", body); // will stub if PROMPT_URL missing
+  logLlmPayloadSnippet(raw);
+  return res.json(buildTeachAndQuizResponse(body, raw));
+});
 
-  const { body, raw, parseError } = parseIncoming(req);
+app.post("/generate_quiz", requireApiKey, async (req, res) => {
+  const body = req.body || {};
+  const raw = await callPromptService("generate_quiz", body);
+  logLlmPayloadSnippet(raw);
+  return res.json(buildGenerateQuizResponse(body, raw));
+});
 
-  if (parseError) {
-    log("error", "Invalid JSON on /webhook", {
-      message: parseError.message,
-      rawSnippet: raw.slice(0, 240),
-    });
-    return res.status(200).json(
-      okFailPayload(
-        "Your request body was not valid JSON (likely unescaped quotes/newlines).",
-        {
-          debug_trace: "webhook_invalid_json",
-        }
-      )
-    );
-  }
+app.post("/generate_lesson", requireApiKey, async (req, res) => {
+  const body = req.body || {};
+  const raw = await callPromptService("generate_lesson", body);
+  logLlmPayloadSnippet(raw);
+  return res.json(buildGenerateLessonResponse(body, raw));
+});
 
-  const action = String(body.action || body.type || "").trim();
+// ---------------------------------------------------------------------------
+// Core webhook handler (action router used by tests + legacy flows)
+// ---------------------------------------------------------------------------
 
-  // Ping (used by smoke tests)
+app.post("/webhook", requireApiKey, async (req, res) => {
+  const body = req.body || {};
+  const action = body.action || body.type || "";
+
+  // ping (used in smoke + verify_in_process)
   if (action === "ping") {
-    return res.status(200).json({ ok: true, reply: "pong", port: PORT });
+    const port =
+      currentServer &&
+      currentServer.address() &&
+      typeof currentServer.address() === "object"
+        ? currentServer.address().port
+        : Number(process.env.PORT || DEFAULT_PORT);
+    return res.json({ ok: true, API_OK: "true", reply: "pong", port });
   }
 
-  if (action === "optimize_question") {
-    return res.status(200).json(optimizeQuestionPayload(body));
+  // If JSON was invalid, return a deterministic needs_clarify response
+  if (body && body._json_parse_error) {
+    const raw = makeStubRaw("invalid_json", body);
+    const clarify_question =
+      "Your request JSON couldn’t be parsed (commonly caused by quotes/newlines in injected variables). " +
+      "Use base64 transport: set question_for_api (base64) + question_encoding='base64'.";
+    return res.json({
+      ok: true,
+      API_OK: "true",
+      raw,
+      component_result: "needs_clarify",
+      optimized_question: "",
+      agent_reply: clarify_question,
+      clarify_reason: "invalid_json",
+      needs_clarify: true,
+      clarify_question,
+      data: { raw },
+    });
+  }
+
+  // regression mirror tests
+  if (action === "llm_elicit" || action === "invoke_component") {
+    const raw = await callPromptService(action, body);
+    logLlmPayloadSnippet(raw);
+    return res.json({ ok: true, API_OK: "true", raw, data: { raw } });
   }
 
   if (action === "generate_lesson") {
-    return res.status(200).json(generateLessonPayload(body));
+    const raw = await callPromptService("generate_lesson", body);
+    logLlmPayloadSnippet(raw);
+    return res.json(buildGenerateLessonResponse(body, raw));
   }
 
   if (action === "generate_quiz") {
-    return res.status(200).json(generateQuizPayload(body));
+    const raw = await callPromptService("generate_quiz", body);
+    logLlmPayloadSnippet(raw);
+    return res.json(buildGenerateQuizResponse(body, raw));
   }
 
-  if (action === "retrieve") {
-    return res.status(200).json(retrievePayload(body));
+  if (action === "optimize_question") {
+    const raw = await callPromptService("optimize_question", body);
+    logLlmPayloadSnippet(raw);
+    return res.json(buildOptimizeQuestionResponse(body, raw));
   }
 
-  if (action === "export_lesson") {
-    return res
-      .status(200)
-      .json({ ok: true, reply: "Lesson export stub – not implemented yet." });
+  if (action === "teach_and_quiz") {
+    const raw = await callPromptService("teach_and_quiz", body);
+    logLlmPayloadSnippet(raw);
+    return res.json(buildTeachAndQuizResponse(body, raw));
   }
 
-  // Unknown action -> still 200 so Voiceflow doesn’t hard-fail
-  return res.status(200).json(
-    okFailPayload(`Unknown action: ${action || "(missing)"}`, {
-      debug_trace: "unknown_action",
-    })
-  );
-});
+  // generic fallback
+  const fallbackRaw = {
+    source: "echo",
+    action: action || "unknown",
+    payload: body,
+    ts: new Date().toISOString(),
+  };
 
-// Optional convenience endpoint (if you ever call it directly)
-app.post("/teach_and_quiz", (req, res) => {
-  if (!requireApiKey(req, res)) return;
-
-  const { body, raw, parseError } = parseIncoming(req);
-  if (parseError) {
-    log("error", "Invalid JSON on /teach_and_quiz", {
-      message: parseError.message,
-      rawSnippet: raw.slice(0, 240),
-    });
-    return res.status(200).json(
-      okFailPayload("Your request body was not valid JSON.", {
-        debug_trace: "teach_and_quiz_invalid_json",
-      })
-    );
-  }
-
-  const lesson = generateLessonPayload(body);
-  const quiz = generateQuizPayload({ ...body, lesson: lesson.lesson });
-
-  return res.status(200).json({
+  return res.json({
     ok: true,
-    reply: "Teach & Quiz ready.",
-    lessonTitle: lesson.lessonTitle,
-    lesson: lesson.lesson,
-    promptLesson: quiz.promptLesson,
-    quiz: quiz.quiz,
-    mcqCount: quiz.mcqCount,
-    tfCount: quiz.tfCount,
-    openCount: quiz.openCount,
+    API_OK: "true",
+    raw: fallbackRaw,
+    data: { raw: fallbackRaw },
   });
 });
 
 // ---------------------------------------------------------------------------
-// Start
+// 404 + error handlers
 // ---------------------------------------------------------------------------
 
-const server = app.listen(PORT, () => {
-  log("info", "Webhook server listening", { port: PORT });
-  debug("Webhook server listening (debug)", { port: PORT });
+app.use((req, res) => {
+  logDebug("404", { method: req.method, path: req.path });
+  res.status(404).json({
+    ok: false,
+    API_OK: "false",
+    error: "not_found",
+    method: req.method,
+    path: req.path,
+  });
 });
 
-process.on("SIGTERM", () => {
-  try {
-    server.close(() => {
-      closeResources();
-      process.exit(0);
-    });
-  } catch {
-    process.exit(0);
-  }
+app.use((err, req, res, _next) => {
+  log("error", "Unhandled error in request", {
+    path: req.path,
+    method: req.method,
+    message: err && err.message,
+    stack: err && err.stack,
+  });
+  res.status(500).json({
+    ok: false,
+    API_OK: "false",
+    error: "internal_error",
+    message: err && err.message ? err.message : "Unexpected error",
+  });
 });
 
-process.on("SIGINT", () => {
-  try {
-    server.close(() => {
-      closeResources();
-      process.exit(0);
+// ---------------------------------------------------------------------------
+// Server bootstrap – no auto-listen on require
+// ---------------------------------------------------------------------------
+
+let currentServer = null;
+
+function startServer(port) {
+  if (currentServer) return currentServer;
+
+  const listenPort = Number.parseInt(
+    port != null ? String(port) : String(DEFAULT_PORT),
+    10
+  );
+  const server = http.createServer(app);
+
+  server.listen(listenPort, () => {
+    log("info", "Webhook server listening", { port: listenPort });
+  });
+
+  server.on("error", (err) => {
+    log("error", "HTTP server error", {
+      message: err && err.message,
+      stack: err && err.stack,
     });
-  } catch {
-    process.exit(0);
-  }
-});
+  });
+
+  currentServer = server;
+  return server;
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+// Helpers expected by some tests.
+app.startServer = startServer;
+app.closeResources = closeResources;
+
+// Default export is the Express app (in-process handler).
+module.exports = app;
