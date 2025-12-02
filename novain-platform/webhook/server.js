@@ -1,17 +1,17 @@
-// novain-platform/webhook/server.js
+﻿// novain-platform/webhook/server.js
 // Deterministic webhook server with CI-friendly behaviour.
 //
 // Consolidated endpoints:
-//   POST /webhook           (action router; used by tests + legacy flows)
+//   POST /webhook           (action router; tests + legacy flows)
 //   POST /optimize_question (Voiceflow C_OptimizeQuestion)
 //   POST /teach_and_quiz    (Voiceflow C_TeachAndQuiz)
-//   POST /generate_quiz     (Voiceflow C_GenerateQuiz - optional)
+//   POST /generate_quiz     (optional)
 //   POST /generate_lesson   (optional)
 //
 // Notes:
 // - Auth is via x-api-key header if WEBHOOK_API_KEY or WEBHOOK_KEY is set.
-// - Keeps backwards compatibility with older APL_* response fields,
-//   but the canonical fields for your updated Voiceflow flows are API_*.
+// - Robust against invalid JSON from clients (Voiceflow raw body glitches).
+// - Supports base64 transport: question_for_api + question_encoding=base64
 
 "use strict";
 
@@ -60,19 +60,43 @@ function requireApiKey(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
-// Express app
+// Express app + body parsing (with invalid-JSON recovery)
 // ---------------------------------------------------------------------------
 
 const app = express();
 
-// capture raw body for potential HMAC; still parse JSON
+// Capture raw body (useful for debugging/HMAC) and attempt JSON parse.
 app.use(
   express.json({
+    limit: "2mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
+
+// If JSON parsing failed, don’t hard-fail the request.
+// Instead, continue with a “safe” body so Voiceflow doesn’t drop into failure path.
+app.use((err, req, _res, next) => {
+  // body-parser uses `type: 'entity.parse.failed'` for invalid JSON
+  if (err && err.type === "entity.parse.failed") {
+    const rawText = req.rawBody ? req.rawBody.toString("utf8") : "";
+    req.body = {
+      action: extractJsonStringField(rawText, "action") || "",
+      _json_parse_error: err.message || "invalid_json",
+      _raw_text: rawText,
+    };
+    return next();
+  }
+  return next(err);
+});
+
+function extractJsonStringField(rawText, fieldName) {
+  if (!rawText) return "";
+  const re = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*)"`);
+  const m = rawText.match(re);
+  return m && m[1] ? m[1] : "";
+}
 
 // ---------------------------------------------------------------------------
 // LLM stub + prompt service helpers
@@ -105,12 +129,31 @@ function makeStubRaw(kind, body) {
   return { ...base, source: "stub" };
 }
 
-async function callPromptService(kind, body) {
+function resolvePromptUrl(kind) {
   const promptUrl = process.env.PROMPT_URL;
-  if (!promptUrl) {
-    // No external prompt service configured: use deterministic stub
-    return makeStubRaw(kind, body);
+  if (!promptUrl) return "";
+
+  // If user set a full endpoint path, respect it as-is.
+  try {
+    const u = new URL(promptUrl);
+    const hasPath = u.pathname && u.pathname !== "/";
+    if (hasPath) return promptUrl;
+
+    // If it’s just a base URL, append a sensible default for teach_and_quiz.
+    if (kind === "teach_and_quiz") {
+      u.pathname = "/v1/teach-and-quiz";
+      return u.toString();
+    }
+    // Otherwise leave it base; your prompt service can route by action if it supports that.
+    return promptUrl;
+  } catch {
+    return promptUrl;
   }
+}
+
+async function callPromptService(kind, body) {
+  const promptUrl = resolvePromptUrl(kind);
+  if (!promptUrl) return makeStubRaw(kind, body);
 
   const payload = {
     action: kind,
@@ -135,9 +178,9 @@ async function callPromptService(kind, body) {
     }
 
     const raw =
-      (parsed && parsed.raw && typeof parsed.raw === "object"
+      parsed && parsed.raw && typeof parsed.raw === "object"
         ? parsed.raw
-        : parsed) || {};
+        : parsed || {};
 
     if (!raw.source) {
       raw.source =
@@ -159,14 +202,12 @@ async function callPromptService(kind, body) {
     log("error", "Error calling prompt service", {
       message: err && err.message,
     });
-    // Fall back to stub on error
     return makeStubRaw(kind, body);
   }
 }
 
 function logLlmPayloadSnippet(raw) {
   if (String(process.env.DEBUG_WEBHOOK).toLowerCase() !== "true") return;
-
   try {
     const snippet = JSON.stringify(raw).slice(0, 400);
     console.log("llm payload snippet:", snippet);
@@ -177,31 +218,20 @@ function logLlmPayloadSnippet(raw) {
 
 function closeResources() {
   try {
-    if (
-      http &&
-      http.globalAgent &&
-      typeof http.globalAgent.destroy === "function"
-    ) {
-      http.globalAgent.destroy();
-    }
-    if (
-      https &&
-      https.globalAgent &&
-      typeof https.globalAgent.destroy === "function"
-    ) {
-      https.globalAgent.destroy();
-    }
+    if (http?.globalAgent?.destroy) http.globalAgent.destroy();
+    if (https?.globalAgent?.destroy) https.globalAgent.destroy();
   } catch {
     // best-effort only
   }
 }
 
 // ---------------------------------------------------------------------------
-// Core business handlers (shared by /webhook and direct endpoints)
+// Core helpers (input decoding + response builders)
 // ---------------------------------------------------------------------------
 
 function pickQuestionFromBody(body) {
   const candidates = [
+    body && body.question_for_api, // preferred (safe transport)
     body && body.question,
     body && body.user_message,
     body && body.userMessage,
@@ -210,6 +240,7 @@ function pickQuestionFromBody(body) {
     body && body.optimized_question,
     body && body.optimizedQuestion,
   ];
+
   for (const c of candidates) {
     const s = String(c || "").trim();
     if (s) return s;
@@ -217,28 +248,72 @@ function pickQuestionFromBody(body) {
   return "";
 }
 
+function decodeQuestionIfNeeded(body, q) {
+  const encoding = String(body?.question_encoding || "")
+    .trim()
+    .toLowerCase();
+  if (encoding !== "base64") return q;
+
+  try {
+    return Buffer.from(String(q || ""), "base64").toString("utf8");
+  } catch {
+    return q;
+  }
+}
+
 function buildOptimizeQuestionResponse(body, raw) {
-  const original = pickQuestionFromBody(body);
+  // If we hit invalid JSON, force a clean “needs_clarify” response instead of failing the request.
+  if (body && body._json_parse_error) {
+    const clarify_question =
+      "Your request JSON couldn’t be parsed (usually due to quotes/newlines in the question). " +
+      "Please retry — or use the base64 flow (question_for_api + question_encoding=base64).";
+
+    return {
+      ok: true,
+      API_OK: "true",
+      raw,
+      component_result: "needs_clarify",
+      optimized_question: "",
+      agent_reply: clarify_question,
+      clarify_reason: "invalid_json",
+      needs_clarify: true,
+      clarify_question,
+      API_Response: clarify_question,
+      data: {
+        raw,
+        component_result: "needs_clarify",
+        optimized_question: "",
+        agent_reply: clarify_question,
+        clarify_reason: "invalid_json",
+        needs_clarify: true,
+        clarify_question,
+      },
+    };
+  }
+
+  const original = decodeQuestionIfNeeded(body, pickQuestionFromBody(body));
   const trimmed = String(original || "").trim();
 
   let component_result;
   let optimized_question = trimmed;
   let agent_reply;
   let clarify_reason = null;
+  let needs_clarify = false;
+  let clarify_question = "";
 
   if (!trimmed || trimmed.length < 10) {
     component_result = "needs_clarify";
-    agent_reply =
-      "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
+    needs_clarify = true;
     clarify_reason = "too_short_or_empty";
+    clarify_question =
+      "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
+    agent_reply = clarify_question;
   } else {
     component_result = "success";
-
     const normalized = trimmed.replace(/\s+/g, " ");
     optimized_question = normalized.endsWith("?")
       ? normalized
       : normalized + "?";
-
     agent_reply =
       "Got it — I’ll turn this into a clean lesson and (optionally) a quiz.";
   }
@@ -251,6 +326,8 @@ function buildOptimizeQuestionResponse(body, raw) {
     optimized_question,
     agent_reply,
     clarify_reason,
+    needs_clarify,
+    clarify_question,
     API_Response: agent_reply,
     data: {
       raw,
@@ -258,51 +335,53 @@ function buildOptimizeQuestionResponse(body, raw) {
       optimized_question,
       agent_reply,
       clarify_reason,
+      needs_clarify,
+      clarify_question,
     },
   };
 }
 
 function buildQuizEnvelope(question) {
   const trimmedQuestion = String(question || "").trim() || "your question";
-
-  const mcq = [
-    {
-      type: "mcq",
-      question:
-        "What is the FIRST thing you should clarify when tackling a strategy question?",
-      options: [
-        "The tools and software you will use",
-        "The business objective and success metrics",
-        "The colour of the slide deck",
-        "The company logo guidelines",
-      ],
-      answer: "The business objective and success metrics",
-    },
-  ];
-
-  const tf = [
-    {
-      type: "tf",
-      question:
-        "True or false: You should pick as many strategic options as possible and try them all at once.",
-      answer: "False",
-    },
-  ];
-
-  const open = [
-    {
-      type: "open",
-      question:
-        "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks.",
-    },
-  ];
-
-  return { question: trimmedQuestion, mcq, tf, open };
+  return {
+    question: trimmedQuestion,
+    mcq: [
+      {
+        type: "mcq",
+        question:
+          "What is the FIRST thing you should clarify when tackling a strategy question?",
+        options: [
+          "The tools and software you will use",
+          "The business objective and success metrics",
+          "The colour of the slide deck",
+          "The company logo guidelines",
+        ],
+        answer: "The business objective and success metrics",
+      },
+    ],
+    tf: [
+      {
+        type: "tf",
+        question:
+          "True or false: You should pick as many strategic options as possible and try them all at once.",
+        answer: "False",
+      },
+    ],
+    open: [
+      {
+        type: "open",
+        question:
+          "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks.",
+      },
+    ],
+  };
 }
 
 function buildTeachAndQuizResponse(body, raw) {
-  const question = pickQuestionFromBody(body) || "your business question";
-  const trimmedQuestion = String(question).trim() || "your question";
+  const q0 =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "your business question";
+  const trimmedQuestion = String(q0).trim() || "your question";
 
   const strategy_answer =
     `Here is a simple, high-level way I would approach "${trimmedQuestion}". ` +
@@ -315,6 +394,7 @@ function buildTeachAndQuizResponse(body, raw) {
     `In this lesson, we’ll walk through a structured way to think about "${trimmedQuestion}". ` +
     "We’ll cover: (1) clarifying the business goal, (2) mapping stakeholders and constraints, " +
     "(3) generating strategic options, and (4) choosing a focused experiment you can run quickly.";
+
   const promptLesson =
     `You are a business strategy co-pilot. Help me reason about "${trimmedQuestion}" step-by-step. ` +
     "Ask clarifying questions where needed, then propose a simple plan with next actions.";
@@ -341,7 +421,7 @@ function buildTeachAndQuizResponse(body, raw) {
     component_result,
     strategy_answer,
 
-    // Canonical fields for your Voiceflow blocks (API_*)
+    // Canonical fields for Voiceflow blocks (API_*)
     API_LessonTitle: lessonTitle,
     API_LessonContent: lessonContent,
     API_PromptLesson: promptLesson,
@@ -351,7 +431,7 @@ function buildTeachAndQuizResponse(body, raw) {
     API_Quiz_JSON,
     API_Response: strategy_answer,
 
-    // Optional JSON slots (useful later)
+    // Optional JSON slots
     API_Lesson_JSON: JSON.stringify({
       title: lessonTitle,
       content: lessonContent,
@@ -384,7 +464,9 @@ function buildTeachAndQuizResponse(body, raw) {
 }
 
 function buildGenerateQuizResponse(body, raw) {
-  const question = pickQuestionFromBody(body) || "Quiz stub question";
+  const question =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "Quiz stub question";
   const quizEnvelope = buildQuizEnvelope(question);
   const mcqCount = quizEnvelope.mcq.length;
 
@@ -392,11 +474,9 @@ function buildGenerateQuizResponse(body, raw) {
     ok: true,
     API_OK: "true",
     raw,
-    // Keep the old smoke-test-friendly fields:
     mcq: quizEnvelope.mcq,
     mcqCount,
     reply: "Stub MCQ quiz generated",
-    // Canonical Voiceflow fields:
     API_MCQ: quizEnvelope.mcq.length,
     API_TF: quizEnvelope.tf.length,
     API_OPEN: quizEnvelope.open.length,
@@ -412,7 +492,9 @@ function buildGenerateQuizResponse(body, raw) {
 }
 
 function buildGenerateLessonResponse(body, raw) {
-  const question = pickQuestionFromBody(body) || "Lesson stub question";
+  const question =
+    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
+    "Lesson stub question";
   const lessonText =
     (body && body.lesson && String(body.lesson)) ||
     `Stub lesson generated for: ${question}`;
@@ -424,16 +506,12 @@ function buildGenerateLessonResponse(body, raw) {
     lesson: lessonText,
     reply: lessonText,
     API_Response: lessonText,
-    data: {
-      raw,
-      lesson: lessonText,
-      reply: lessonText,
-    },
+    data: { raw, lesson: lessonText, reply: lessonText },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Basic diagnostics endpoints
+// Diagnostics
 // ---------------------------------------------------------------------------
 
 app.get("/health", (req, res) => {
@@ -455,19 +533,19 @@ app.get("/diagnostics/env", (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Direct endpoints (what your Voiceflow API blocks are calling)
+// Direct endpoints (Voiceflow API blocks)
 // ---------------------------------------------------------------------------
 
 app.post("/optimize_question", requireApiKey, async (req, res) => {
   const body = req.body || {};
-  const raw = await callPromptService("optimize_question", body);
+  const raw = await callPromptService("optimize_question", body); // will stub if PROMPT_URL missing
   logLlmPayloadSnippet(raw);
   return res.json(buildOptimizeQuestionResponse(body, raw));
 });
 
 app.post("/teach_and_quiz", requireApiKey, async (req, res) => {
   const body = req.body || {};
-  const raw = await callPromptService("teach_and_quiz", body);
+  const raw = await callPromptService("teach_and_quiz", body); // will stub if PROMPT_URL missing
   logLlmPayloadSnippet(raw);
   return res.json(buildTeachAndQuizResponse(body, raw));
 });
@@ -494,211 +572,69 @@ app.post("/webhook", requireApiKey, async (req, res) => {
   const body = req.body || {};
   const action = body.action || body.type || "";
 
-  // ---- ping (used in smoke + verify_in_process) ---------------------------
+  // ping (used in smoke + verify_in_process)
   if (action === "ping") {
-    const port = Number(process.env.PORT || DEFAULT_PORT);
+    const port =
+      currentServer &&
+      currentServer.address() &&
+      typeof currentServer.address() === "object"
+        ? currentServer.address().port
+        : Number(process.env.PORT || DEFAULT_PORT);
     return res.json({ ok: true, API_OK: "true", reply: "pong", port });
   }
 
-  // ---- llm_elicit / invoke_component (regression mirror tests) ------------
+  // If JSON was invalid, return a deterministic needs_clarify response
+  if (body && body._json_parse_error) {
+    const raw = makeStubRaw("invalid_json", body);
+    const clarify_question =
+      "Your request JSON couldn’t be parsed (commonly caused by quotes/newlines in injected variables). " +
+      "Use base64 transport: set question_for_api (base64) + question_encoding='base64'.";
+    return res.json({
+      ok: true,
+      API_OK: "true",
+      raw,
+      component_result: "needs_clarify",
+      optimized_question: "",
+      agent_reply: clarify_question,
+      clarify_reason: "invalid_json",
+      needs_clarify: true,
+      clarify_question,
+      data: { raw },
+    });
+  }
+
+  // regression mirror tests
   if (action === "llm_elicit" || action === "invoke_component") {
     const raw = await callPromptService(action, body);
     logLlmPayloadSnippet(raw);
     return res.json({ ok: true, API_OK: "true", raw, data: { raw } });
   }
 
-  // ---- generate_lesson (best-effort smoke) -------------------------------
   if (action === "generate_lesson") {
     const raw = await callPromptService("generate_lesson", body);
     logLlmPayloadSnippet(raw);
     return res.json(buildGenerateLessonResponse(body, raw));
   }
 
-  // ---- generate_quiz (best-effort smoke) ---------------------------------
   if (action === "generate_quiz") {
     const raw = await callPromptService("generate_quiz", body);
     logLlmPayloadSnippet(raw);
     return res.json(buildGenerateQuizResponse(body, raw));
   }
 
-  // ---- optimize_question (C_OptimizeQuestion) ----------------------------
   if (action === "optimize_question") {
     const raw = await callPromptService("optimize_question", body);
     logLlmPayloadSnippet(raw);
     return res.json(buildOptimizeQuestionResponse(body, raw));
   }
 
-  // ---- teach_and_quiz (C_TeachAndQuiz orchestrator) ----------------------
   if (action === "teach_and_quiz") {
     const raw = await callPromptService("teach_and_quiz", body);
     logLlmPayloadSnippet(raw);
     return res.json(buildTeachAndQuizResponse(body, raw));
   }
 
-  // ---- optimize_question (C_OptimizeQuestion) ----------------------------
-
-  if (action === "optimize_question") {
-    const raw = await callPromptService("optimize_question", body);
-    logLlmPayloadSnippet(raw);
-
-    // Prefer explicit question field, fall back to last_utterance.
-    const original =
-      (body && body.question) ||
-      (body && body.last_utterance) ||
-      (body && body.lastUtterance) ||
-      "";
-
-    const trimmed = String(original || "").trim();
-
-    let component_result;
-    let optimized_question = trimmed;
-    let agent_reply;
-    let clarify_reason = null;
-
-    if (!trimmed || trimmed.length < 10) {
-      component_result = "needs_clarify";
-      agent_reply =
-        "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
-      clarify_reason = "too_short_or_empty";
-    } else {
-      component_result = "success";
-
-      // Simple, deterministic clean-up: ensure it ends with a question mark
-      // and remove excess whitespace.
-      const normalized = trimmed.replace(/\s+/g, " ");
-      optimized_question = normalized.endsWith("?")
-        ? normalized
-        : normalized + "?";
-
-      agent_reply =
-        "Got it, let me work on that now. I’ll turn this into a lesson and a quiz for you.";
-    }
-
-    const payload = {
-      ok: true,
-      raw,
-      component_result,
-      optimized_question,
-      agent_reply,
-      clarify_reason,
-      data: {
-        raw,
-        component_result,
-        optimized_question,
-        agent_reply,
-        clarify_reason,
-      },
-    };
-
-    return res.json(payload);
-  }
-
-  // ---- teach_and_quiz (C_TeachAndQuiz orchestrator) ----------------------
-
-  if (action === "teach_and_quiz") {
-    const raw = await callPromptService("teach_and_quiz", body);
-    logLlmPayloadSnippet(raw);
-
-    const question =
-      (body && body.question) ||
-      (body && body.optimized_question) ||
-      (body && body.last_utterance) ||
-      "your business question";
-
-    const trimmedQuestion = String(question || "").trim() || "your question";
-
-    const strategy_answer =
-      `Here is a simple, high-level way I would approach "${trimmedQuestion}". ` +
-      "First, clarify the objective and success metrics. Second, analyze the current state " +
-      "and constraints. Third, identify 2-3 strategic options, compare impact vs. effort, " +
-      "and choose one to test. Finally, define concrete next steps for the next 2–4 weeks.";
-
-    const lessonTitle = `Strategy lesson for: ${trimmedQuestion}`;
-    const lessonContent =
-      `In this lesson, we’ll walk through a structured way to think about "${trimmedQuestion}". ` +
-      "We’ll cover: (1) clarifying the business goal, (2) mapping stakeholders and constraints, " +
-      "(3) generating strategic options, and (4) choosing a focused experiment you can run quickly.";
-    const promptLesson =
-      `You are a business strategy co-pilot. Help me reason about "${trimmedQuestion}" step-by-step. ` +
-      "Ask clarifying questions where needed, then propose a simple plan with next actions.";
-
-    // Very small, deterministic quiz stub.
-    const mcq = [
-      {
-        type: "mcq",
-        question:
-          "What is the FIRST thing you should clarify when tackling this strategy question?",
-        options: [
-          "The tools and software you will use",
-          "The business objective and success metrics",
-          "The colour of the slide deck",
-          "The company logo guidelines",
-        ],
-        answer: "The business objective and success metrics",
-      },
-    ];
-
-    const tf = [
-      {
-        type: "tf",
-        question:
-          "True or false: You should pick as many strategic options as possible and try them all at once.",
-        answer: "False",
-      },
-    ];
-
-    const open = [
-      {
-        type: "open",
-        question:
-          "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks related to this question.",
-      },
-    ];
-
-    const quizEnvelope = {
-      question: trimmedQuestion,
-      mcq,
-      tf,
-      open,
-    };
-
-    const APL_MCQ = mcq.length;
-    const APL_TF = tf.length;
-    const APL_OPEN = open.length;
-    const APL_Quiz_JSON = JSON.stringify(quizEnvelope);
-
-    const component_result = "success";
-
-    const payload = {
-      ok: true,
-      raw,
-      component_result,
-      strategy_answer,
-      APL_LessonTitle: lessonTitle,
-      APL_lesson_content: lessonContent,
-      APL_PromptLesson: promptLesson,
-      APL_MCQ,
-      APL_TF,
-      APL_OPEN,
-      APL_Quiz_JSON,
-      data: {
-        raw,
-        component_result,
-        strategy_answer,
-        APL_LessonTitle: lessonTitle,
-        APL_lesson_content: lessonContent,
-        APL_PromptLesson: promptLesson,
-        APL_MCQ,
-        APL_TF,
-        APL_OPEN,
-        APL_Quiz_JSON,
-      },
-    };
-
-    return res.json(payload);
-  }
-
-  // ---- generic fallback ---------------------------------------------------
+  // generic fallback
   const fallbackRaw = {
     source: "echo",
     action: action || "unknown",
@@ -774,7 +710,6 @@ function startServer(port) {
   return server;
 }
 
-// When run directly: "node novain-platform/webhook/server.js"
 if (require.main === module) {
   startServer();
 }
