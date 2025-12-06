@@ -143,7 +143,7 @@ function makeStubRaw(kind, body) {
   return { ...base, source: "stub" };
 }
 
-function resolvePromptUrl(kind) {
+function resolvePromptUrl(_kind) {
   const promptUrl = process.env.PROMPT_URL;
   if (!promptUrl) return "";
 
@@ -152,12 +152,11 @@ function resolvePromptUrl(kind) {
     const hasPath = u.pathname && u.pathname !== "/";
     if (hasPath) return promptUrl;
 
-    // If it’s just a base URL, append a sensible default for teach_and_quiz.
-    if (kind === "teach_and_quiz") {
-      u.pathname = "/v1/teach-and-quiz";
-      return u.toString();
-    }
-    return promptUrl;
+    // If PROMPT_URL is a bare base URL, route all prompt-agent calls to its single
+    // cannonical entrypoint. The prompt service decides behavior based on the
+    // request payload (e.g., action/mode fields).
+    u.pathname = "/v1/teach-and-quiz";
+    return u.toString();
   } catch {
     return promptUrl;
   }
