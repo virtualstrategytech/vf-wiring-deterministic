@@ -196,3 +196,6 @@ backup-do not commit/
 *.heapsnapshot.*
 # Backup files that include timestamps/suffixes
 *.bak*
+*.pid
+tests/*.pid
+tests/webhook.pid
