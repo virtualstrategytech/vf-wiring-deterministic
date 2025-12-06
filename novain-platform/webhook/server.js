@@ -1,36 +1,80 @@
-﻿// novain-platform/webhook/server.js
-// Deterministic webhook server with CI-friendly behaviour.
-//
-// Consolidated endpoints:
-//   POST /webhook           (action router; tests + legacy flows)
-//   POST /optimize_question (Voiceflow C_OptimizeQuestion)
-//   POST /teach_and_quiz    (Voiceflow C_TeachAndQuiz)
-//   POST /generate_quiz     (optional)
-//   POST /generate_lesson   (optional)
-//
-// NEW endpoints for two-branch + exam:
-//   POST /prompt_lesson     (Agent 2 prompt-engineering lesson)
-//   POST /generate_exam     (10 MCQ + 3 TF + 1 open, mode-aware)
-//   POST /grade_open        (automated feedback + model answer)
-//
-// Notes:
-// - Auth is via x-api-key header if WEBHOOK_API_KEY or WEBHOOK_KEY is set.
-// - Robust against invalid JSON from clients (Voiceflow raw body glitches).
-// - Supports base64 transport: question_for_api + question_encoding=base64
+﻿/**
+ * vf-webhook-service server.js
+ *
+ * Goals:
+ * - Deterministic, Voiceflow-safe responses (no random crashes on upstream failures)
+ * - UPSTREAM_TIMEOUT_MS via AbortController
+ * - UPSTREAM_MAX_RETRIES + UPSTREAM_RETRY_BASE_MS exponential backoff
+ *   - retry only on 429 / 5xx
+ * - Optional per-endpoint upstream URL overrides (future-proofing)
+ *
+ * Environment variables (recommended):
+ *   WEBHOOK_API_KEY            (required in prod; client sends header x-api-key)
+ *   NODE_ENV                   ("production" / "development")
+ *
+ *   OPENAI_API_KEY             (optional if you want local generation/grading)
+ *   OPENAI_MODEL               (default: gpt-4o-mini)
+ *
+ *   UPSTREAM_TIMEOUT_MS        (default: 12000)
+ *   UPSTREAM_MAX_RETRIES       (default: 2)
+ *   UPSTREAM_RETRY_BASE_MS     (default: 350)
+ *
+ *   UPSTREAM_ENABLED           ("true"/"false", default false)
+ *   BUSINESS_URL               (optional base upstream)
+ *   PROMPT_URL                 (optional base upstream)
+ *   RETRIEVAL_URL              (optional base upstream)
+ *
+ *   Per-endpoint overrides (optional):
+ *     UPSTREAM_URL_OPTIMIZE_QUESTION
+ *     UPSTREAM_URL_TEACH_AND_QUIZ
+ *     UPSTREAM_URL_PROMPT_LESSON
+ *     UPSTREAM_URL_GENERATE_EXAM
+ *     UPSTREAM_URL_GRADE_OPEN
+ */
 
 "use strict";
 
-const http = require("http");
-const https = require("https");
 const express = require("express");
 
-// ---------------------------------------------------------------------------
-// Env + logging
-// ---------------------------------------------------------------------------
+const app = express();
+app.disable("x-powered-by");
+app.use(express.json({ limit: "1mb" }));
 
-const NODE_ENV = process.env.NODE_ENV || "local";
-const LOG_LEVEL = process.env.LOG_LEVEL || "info";
-const DEFAULT_PORT = Number.parseInt(process.env.PORT || "3000", 10);
+// -------------------------
+// Env / config
+// -------------------------
+
+const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
+const IS_PROD = NODE_ENV === "production";
+
+const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "";
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+const UPSTREAM_TIMEOUT_MS = parseInt(
+  process.env.UPSTREAM_TIMEOUT_MS || "12000",
+  10
+);
+const UPSTREAM_MAX_RETRIES = parseInt(
+  process.env.UPSTREAM_MAX_RETRIES || "2",
+  10
+);
+const UPSTREAM_RETRY_BASE_MS = parseInt(
+  process.env.UPSTREAM_RETRY_BASE_MS || "350",
+  10
+);
+
+const UPSTREAM_ENABLED =
+  String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
+
+const BUSINESS_URL = (process.env.BUSINESS_URL || "").trim();
+const PROMPT_URL = (process.env.PROMPT_URL || "").trim();
+const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
+
+// -------------------------
+// Logging
+// -------------------------
 
 function log(level, msg, extra) {
   const payload = {
@@ -38,1336 +82,902 @@ function log(level, msg, extra) {
     level,
     env: NODE_ENV,
     msg,
-    ...(extra || {}),
+    ...(extra && typeof extra === "object" ? extra : {}),
   };
+  // Render likes stdout logs.
   console.log(JSON.stringify(payload));
 }
 
-function logDebug(msg, extra) {
-  if (LOG_LEVEL === "debug") log("debug", msg, extra);
-}
-
-function getWebhookKey() {
-  return process.env.WEBHOOK_API_KEY || process.env.WEBHOOK_KEY || "";
-}
+// -------------------------
+// Auth middleware
+// -------------------------
 
 function requireApiKey(req, res, next) {
-  const requiredKey = getWebhookKey();
-  if (!requiredKey) return next();
+  // allow health/root without key
+  if (req.path === "/health" || req.path === "/") return next();
 
-  const apiKeyHeader = req.get("x-api-key") || "";
-  if (apiKeyHeader !== requiredKey) {
-    return res
-      .status(401)
-      .json({ ok: false, API_OK: "false", error: "unauthorized" });
+  // In dev, don’t block people by default
+  if (!IS_PROD && !WEBHOOK_API_KEY) return next();
+
+  if (!WEBHOOK_API_KEY) {
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "WEBHOOK_API_KEY is not configured on the server",
+    });
   }
+
+  const key =
+    req.header("x-api-key") ||
+    req.header("X-API-Key") ||
+    req.header("X-API-KEY") ||
+    "";
+  if (key !== WEBHOOK_API_KEY) {
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "Invalid API key",
+    });
+  }
+
   return next();
 }
 
-// ---------------------------------------------------------------------------
-// Express app + body parsing (with invalid-JSON recovery)
-// ---------------------------------------------------------------------------
+app.use(requireApiKey);
 
-const app = express();
+// -------------------------
+// Helpers: timing, retry, HTTP
+// -------------------------
 
-// Capture raw body and attempt JSON parse.
-app.use(
-  express.json({
-    limit: "2mb",
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
-
-// If JSON parsing failed, don’t hard-fail the request.
-// Instead, continue with a “safe” body so Voiceflow doesn’t drop into failure path.
-app.use((err, req, _res, next) => {
-  if (err && err.type === "entity.parse.failed") {
-    const rawText = req.rawBody ? req.rawBody.toString("utf8") : "";
-    req.body = {
-      action: extractJsonStringField(rawText, "action") || "",
-      mode: extractJsonStringField(rawText, "mode") || "",
-      learning_mode: extractJsonStringField(rawText, "learning_mode") || "",
-      question_for_api:
-        extractJsonStringField(rawText, "question_for_api") || "",
-      _json_parse_error: err.message || "invalid_json",
-      _raw_text: rawText,
-    };
-    return next();
-  }
-  return next(err);
-});
-
-function extractJsonStringField(rawText, fieldName) {
-  if (!rawText) return "";
-  const re = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*)"`);
-  const m = rawText.match(re);
-  return m && m[1] ? m[1] : "";
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ---------------------------------------------------------------------------
-// LLM stub + prompt service helpers
-// ---------------------------------------------------------------------------
-
-function makeStubRaw(kind, body) {
-  const base = {
-    question: body && body.question ? String(body.question) : "",
-    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
-    component: body && body.component ? String(body.component) : undefined,
-    ts: new Date().toISOString(),
-    kind,
-  };
-
-  if (kind === "invoke_component")
-    return { ...base, source: "invoke_component_stub" };
-  if (kind === "generate_lesson")
-    return { ...base, mode: "lesson", source: "lesson_stub" };
-  if (kind === "generate_quiz")
-    return { ...base, mode: "quiz", source: "quiz_stub" };
-  if (kind === "optimize_question")
-    return {
-      ...base,
-      mode: "optimize_question",
-      source: "optimize_question_stub",
-    };
-  if (kind === "teach_and_quiz")
-    return { ...base, mode: "teach_and_quiz", source: "teach_and_quiz_stub" };
-  if (kind === "prompt_lesson")
-    return { ...base, mode: "prompt_lesson", source: "prompt_lesson_stub" };
-  if (kind === "generate_exam")
-    return { ...base, mode: "generate_exam", source: "generate_exam_stub" };
-  if (kind === "grade_open")
-    return { ...base, mode: "grade_open", source: "grade_open_stub" };
-
-  return { ...base, source: "stub" };
+function clampNumber(n, min, max) {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
 }
 
-function resolvePromptUrl(_kind) {
-  const promptUrl = process.env.PROMPT_URL;
-  if (!promptUrl) return "";
+function shouldRetryStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const u = new URL(promptUrl);
-    const hasPath = u.pathname && u.pathname !== "/";
-    if (hasPath) return promptUrl;
-
-    // If PROMPT_URL is a bare base URL, route all prompt-agent calls to its single
-    // cannonical entrypoint. The prompt service decides behavior based on the
-    // request payload (e.g., action/mode fields).
-    u.pathname = "/v1/teach-and-quiz";
-    return u.toString();
-  } catch {
-    return promptUrl;
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    return resp;
+  } finally {
+    clearTimeout(id);
   }
 }
 
-async function callPromptService(kind, body) {
-  const promptUrl = resolvePromptUrl(kind);
-  if (!promptUrl) return makeStubRaw(kind, body);
+async function fetchWithRetry(url, options = {}, cfg = {}) {
+  const timeoutMs = clampNumber(
+    cfg.timeoutMs ?? UPSTREAM_TIMEOUT_MS,
+    1000,
+    120000
+  );
+  const maxRetries = clampNumber(cfg.maxRetries ?? UPSTREAM_MAX_RETRIES, 0, 10);
+  const baseMs = clampNumber(cfg.baseMs ?? UPSTREAM_RETRY_BASE_MS, 50, 60000);
 
-  const payload = {
-    action: kind,
-    mode: body && body.mode ? String(body.mode) : "",
-    learning_mode: body && body.learning_mode ? String(body.learning_mode) : "",
-    question: body && body.question ? String(body.question) : "",
-    tenantId: body && body.tenantId ? String(body.tenantId) : "default",
-    component: body && body.component ? String(body.component) : undefined,
-  };
+  let last = null;
 
-  try {
-    const resp = await globalThis.fetch(promptUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let resp;
+    let text = "";
 
-    const text = await resp.text();
-    let parsed;
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = { raw: text };
+      resp = await fetchWithTimeout(url, options, timeoutMs);
+      text = await resp.text();
+
+      if (resp.ok) {
+        return { ok: true, status: resp.status, text, headers: resp.headers };
+      }
+
+      // Only retry on 429/5xx (explicit requirement)
+      if (shouldRetryStatus(resp.status) && attempt < maxRetries) {
+        const backoff = Math.min(baseMs * Math.pow(2, attempt), 8000);
+        log("warn", "Upstream non-2xx; retrying", {
+          url,
+          status: resp.status,
+          attempt,
+          backoff_ms: backoff,
+        });
+        await sleep(backoff);
+        continue;
+      }
+
+      // Non-retryable non-2xx
+      last = { ok: false, status: resp.status, text };
+      break;
+    } catch (err) {
+      // Do NOT retry on network/timeout errors per the requirement ("only retry on 429/5xx")
+      const name = err && err.name ? err.name : "Error";
+      const message = err && err.message ? err.message : String(err);
+      last = { ok: false, status: 0, text: "", error: `${name}: ${message}` };
+
+      log("error", "Upstream request failed (no retry per policy)", {
+        url,
+        attempt,
+        error: last.error,
+      });
+      break;
     }
+  }
 
-    const raw =
-      parsed && parsed.raw && typeof parsed.raw === "object"
-        ? parsed.raw
-        : parsed || {};
-
-    if (!raw.source) {
-      raw.source =
-        kind === "invoke_component"
-          ? "invoke_component_default"
-          : kind === "generate_lesson"
-            ? "lesson_default"
-            : kind === "generate_quiz"
-              ? "quiz_default"
-              : kind === "optimize_question"
-                ? "optimize_question_default"
-                : kind === "teach_and_quiz"
-                  ? "teach_and_quiz_default"
-                  : kind === "prompt_lesson"
-                    ? "prompt_lesson_default"
-                    : kind === "generate_exam"
-                      ? "generate_exam_default"
-                      : kind === "grade_open"
-                        ? "grade_open_default"
-                        : "remote_llm";
+  return (
+    last || {
+      ok: false,
+      status: 0,
+      text: "",
+      error: "Unknown upstream failure",
     }
-
-    return raw;
-  } catch (err) {
-    log("error", "Error calling prompt service", {
-      message: err && err.message,
-    });
-    return makeStubRaw(kind, body);
-  }
+  );
 }
 
-function logLlmPayloadSnippet(raw) {
-  if (String(process.env.DEBUG_WEBHOOK).toLowerCase() !== "true") return;
+function jsonOrNull(s) {
   try {
-    const snippet = JSON.stringify(raw).slice(0, 400);
-    console.log("llm payload snippet:", snippet);
+    return JSON.parse(s);
   } catch {
-    console.log("llm payload snippet: [unserializable]");
+    return null;
   }
 }
 
-function closeResources() {
-  try {
-    if (http?.globalAgent?.destroy) http.globalAgent.destroy();
-    if (https?.globalAgent?.destroy) https.globalAgent.destroy();
-  } catch {
-    // best-effort only
-  }
+function safeTrim(s, max = 3500) {
+  if (typeof s !== "string") return "";
+  if (s.length <= max) return s;
+  return s.slice(0, max) + "…";
 }
 
-// ---------------------------------------------------------------------------
-// Core helpers (input decoding + response builders)
-// ---------------------------------------------------------------------------
+// -------------------------
+// Deterministic Voiceflow-safe envelopes
+// -------------------------
 
-function pickQuestionFromBody(body) {
-  const candidates = [
-    body && body.question_for_api,
-    body && body.question,
-    body && body.user_message,
-    body && body.userMessage,
-    body && body.last_utterance,
-    body && body.lastUtterance,
-    body && body.optimized_question,
-    body && body.optimizedQuestion,
-    body && body.confirmed_question,
-    body && body.confirmedQuestion,
-  ];
-
-  for (const c of candidates) {
-    const s = String(c || "").trim();
-    if (s) return s;
-  }
-  return "";
-}
-
-function decodeQuestionIfNeeded(body, q) {
-  const encoding = String(body?.question_encoding || "")
-    .trim()
-    .toLowerCase();
-  if (encoding !== "base64") return q;
-
-  try {
-    return Buffer.from(String(q || ""), "base64").toString("utf8");
-  } catch {
-    return q;
-  }
-}
-
-function normalizeMode(body) {
-  const m = String(body?.learning_mode || body?.mode || body?.exam_mode || "")
-    .trim()
-    .toLowerCase();
-
-  if (
-    m === "prompt" ||
-    m === "prompt_engineering" ||
-    m === "promptlesson" ||
-    m === "prompt_lesson"
-  ) {
-    return "prompt";
-  }
-  // default
-  return "business";
-}
-
-function buildNeedsClarifyResponse(raw, reason) {
-  const clarify_question =
-    "Your request JSON couldn’t be parsed (usually due to quotes/newlines in variables). " +
-    "Please retry — or use base64 transport (question_for_api + question_encoding=base64).";
+function okEnvelope(extra = {}) {
   return {
     ok: true,
-    API_OK: "true",
-    raw,
-    component_result: "needs_clarify",
-    needs_clarify: true,
-    clarify_reason: reason || "invalid_json",
-    clarify_question,
-    agent_reply: clarify_question,
-    API_Response: clarify_question,
-    data: { raw },
-  };
-}
-
-function buildOptimizeQuestionResponse(body, raw) {
-  if (body && body._json_parse_error) {
-    return buildNeedsClarifyResponse(raw, "invalid_json");
-  }
-
-  const original = decodeQuestionIfNeeded(body, pickQuestionFromBody(body));
-  const trimmed = String(original || "").trim();
-
-  let component_result;
-  let optimized_question = trimmed;
-  let agent_reply;
-  let clarify_reason = null;
-  let needs_clarify = false;
-  let clarify_question = "";
-
-  if (!trimmed || trimmed.length < 10) {
-    component_result = "needs_clarify";
-    needs_clarify = true;
-    clarify_reason = "too_short_or_empty";
-    clarify_question =
-      "I want to be sure I understand. Could you restate your question in one clear sentence or add a bit more detail?";
-    agent_reply = clarify_question;
-  } else {
-    component_result = "success";
-    const normalized = trimmed.replace(/\s+/g, " ");
-    optimized_question = normalized.endsWith("?")
-      ? normalized
-      : normalized + "?";
-    agent_reply =
-      "Got it — I’ll turn this into a clean lesson and (optionally) a quiz.";
-  }
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    component_result,
-    optimized_question,
-    agent_reply,
-    clarify_reason,
-    needs_clarify,
-    clarify_question,
-    API_Response: agent_reply,
-    data: {
-      raw,
-      component_result,
-      optimized_question,
-      agent_reply,
-      clarify_reason,
-      needs_clarify,
-      clarify_question,
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Agent 2: PromptLesson object (structured)
-// ---------------------------------------------------------------------------
-
-function buildPromptLessonObject(mode, question) {
-  const q = String(question || "").trim() || "your question";
-  const isPrompt = mode === "prompt";
-
-  const title = isPrompt
-    ? `Prompt engineering lesson for: ${q}`
-    : `Prompting helper for: ${q}`;
-
-  const goal = isPrompt
-    ? "Learn a repeatable prompt pattern to get high-quality strategy output for this specific problem."
-    : "Use a structured prompt to get clearer strategy output.";
-
-  const framework = [
-    "Role: who the AI should act as",
-    "Context: what matters, what’s known, what’s unknown",
-    "Task: what you want produced (analysis + recommendation)",
-    "Constraints: time, scope, assumptions, exclusions",
-    "Output format: headings, bullets, tables, step-by-step",
-    "Iteration: ask clarifying questions before answering when needed",
-  ];
-
-  const example_prompt =
-    `You are a senior ${isPrompt ? "prompt engineer + strategy consultant" : "strategy consultant"}. ` +
-    `My question: "${q}". ` +
-    `First ask up to 3 clarifying questions if needed. Then produce:\n` +
-    `1) Objective & success metrics\n2) Key assumptions\n3) 3 strategic options (impact vs effort)\n` +
-    `4) Recommended option + 2-week experiment plan\n5) Risks + mitigations\n` +
-    `Output in clear headings and bullet points. Keep it actionable.`;
-
-  const bad_prompt = `Help with ${q}.`;
-
-  const improved_prompt =
-    `Act as a strategy consultant. Question: "${q}". ` +
-    `Give me: objectives, KPIs, constraints, options, recommendation, and a 2-week experiment plan. ` +
-    `Ask clarifying questions if anything is missing. Use headings.`;
-
-  const checklist = isPrompt
-    ? [
-        "Did you specify the role?",
-        "Did you request clarifying questions first?",
-        "Did you define the output format (headings/bullets)?",
-        "Did you include constraints (time, scope, assumptions)?",
-        "Did you request an experiment plan with metrics?",
-      ]
-    : [
-        "Ask for objectives + KPIs explicitly",
-        "Ask for assumptions/constraints",
-        "Ask for options and recommendation",
-        "Ask for next steps with a short timeline",
-      ];
-
-  return {
-    title,
-    goal,
-    framework,
-    example_prompt,
-    bad_prompt,
-    improved_prompt,
-    checklist,
-  };
-}
-
-function buildPromptLessonResponse(body, raw) {
-  if (body && body._json_parse_error)
-    return buildNeedsClarifyResponse(raw, "invalid_json");
-
-  const mode = normalizeMode(body);
-  const q0 =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) || "your question";
-  const q = String(q0).trim() || "your question";
-
-  const promptLessonObj = buildPromptLessonObject(mode, q);
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
+    API_OK: true,
     component_result: "success",
-    API_PromptLesson_JSON: JSON.stringify(promptLessonObj),
-    API_PromptLesson: promptLessonObj.example_prompt,
-    API_Response: promptLessonObj.example_prompt,
-    data: { raw, promptLesson: promptLessonObj },
+    ...extra,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Quiz + Lesson stubs (existing behaviour preserved)
-// ---------------------------------------------------------------------------
+function failEnvelope(extra = {}) {
+  return {
+    ok: false,
+    API_OK: false,
+    component_result: "fail",
+    ...extra,
+  };
+}
 
-function buildQuizEnvelope(question, mode) {
-  const trimmedQuestion = String(question || "").trim() || "your question";
-  const m = mode || "business";
+function stubText(kind) {
+  // Deterministic, zero-randomness, Voiceflow-safe strings
+  if (kind === "lesson_business") {
+    return [
+      "Business lesson (stub):",
+      "1) Define the objective and success metric.",
+      "2) State key assumptions and constraints.",
+      "3) Generate 2–3 strategic options.",
+      "4) Recommend one option with a rationale.",
+      "5) Outline risks and mitigations.",
+    ].join("\n");
+  }
 
-  if (m === "prompt") {
+  if (kind === "lesson_prompt") {
+    return [
+      "Prompt engineering lesson (stub):",
+      "1) Role: specify who the model is.",
+      "2) Context: what’s known/unknown.",
+      "3) Constraints: time, scope, format.",
+      "4) Output format: headings/bullets/tables.",
+      "5) Ask clarifying questions if missing info.",
+    ].join("\n");
+  }
+
+  if (kind === "optimize_question") {
+    return "Please restate your question with: objective, scope, constraints, and desired output format.";
+  }
+
+  if (kind === "grade_open") {
+    return "Feedback (stub): Unable to grade due to upstream limits. Add role + constraints + output format next time.";
+  }
+
+  return "Stub response (upstream unavailable).";
+}
+
+function stubQuizExam(mode = "business") {
+  // Deterministic 10 MCQ + 3 TF + 1 Open to satisfy your exam component.
+  // Answers match the exact option strings / True/False buttons.
+  const topic = mode === "prompt" ? "prompt engineering" : "business strategy";
+
+  const mcq = Array.from({ length: 10 }, (_, i) => {
+    const n = i + 1;
+    const options = [
+      `Option A (${topic})`,
+      `Option B (${topic})`,
+      `Option C (${topic})`,
+      `Option D (${topic})`,
+    ];
     return {
-      question: trimmedQuestion,
-      mcq: [
-        {
-          type: "mcq",
-          question:
-            "Which element most improves reliability of an AI response?",
-          options: [
-            "Asking for a poem format",
-            "Specifying role + output format + constraints",
-            "Using more exclamation points",
-            "Avoiding any requirements",
-          ],
-          answer: "Specifying role + output format + constraints",
-        },
-      ],
-      tf: [
-        {
-          type: "tf",
-          question:
-            "True or false: Clarifying questions can improve output quality.",
-          answer: "True",
-        },
-      ],
-      open: [
-        {
-          type: "open",
-          question: `Write a copy-ready prompt to solve: "${trimmedQuestion}". Include role, constraints, and output format.`,
-        },
-      ],
+      question: `MCQ ${n}: Which choice best supports good ${topic} practice?`,
+      options,
+      answer: options[0],
+    };
+  });
+
+  const tf = Array.from({ length: 3 }, (_, i) => {
+    const n = i + 1;
+    return {
+      question: `TF ${n}: Being explicit about constraints improves ${topic} outputs.`,
+      answer: "True",
+    };
+  });
+
+  const open = [
+    {
+      question:
+        mode === "prompt"
+          ? "Open: Write a strong system prompt for this user question (include role, constraints, and output format)."
+          : "Open: Provide a structured strategy recommendation (objective, assumptions, options, recommendation, risks).",
+      rubric:
+        mode === "prompt"
+          ? "Score 0–5 based on: role clarity, context, constraints, output format, and use of clarifying questions."
+          : "Score 0–5 based on: objective+metric, assumptions, options, recommendation, risks/mitigations.",
+    },
+  ];
+
+  return { mcq, tf, open };
+}
+
+// -------------------------
+// Upstream URL resolution (optional overrides)
+// -------------------------
+
+function normalizeBaseUrl(u) {
+  if (!u) return "";
+  return u.endsWith("/") ? u.slice(0, -1) : u;
+}
+
+function getUpstreamOverride(name) {
+  const v = (process.env[name] || "").trim();
+  return v ? v : "";
+}
+
+function upstreamUrlFor(endpointName) {
+  // EndpointName is one of:
+  // OPTIMIZE_QUESTION, TEACH_AND_QUIZ, PROMPT_LESSON, GENERATE_EXAM, GRADE_OPEN
+  const override = getUpstreamOverride(`UPSTREAM_URL_${endpointName}`);
+  if (override) return override;
+
+  // Fallback heuristics: use PROMPT_URL / BUSINESS_URL if present.
+  // IMPORTANT: We do NOT auto-append paths unless upstream is explicitly enabled,
+  // and only for the endpoint that should logically exist.
+  const p = normalizeBaseUrl(PROMPT_URL);
+  const b = normalizeBaseUrl(BUSINESS_URL);
+
+  switch (endpointName) {
+    case "PROMPT_LESSON":
+      return p ? `${p}/prompt_lesson` : "";
+    case "GRADE_OPEN":
+      return p ? `${p}/grade_open` : "";
+    case "TEACH_AND_QUIZ":
+      return b ? `${b}/teach_and_quiz` : "";
+    case "OPTIMIZE_QUESTION":
+      return b ? `${b}/optimize_question` : "";
+    case "GENERATE_EXAM":
+      return b ? `${b}/generate_exam` : "";
+    default:
+      return "";
+  }
+}
+
+// -------------------------
+// OpenAI (local generation/grading) with the SAME retry policy
+// -------------------------
+
+async function openaiChat(
+  messages,
+  { temperature = 0.1, maxTokens = 900 } = {}
+) {
+  if (!OPENAI_API_KEY) {
+    return { ok: false, error: "OPENAI_API_KEY missing" };
+  }
+
+  const url = "https://api.openai.com/v1/chat/completions";
+  const body = {
+    model: OPENAI_MODEL,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  };
+
+  const resp = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+    {
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      maxRetries: UPSTREAM_MAX_RETRIES,
+      baseMs: UPSTREAM_RETRY_BASE_MS,
+    }
+  );
+
+  if (!resp || !resp.ok) {
+    return {
+      ok: false,
+      status: resp?.status || 0,
+      error: resp?.error || "OpenAI request failed",
+      raw: safeTrim(resp?.text || "", 1200),
     };
   }
 
-  // business default
-  return {
-    question: trimmedQuestion,
-    mcq: [
-      {
-        type: "mcq",
-        question:
-          "What is the FIRST thing you should clarify when tackling a strategy question?",
-        options: [
-          "The tools and software you will use",
-          "The business objective and success metrics",
-          "The colour of the slide deck",
-          "The company logo guidelines",
-        ],
-        answer: "The business objective and success metrics",
-      },
-    ],
-    tf: [
-      {
-        type: "tf",
-        question:
-          "True or false: You should pick as many strategic options as possible and try them all at once.",
-        answer: "False",
-      },
-    ],
-    open: [
-      {
-        type: "open",
-        question:
-          "In 2–3 sentences, describe one concrete experiment you could run in the next 2–4 weeks.",
-      },
-    ],
-  };
+  const json = jsonOrNull(resp.text);
+  const content = json?.choices?.[0]?.message?.content ?? "";
+  return { ok: true, content, raw: json };
 }
 
-function buildTeachAndQuizResponse(body, raw) {
-  const mode = normalizeMode(body);
-  const q0 =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) || "your question";
-  const trimmedQuestion = String(q0).trim() || "your question";
+// -------------------------
+// Core component logic
+// -------------------------
 
-  // Agent 1: Business strategy lesson (default)
-  const strategy_answer_business =
-    `Here is a simple, high-level way I would approach "${trimmedQuestion}". ` +
-    "First, clarify the objective and success metrics. Second, analyze the current state and constraints. " +
-    "Third, identify 2–3 strategic options, compare impact vs. effort, and choose one to test. " +
-    "Finally, define concrete next steps for the next 2–4 weeks.";
+async function maybeProxy(endpointName, payload) {
+  // Only proxy if UPSTREAM_ENABLED is true AND we have a URL.
+  if (!UPSTREAM_ENABLED) return { proxied: false };
 
-  const lessonTitle_business = `Strategy lesson for: ${trimmedQuestion}`;
-  const lessonContent_business =
-    `In this lesson, we’ll walk through a structured way to think about "${trimmedQuestion}". ` +
-    "We’ll cover: (1) clarifying the business goal, (2) mapping stakeholders and constraints, " +
-    "(3) generating strategic options, and (4) choosing a focused experiment you can run quickly.";
+  const url = upstreamUrlFor(endpointName);
+  if (!url) return { proxied: false };
 
-  // Agent 2: Prompt engineering lesson object (always available)
-  const promptLessonObj = buildPromptLessonObject("prompt", trimmedQuestion);
-
-  // If caller is explicitly in prompt mode, we foreground the prompt lesson as the "lesson"
-  const isPromptForeground = mode === "prompt";
-
-  const strategy_answer = isPromptForeground
-    ? `Here’s how to prompt for this well: define role, constraints, and output structure for "${trimmedQuestion}", ` +
-      "ask clarifying questions first, then request options + recommendation + next steps."
-    : strategy_answer_business;
-
-  const lessonTitle = isPromptForeground
-    ? promptLessonObj.title
-    : lessonTitle_business;
-  const lessonContent = isPromptForeground
-    ? `Goal: ${promptLessonObj.goal}\n\nFramework:\n- ${promptLessonObj.framework.join("\n- ")}\n\n` +
-      `Example prompt:\n${promptLessonObj.example_prompt}`
-    : lessonContent_business;
-
-  const quizEnvelope = buildQuizEnvelope(trimmedQuestion, mode);
-
-  const API_MCQ = quizEnvelope.mcq.length;
-  const API_TF = quizEnvelope.tf.length;
-  const API_OPEN = quizEnvelope.open.length;
-  const API_Quiz_JSON = JSON.stringify(quizEnvelope);
-
-  const component_result = "success";
-
-  // Back-compat fields (older flow versions)
-  const APL_MCQ = API_MCQ;
-  const APL_TF = API_TF;
-  const APL_OPEN = API_OPEN;
-  const APL_Quiz_JSON = API_Quiz_JSON;
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    component_result,
-    strategy_answer,
-
-    // Canonical fields for Voiceflow blocks (API_*)
-    API_LessonTitle: lessonTitle,
-    API_LessonContent: lessonContent,
-    API_PromptLesson: promptLessonObj.example_prompt,
-    API_MCQ,
-    API_TF,
-    API_OPEN,
-    API_Quiz_JSON,
-    API_Response: strategy_answer,
-
-    // Optional JSON slots
-    API_Lesson_JSON: JSON.stringify({
-      title: lessonTitle,
-      content: lessonContent,
-      promptLesson: promptLessonObj,
-    }),
-    API_PromptLesson_JSON: JSON.stringify(promptLessonObj),
-
-    // Back-compat (APL_*)
-    APL_LessonTitle: lessonTitle,
-    APL_lesson_content: lessonContent,
-    APL_PromptLesson: promptLessonObj.example_prompt,
-    APL_MCQ,
-    APL_TF,
-    APL_OPEN,
-    APL_Quiz_JSON,
-
-    data: {
-      raw,
-      component_result,
-      strategy_answer,
-      API_LessonTitle: lessonTitle,
-      API_LessonContent: lessonContent,
-      promptLesson: promptLessonObj,
-      API_MCQ,
-      API_TF,
-      API_OPEN,
-      API_Quiz_JSON,
-    },
-  };
-}
-
-function buildGenerateQuizResponse(body, raw) {
-  const mode = normalizeMode(body);
-  const question =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
-    "Quiz stub question";
-  const quizEnvelope = buildQuizEnvelope(question, mode);
-  const mcqCount = quizEnvelope.mcq.length;
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    mcq: quizEnvelope.mcq,
-    mcqCount,
-    reply: "Stub MCQ quiz generated",
-    API_MCQ: quizEnvelope.mcq.length,
-    API_TF: quizEnvelope.tf.length,
-    API_OPEN: quizEnvelope.open.length,
-    API_Quiz_JSON: JSON.stringify(quizEnvelope),
-    data: {
-      raw,
-      quiz: quizEnvelope,
-      mcq: quizEnvelope.mcq,
-      mcqCount,
-      reply: "Stub MCQ quiz generated",
-    },
-  };
-}
-
-function buildGenerateLessonResponse(body, raw) {
-  const question =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) ||
-    "Lesson stub question";
-  const lessonText =
-    (body && body.lesson && String(body.lesson)) ||
-    `Stub lesson generated for: ${question}`;
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    lesson: lessonText,
-    reply: lessonText,
-    API_Response: lessonText,
-    data: { raw, lesson: lessonText, reply: lessonText },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Exam generator (10 MCQ + 3 TF + 1 Open), deterministic but mode-aware
-// ---------------------------------------------------------------------------
-
-function makeBusinessMcqs(question) {
-  const q = String(question || "").trim() || "the problem";
-  return [
+  const resp = await fetchWithRetry(
+    url,
     {
-      type: "mcq",
-      question: `For "${q}", what should you define first?`,
-      options: [
-        "Logo guidelines",
-        "Objective + success metrics",
-        "Team org chart",
-        "Slide theme",
-      ],
-      answer: "Objective + success metrics",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
     },
     {
-      type: "mcq",
-      question: "Which is the best way to handle missing information?",
-      options: [
-        "Assume everything",
-        "Ask clarifying questions",
-        "Skip constraints",
-        "Proceed without metrics",
-      ],
-      answer: "Ask clarifying questions",
-    },
-    {
-      type: "mcq",
-      question: "What is a good next step after clarifying objective?",
-      options: [
-        "Pick a solution immediately",
-        "Map current state + constraints",
-        "Write the final deck",
-        "Launch marketing",
-      ],
-      answer: "Map current state + constraints",
-    },
-    {
-      type: "mcq",
-      question:
-        "Which is the BEST decision tool for selecting an option quickly?",
-      options: [
-        "Impact vs effort comparison",
-        "Random choice",
-        "Longest document",
-        "Most meetings",
-      ],
-      answer: "Impact vs effort comparison",
-    },
-    {
-      type: "mcq",
-      question: "What is a strong experiment definition?",
-      options: [
-        "Try everything at once",
-        "A test with a hypothesis, metric, and timebox",
-        "A meeting to discuss ideas",
-        "A slide summarizing the goal",
-      ],
-      answer: "A test with a hypothesis, metric, and timebox",
-    },
-    {
-      type: "mcq",
-      question: "Which metric is most useful?",
-      options: [
-        "Vanity metric only",
-        "A metric tied to the objective",
-        "Any metric you can find",
-        "No metrics needed",
-      ],
-      answer: "A metric tied to the objective",
-    },
-    {
-      type: "mcq",
-      question: "What should you do with constraints?",
-      options: [
-        "Ignore them",
-        "Explicitly list and design around them",
-        "Hide them",
-        "Only mention at the end",
-      ],
-      answer: "Explicitly list and design around them",
-    },
-    {
-      type: "mcq",
-      question: "What is a practical number of strategic options to compare?",
-      options: ["1", "2–3", "10–15", "As many as possible"],
-      answer: "2–3",
-    },
-    {
-      type: "mcq",
-      question: "What belongs in the recommendation?",
-      options: [
-        "Only analysis",
-        "A choice + rationale + next steps",
-        "Only risks",
-        "Only cost",
-      ],
-      answer: "A choice + rationale + next steps",
-    },
-    {
-      type: "mcq",
-      question: "What is a strong final output structure?",
-      options: [
-        "Unstructured stream of thoughts",
-        "Objective → Options → Recommendation → Experiments",
-        "Only a table",
-        "Only a paragraph",
-      ],
-      answer: "Objective → Options → Recommendation → Experiments",
-    },
-  ];
-}
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      maxRetries: UPSTREAM_MAX_RETRIES,
+      baseMs: UPSTREAM_RETRY_BASE_MS,
+    }
+  );
 
-function makePromptMcqs(question) {
-  const q = String(question || "").trim() || "the problem";
-  return [
-    {
-      type: "mcq",
-      question: "Which prompt element most improves consistency?",
-      options: [
-        "More emojis",
-        "Role + constraints + output format",
-        "Longer sentences",
-        "No structure",
-      ],
-      answer: "Role + constraints + output format",
-    },
-    {
-      type: "mcq",
-      question: "What is the best first step when context is missing?",
-      options: [
-        "Guess",
-        "Ask clarifying questions",
-        "Refuse",
-        "Give generic advice only",
-      ],
-      answer: "Ask clarifying questions",
-    },
-    {
-      type: "mcq",
-      question: "What does 'output format' mean?",
-      options: [
-        "Font choice",
-        "Exact structure requested (headings/bullets/table)",
-        "More tokens",
-        "Short answers only",
-      ],
-      answer: "Exact structure requested (headings/bullets/table)",
-    },
-    {
-      type: "mcq",
-      question: "What is an effective constraint you can specify?",
-      options: [
-        "'Be smart'",
-        "Time horizon + assumptions + exclusions",
-        "Random details",
-        "No constraints",
-      ],
-      answer: "Time horizon + assumptions + exclusions",
-    },
-    {
-      type: "mcq",
-      question: "Best practice for reliability is to request…",
-      options: [
-        "A single paragraph",
-        "A checklist and numbered steps",
-        "Poetry",
-        "No reasoning",
-      ],
-      answer: "A checklist and numbered steps",
-    },
-    {
-      type: "mcq",
-      question: "What is a good way to reduce hallucination risk?",
-      options: [
-        "Demand certainty",
-        "Ask it to state assumptions + unknowns",
-        "Avoid constraints",
-        "Use sarcasm",
-      ],
-      answer: "Ask it to state assumptions + unknowns",
-    },
-    {
-      type: "mcq",
-      question: "Few-shot prompting is best described as…",
-      options: [
-        "Asking many questions",
-        "Providing examples of desired outputs",
-        "Making it shorter",
-        "Using only keywords",
-      ],
-      answer: "Providing examples of desired outputs",
-    },
-    {
-      type: "mcq",
-      question: "What’s the best iteration strategy?",
-      options: [
-        "Restart from scratch always",
-        "Refine under a fixed rubric",
-        "Never iterate",
-        "Only change tone",
-      ],
-      answer: "Refine under a fixed rubric",
-    },
-    {
-      type: "mcq",
-      question: `For "${q}", which request yields the most actionable answer?`,
-      options: [
-        "Explain the topic generally",
-        "Give objective, options, recommendation, and 2-week plan in headings",
-        "Tell a story",
-        "Summarize in one word",
-      ],
-      answer:
-        "Give objective, options, recommendation, and 2-week plan in headings",
-    },
-    {
-      type: "mcq",
-      question: "Which is a strong 'role' instruction?",
-      options: [
-        "'Act normal'",
-        "'You are a senior strategy consultant'",
-        "'Be creative'",
-        "'Be brief'",
-      ],
-      answer: "'You are a senior strategy consultant'",
-    },
-  ];
-}
+  if (!resp.ok) {
+    // Treat ANY non-2xx as upstream failure; deterministic fallback (no Voiceflow explosions)
+    log("warn", "Upstream failed; falling back", {
+      endpointName,
+      url,
+      status: resp.status,
+      error: resp.error,
+      raw: safeTrim(resp.text || "", 300),
+    });
 
-function makeTfs(mode) {
-  if (mode === "prompt") {
-    return [
-      {
-        type: "tf",
-        question:
-          "True or false: Asking clarifying questions can improve answer quality.",
-        answer: "True",
-      },
-      {
-        type: "tf",
-        question: "True or false: Output format requirements reduce ambiguity.",
-        answer: "True",
-      },
-      {
-        type: "tf",
-        question:
-          "True or false: Constraints are optional for reliable prompts.",
-        answer: "False",
-      },
-    ];
-  }
-  return [
-    {
-      type: "tf",
-      question: "True or false: Success metrics should be defined early.",
-      answer: "True",
-    },
-    {
-      type: "tf",
-      question:
-        "True or false: Testing 2–3 options is usually better than testing 12 at once.",
-      answer: "True",
-    },
-    {
-      type: "tf",
-      question:
-        "True or false: Constraints can be ignored if the idea is strong.",
-      answer: "False",
-    },
-  ];
-}
-
-function makeOpen(mode, question) {
-  const q = String(question || "").trim() || "the problem";
-  if (mode === "prompt") {
-    return [
-      {
-        type: "open",
-        question: `Write a copy-ready prompt to solve: "${q}". Include role, clarifying questions first, constraints, and output format.`,
-      },
-    ];
-  }
-  return [
-    {
-      type: "open",
-      question: `For "${q}", propose a 2-week experiment. Include hypothesis, metric, and what decision you’ll make from the results.`,
-    },
-  ];
-}
-
-function buildExamEnvelope(mode, question) {
-  const m = mode === "prompt" ? "prompt" : "business";
-  const q = String(question || "").trim() || "your question";
-
-  const mcq = m === "prompt" ? makePromptMcqs(q) : makeBusinessMcqs(q);
-  const tf = makeTfs(m);
-  const open = makeOpen(m, q);
-
-  return { mode: m, question: q, mcq, tf, open };
-}
-
-function buildGenerateExamResponse(body, raw) {
-  if (body && body._json_parse_error)
-    return buildNeedsClarifyResponse(raw, "invalid_json");
-
-  const mode = normalizeMode(body);
-  const q0 =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) || "your question";
-  const exam = buildExamEnvelope(mode, q0);
-
-  const API_Exam_JSON = JSON.stringify(exam);
-
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    component_result: "success",
-    API_Exam_JSON,
-    API_MCQ: Array.isArray(exam.mcq) ? exam.mcq.length : 0,
-    API_TF: Array.isArray(exam.tf) ? exam.tf.length : 0,
-    API_OPEN: Array.isArray(exam.open) ? exam.open.length : 0,
-    data: { raw, exam },
-  };
-}
-
-function scoreOpenHeuristics(mode, openAnswer) {
-  const text = String(openAnswer || "").toLowerCase();
-  const hits = (keys) => keys.some((k) => text.includes(k));
-
-  // simple, deterministic rubric
-  let score = 0;
-  let strengths = [];
-  let gaps = [];
-
-  if (mode === "prompt") {
-    if (hits(["you are", "act as", "role"])) {
-      score += 1;
-      strengths.push("You specified a role.");
-    } else
-      gaps.push("Add a role (e.g., 'You are a senior strategy consultant').");
-
-    if (hits(["clarifying", "questions", "ask"])) {
-      score += 1;
-      strengths.push("You asked for clarifying questions first.");
-    } else gaps.push("Ask for 1–3 clarifying questions before answering.");
-
-    if (hits(["constraints", "assumptions", "time horizon", "scope"])) {
-      score += 1;
-      strengths.push("You included constraints/assumptions.");
-    } else
-      gaps.push("Add constraints (time horizon, assumptions, exclusions).");
-
-    if (hits(["headings", "bullet", "format", "table", "structure"])) {
-      score += 1;
-      strengths.push("You specified output format.");
-    } else gaps.push("Specify an output format (headings/bullets/table).");
-
-    if (
-      hits([
-        "objective",
-        "kpi",
-        "options",
-        "recommendation",
-        "next steps",
-        "experiment",
-      ])
-    ) {
-      score += 1;
-      strengths.push("You requested actionable strategy elements.");
-    } else
-      gaps.push(
-        "Request objective/KPIs, options, recommendation, and a short experiment plan."
-      );
-  } else {
-    if (hits(["hypothesis"])) {
-      score += 1;
-      strengths.push("You included a hypothesis.");
-    } else gaps.push("Add a clear hypothesis.");
-
-    if (hits(["metric", "kpi", "measure"])) {
-      score += 1;
-      strengths.push("You included a measurable metric.");
-    } else gaps.push("Specify a metric/KPI.");
-
-    if (hits(["2-week", "two-week", "timebox", "timeline"])) {
-      score += 1;
-      strengths.push("You included a timebox.");
-    } else gaps.push("Add a timebox (e.g., 2 weeks).");
-
-    if (hits(["decision", "if", "then"])) {
-      score += 1;
-      strengths.push("You defined a decision rule.");
-    } else gaps.push("Define how results change your decision.");
-
-    if (hits(["experiment", "test", "pilot"])) {
-      score += 1;
-      strengths.push("You framed it as a test/pilot.");
-    } else gaps.push("Frame it explicitly as an experiment/test.");
+    return {
+      proxied: true,
+      ok: false,
+      status: resp.status,
+      error: resp.error || `Upstream non-2xx: ${resp.status}`,
+      raw: resp.text || "",
+    };
   }
 
-  return { score, strengths, gaps };
+  const data = jsonOrNull(resp.text);
+  return {
+    proxied: true,
+    ok: true,
+    status: resp.status,
+    data,
+    text: resp.text,
+  };
 }
 
-function buildGradeOpenResponse(body, raw) {
-  if (body && body._json_parse_error)
-    return buildNeedsClarifyResponse(raw, "invalid_json");
+async function optimizeQuestion(input) {
+  const question = (input?.question || input?.user_question || "")
+    .toString()
+    .trim();
+  const mode = (input?.mode || "business").toString().trim();
 
-  const mode = normalizeMode(body);
-  const q0 =
-    decodeQuestionIfNeeded(body, pickQuestionFromBody(body)) || "your question";
-  const open_q = String(body?.open_q || "").trim();
-  const open_user_answer = String(
-    body?.open_user_answer || body?.answer || ""
-  ).trim();
+  // Proxy attempt
+  const prox = await maybeProxy("OPTIMIZE_QUESTION", { question, mode });
+  if (prox.proxied && prox.ok) {
+    // Pass-through upstream JSON or text
+    const out = prox.data || {};
+    const optimized =
+      out.optimized_question ||
+      out.optimized ||
+      out.question ||
+      out.result ||
+      "";
+    return okEnvelope({
+      source: "upstream_optimize",
+      optimized_question: optimized,
+      API_OptimizedQuestion: optimized,
+      upstream_status: prox.status,
+    });
+  }
 
-  const rubric = scoreOpenHeuristics(mode, open_user_answer);
-
-  const open_feedback =
-    `Strengths:\n- ${rubric.strengths.length ? rubric.strengths.join("\n- ") : "Good start — you answered the question."}\n\n` +
-    `Improvements:\n- ${rubric.gaps.length ? rubric.gaps.join("\n- ") : "None — this is solid for MVP."}\n\n` +
-    `Score (rubric): ${rubric.score}/5`;
-
-  const model =
+  // Local generation (OpenAI) fallback
+  const sys =
     mode === "prompt"
-      ? `You are a senior strategy consultant. My question: "${q0}".\n` +
-        `First ask up to 3 clarifying questions. Then provide:\n` +
-        `1) Objective & success metrics\n2) Assumptions + constraints\n3) 3 options (impact vs effort)\n` +
-        `4) Recommendation + 2-week experiment plan (hypothesis + metric)\n5) Risks + mitigations\n` +
-        `Output with headings and bullets.`
-      : `Hypothesis: If we do X for 2 weeks, metric Y will improve by Z.\n` +
-        `Experiment: Run a timeboxed pilot with a clear control/comparison.\n` +
-        `Metric: Track Y daily/weekly; success threshold = Z.\n` +
-        `Decision: If threshold met, scale; if not, pivot or stop with a documented learning.`;
+      ? "You are a prompt-engineering coach. Rewrite the user question into a clear prompt-spec: objective, context, constraints, output format."
+      : "You are a business strategy consultant. Rewrite the user question into a crisp problem statement: objective, scope, constraints, and desired deliverable.";
 
-  const open_model_answer = open_q
-    ? `Question: ${open_q}\n\nModel answer:\n${model}`
-    : `Model answer:\n${model}`;
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: question || "Optimize this question." },
+    ],
+    { temperature: 0.1, maxTokens: 350 }
+  );
 
-  return {
-    ok: true,
-    API_OK: "true",
-    raw,
-    component_result: "success",
-    open_feedback,
-    open_model_answer,
-    open_score: String(rubric.score),
-    data: { raw, mode, question: q0, open_q, open_user_answer, rubric },
-  };
+  if (!oa.ok) {
+    const stub = stubText("optimize_question");
+    return okEnvelope({
+      source: "optimize_stub",
+      optimized_question: stub,
+      API_OptimizedQuestion: stub,
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
+  }
+
+  const optimized = oa.content.trim() || stubText("optimize_question");
+  return okEnvelope({
+    source: "optimize_local",
+    optimized_question: optimized,
+    API_OptimizedQuestion: optimized,
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Diagnostics
-// ---------------------------------------------------------------------------
+async function generateLesson(input) {
+  const question = (input?.question || input?.user_question || "")
+    .toString()
+    .trim();
+  const mode = (input?.mode || "business").toString().trim();
 
-app.get("/health", (req, res) => {
-  logDebug("GET /health", { ip: req.ip });
-  res.type("text/plain").send("ok");
-});
+  const kind = mode === "prompt" ? "lesson_prompt" : "lesson_business";
+  const sys =
+    mode === "prompt"
+      ? "You are a senior prompt engineer teaching prompt patterns. Create a concise lesson with: role, context, constraints, output format, clarifying questions, and examples."
+      : "You are a senior strategy consultant. Create a concise lesson with: objective/metric, assumptions, options, recommendation, risks/mitigations, and a short execution plan.";
 
-app.get("/diagnostics/env", (_req, res) => {
-  res.json({
-    ok: true,
-    env: {
-      NODE_ENV,
-      LOG_LEVEL,
-      hasWebhookKey: Boolean(getWebhookKey()),
-      hasPromptUrl: Boolean(process.env.PROMPT_URL),
-      debugWebhook: String(process.env.DEBUG_WEBHOOK || "false"),
-    },
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: question || "Generate a lesson." },
+    ],
+    { temperature: 0.15, maxTokens: 900 }
+  );
+
+  if (!oa.ok) {
+    const lesson = stubText(kind);
+    return okEnvelope({
+      source: `${kind}_stub`,
+      lesson,
+      API_Lesson: lesson,
+      API_Lesson_Display: lesson,
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
+  }
+
+  const lesson = oa.content.trim() || stubText(kind);
+  return okEnvelope({
+    source: `${kind}_local`,
+    lesson,
+    API_Lesson: lesson,
+    API_Lesson_Display: lesson,
   });
-});
+}
 
-// ---------------------------------------------------------------------------
-// Direct endpoints (Voiceflow API blocks)
-// ---------------------------------------------------------------------------
+async function generateExam(input) {
+  const question = (input?.question || input?.user_question || "")
+    .toString()
+    .trim();
+  const mode = (input?.mode || "business").toString().trim();
 
-app.post("/optimize_question", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("optimize_question", body); // will stub if PROMPT_URL missing
-  logLlmPayloadSnippet(raw);
-  return res.json(buildOptimizeQuestionResponse(body, raw));
-});
-
-app.post("/teach_and_quiz", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("teach_and_quiz", body); // will stub if PROMPT_URL missing
-  logLlmPayloadSnippet(raw);
-  return res.json(buildTeachAndQuizResponse(body, raw));
-});
-
-app.post("/generate_quiz", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("generate_quiz", body);
-  logLlmPayloadSnippet(raw);
-  return res.json(buildGenerateQuizResponse(body, raw));
-});
-
-app.post("/generate_lesson", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("generate_lesson", body);
-  logLlmPayloadSnippet(raw);
-  return res.json(buildGenerateLessonResponse(body, raw));
-});
-
-// NEW: Prompt engineering lesson (Agent 2)
-app.post("/prompt_lesson", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("prompt_lesson", body);
-  logLlmPayloadSnippet(raw);
-  return res.json(buildPromptLessonResponse(body, raw));
-});
-
-// NEW: Exam generator (10 MCQ / 3 TF / 1 open)
-app.post("/generate_exam", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("generate_exam", body);
-  logLlmPayloadSnippet(raw);
-  return res.json(buildGenerateExamResponse(body, raw));
-});
-
-// NEW: Open-answer grading (automated feedback)
-app.post("/grade_open", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const raw = await callPromptService("grade_open", body);
-  logLlmPayloadSnippet(raw);
-  return res.json(buildGradeOpenResponse(body, raw));
-});
-
-// ---------------------------------------------------------------------------
-// Core webhook handler (action router used by tests + legacy flows)
-// ---------------------------------------------------------------------------
-
-app.post("/webhook", requireApiKey, async (req, res) => {
-  const body = req.body || {};
-  const action = body.action || body.type || "";
-
-  // ping (used in smoke + verify_in_process)
-  if (action === "ping") {
-    const port =
-      currentServer &&
-      currentServer.address() &&
-      typeof currentServer.address() === "object"
-        ? currentServer.address().port
-        : Number(process.env.PORT || DEFAULT_PORT);
-    return res.json({ ok: true, API_OK: "true", reply: "pong", port });
+  // Proxy attempt
+  const prox = await maybeProxy("GENERATE_EXAM", { question, mode });
+  if (prox.proxied && prox.ok) {
+    const quizObj = prox.data?.quiz || prox.data?.exam || prox.data;
+    const quiz =
+      quizObj && typeof quizObj === "object" ? quizObj : stubQuizExam(mode);
+    const json = JSON.stringify(quiz);
+    return okEnvelope({
+      source: "upstream_generate_exam",
+      quiz,
+      API_Quiz_JSON: json,
+      upstream_status: prox.status,
+    });
   }
 
-  // If JSON was invalid, return deterministic needs_clarify response
-  if (body && body._json_parse_error) {
-    const raw = makeStubRaw("invalid_json", body);
-    return res.json(buildNeedsClarifyResponse(raw, "invalid_json"));
+  // Local generation (JSON only)
+  const sys =
+    mode === "prompt"
+      ? "You generate exams for prompt engineering. Output JSON only."
+      : "You generate exams for business strategy. Output JSON only.";
+
+  const user = [
+    "Create an exam JSON with exactly:",
+    "- mcq: 10 items, each {question, options:[4 strings], answer:(must equal EXACT option string)}",
+    "- tf: 3 items, each {question, answer:(True/False)}",
+    "- open: 1 item, {question, rubric}",
+    "",
+    `Topic/context: ${question || "(general fundamentals)"}`,
+  ].join("\n");
+
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    { temperature: 0.1, maxTokens: 900 }
+  );
+
+  if (!oa.ok) {
+    const quiz = stubQuizExam(mode);
+    return okEnvelope({
+      source: "exam_stub",
+      quiz,
+      API_Quiz_JSON: JSON.stringify(quiz),
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
   }
 
-  // regression mirror tests
-  if (action === "llm_elicit" || action === "invoke_component") {
-    const raw = await callPromptService(action, body);
-    logLlmPayloadSnippet(raw);
-    return res.json({ ok: true, API_OK: "true", raw, data: { raw } });
-  }
+  const parsed = jsonOrNull(oa.content);
+  const quiz =
+    parsed && typeof parsed === "object" ? parsed : stubQuizExam(mode);
 
-  if (action === "generate_lesson") {
-    const raw = await callPromptService("generate_lesson", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildGenerateLessonResponse(body, raw));
-  }
+  // Minimal guardrails: ensure arrays exist
+  quiz.mcq = Array.isArray(quiz.mcq) ? quiz.mcq : stubQuizExam(mode).mcq;
+  quiz.tf = Array.isArray(quiz.tf) ? quiz.tf : stubQuizExam(mode).tf;
+  quiz.open = Array.isArray(quiz.open) ? quiz.open : stubQuizExam(mode).open;
 
-  if (action === "generate_quiz") {
-    const raw = await callPromptService("generate_quiz", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildGenerateQuizResponse(body, raw));
-  }
-
-  if (action === "optimize_question") {
-    const raw = await callPromptService("optimize_question", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildOptimizeQuestionResponse(body, raw));
-  }
-
-  if (action === "teach_and_quiz") {
-    const raw = await callPromptService("teach_and_quiz", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildTeachAndQuizResponse(body, raw));
-  }
-
-  if (action === "prompt_lesson") {
-    const raw = await callPromptService("prompt_lesson", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildPromptLessonResponse(body, raw));
-  }
-
-  if (action === "generate_exam") {
-    const raw = await callPromptService("generate_exam", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildGenerateExamResponse(body, raw));
-  }
-
-  if (action === "grade_open") {
-    const raw = await callPromptService("grade_open", body);
-    logLlmPayloadSnippet(raw);
-    return res.json(buildGradeOpenResponse(body, raw));
-  }
-
-  // generic fallback
-  const fallbackRaw = {
-    source: "echo",
-    action: action || "unknown",
-    payload: body,
-    ts: new Date().toISOString(),
-  };
-
-  return res.json({
-    ok: true,
-    API_OK: "true",
-    raw: fallbackRaw,
-    data: { raw: fallbackRaw },
+  return okEnvelope({
+    source: "exam_local",
+    quiz,
+    API_Quiz_JSON: JSON.stringify(quiz),
   });
+}
+
+async function promptLesson(input) {
+  const question = (
+    input?.question ||
+    input?.user_question ||
+    input?.question_for_api ||
+    ""
+  )
+    .toString()
+    .trim();
+  const goal = (input?.goal || "").toString().trim();
+
+  // Proxy attempt
+  const prox = await maybeProxy("PROMPT_LESSON", { question, goal });
+  if (prox.proxied && prox.ok) {
+    const out = prox.data || {};
+    const text =
+      out.prompt_lesson ||
+      out.lesson ||
+      out.result ||
+      prox.text ||
+      stubText("lesson_prompt");
+    return okEnvelope({
+      source: "upstream_prompt_lesson",
+      API_PromptLesson: text,
+      API_PromptLesson_JSON: JSON.stringify({ text }),
+      prompt_lesson: text,
+      upstream_status: prox.status,
+    });
+  }
+
+  const sys =
+    "You are a senior prompt engineer. Teach a repeatable prompt pattern for the user’s goal and question.";
+  const user = [
+    `Goal: ${goal || "(not provided)"}`,
+    `Question: ${question || "(not provided)"}`,
+    "",
+    "Deliver:",
+    "1) Objective & success metrics",
+    "2) Key assumptions",
+    "3) 3 strategic prompt options (impact vs effort)",
+    "4) Recommended option + short experiment plan (2 weeks)",
+    "5) Risks + mitigations",
+    "Output with clear headings and bullets.",
+  ].join("\n");
+
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    { temperature: 0.2, maxTokens: 900 }
+  );
+
+  if (!oa.ok) {
+    const lesson = stubText("lesson_prompt");
+    return okEnvelope({
+      source: "prompt_lesson_stub",
+      API_PromptLesson: lesson,
+      API_PromptLesson_JSON: JSON.stringify({ text: lesson }),
+      prompt_lesson: lesson,
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
+  }
+
+  const lesson = oa.content.trim() || stubText("lesson_prompt");
+  return okEnvelope({
+    source: "prompt_lesson_local",
+    API_PromptLesson: lesson,
+    API_PromptLesson_JSON: JSON.stringify({ text: lesson }),
+    prompt_lesson: lesson,
+  });
+}
+
+async function gradeOpen(input) {
+  const mode = (input?.mode || "business").toString().trim();
+  const question = (
+    input?.open_q ||
+    input?.question ||
+    input?.open_question ||
+    ""
+  )
+    .toString()
+    .trim();
+  const openUserAnswer = (input?.open_user_answer || input?.answer || "")
+    .toString()
+    .trim();
+  const rubric = (input?.rubric || "").toString().trim();
+
+  // Proxy attempt
+  const prox = await maybeProxy("GRADE_OPEN", {
+    mode,
+    open_q: question,
+    open_user_answer: openUserAnswer,
+    rubric,
+  });
+  if (prox.proxied && prox.ok) {
+    const out = prox.data || {};
+    return okEnvelope({
+      source: "upstream_grade_open",
+      open_feedback: out.open_feedback || out.feedback || "",
+      open_score:
+        typeof out.open_score === "number"
+          ? out.open_score
+          : Number(out.open_score || 0),
+      open_model_answer: out.open_model_answer || out.model_answer || "",
+      upstream_status: prox.status,
+    });
+  }
+
+  const rubricEffective =
+    rubric ||
+    (mode === "prompt"
+      ? "Score 0–5: role clarity, context, constraints, output format, clarifying questions."
+      : "Score 0–5: objective+metric, assumptions, options, recommendation, risks/mitigations.");
+
+  const sys =
+    mode === "prompt"
+      ? "You grade prompt-engineering answers using the rubric. Be concise and actionable."
+      : "You grade business strategy answers using the rubric. Be concise and actionable.";
+
+  const user = [
+    `Question: ${question || "(none)"}`,
+    `User answer: ${openUserAnswer || "(none)"}`,
+    `Rubric: ${rubricEffective}`,
+    "",
+    "Return JSON ONLY with fields:",
+    `{ "open_feedback": "strengths + improvements", "open_score": 0-5, "open_model_answer": "ideal answer" }`,
+  ].join("\n");
+
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    { temperature: 0.1, maxTokens: 700 }
+  );
+
+  if (!oa.ok) {
+    return okEnvelope({
+      source: "grade_open_stub",
+      open_feedback: stubText("grade_open"),
+      open_score: 0,
+      open_model_answer: "",
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
+  }
+
+  const parsed = jsonOrNull(oa.content) || {};
+  const open_feedback =
+    (parsed.open_feedback || "").toString().trim() || stubText("grade_open");
+  const open_model_answer = (parsed.open_model_answer || "").toString().trim();
+  const open_score = clampNumber(Number(parsed.open_score), 0, 5);
+
+  return okEnvelope({
+    source: "grade_open_local",
+    open_feedback,
+    open_score,
+    open_model_answer,
+  });
+}
+
+// Teach & Quiz = lesson + exam JSON
+async function teachAndQuiz(input) {
+  const mode = (input?.mode || "business").toString().trim();
+  const question = (input?.question || input?.user_question || "")
+    .toString()
+    .trim();
+
+  // Proxy attempt
+  const prox = await maybeProxy("TEACH_AND_QUIZ", { mode, question });
+  if (prox.proxied && prox.ok) {
+    const out = prox.data || {};
+    const lesson = out.lesson || out.API_Lesson || out.lesson_display || "";
+    const quiz =
+      out.quiz ||
+      jsonOrNull(out.API_Quiz_JSON) ||
+      out.API_Quiz ||
+      stubQuizExam(mode);
+    return okEnvelope({
+      source: "upstream_teach_and_quiz",
+      API_Lesson: lesson,
+      API_Lesson_Display: lesson,
+      API_Quiz_JSON: JSON.stringify(quiz),
+      upstream_status: prox.status,
+    });
+  }
+
+  const lessonResp = await generateLesson({ mode, question });
+  const examResp = await generateExam({ mode, question });
+
+  const lesson =
+    lessonResp.lesson ||
+    lessonResp.API_Lesson ||
+    stubText(mode === "prompt" ? "lesson_prompt" : "lesson_business");
+  const quiz = examResp.quiz || stubQuizExam(mode);
+
+  return okEnvelope({
+    source: "teach_and_quiz_local",
+    API_Lesson: lesson,
+    API_Lesson_Display: lesson,
+    API_Quiz_JSON: JSON.stringify(quiz),
+  });
+}
+
+// -------------------------
+// Routes
+// -------------------------
+
+app.get("/", (req, res) => res.status(200).send("ok"));
+app.get("/health", (req, res) => res.status(200).send("ok"));
+
+/**
+ * Generic webhook entry point (optional).
+ * Accepts { action: "teach_and_quiz" | "optimize_question" | ... , ...payload }
+ */
+app.post("/webhook", async (req, res) => {
+  try {
+    const action =
+      (req.body?.action && typeof req.body.action === "string"
+        ? req.body.action
+        : "") ||
+      (req.body?.action?.name ? String(req.body.action.name) : "") ||
+      (req.body?.type ? String(req.body.type) : "");
+
+    const payload = req.body || {};
+
+    let result;
+    switch ((action || "").toLowerCase()) {
+      case "optimize_question":
+        result = await optimizeQuestion(payload);
+        break;
+      case "prompt_lesson":
+        result = await promptLesson(payload);
+        break;
+      case "grade_open":
+        result = await gradeOpen(payload);
+        break;
+      case "generate_exam":
+        result = await generateExam(payload);
+        break;
+      case "teach_and_quiz":
+      default:
+        result = await teachAndQuiz(payload);
+        break;
+    }
+
+    return res.status(200).json(result);
+  } catch (err) {
+    log("error", "Unhandled /webhook error", {
+      error: String(err?.message || err),
+    });
+    return res.status(200).json(
+      failEnvelope({
+        error: "Unhandled server error",
+      })
+    );
+  }
 });
 
-// ---------------------------------------------------------------------------
-// 404 + error handlers
-// ---------------------------------------------------------------------------
-
-app.use((req, res) => {
-  logDebug("404", { method: req.method, path: req.path });
-  res.status(404).json({
-    ok: false,
-    API_OK: "false",
-    error: "not_found",
-    method: req.method,
-    path: req.path,
-  });
+app.post("/optimize_question", async (req, res) => {
+  const result = await optimizeQuestion(req.body || {});
+  res.status(200).json(result);
 });
 
-app.use((err, req, res, _next) => {
-  log("error", "Unhandled error in request", {
-    path: req.path,
-    method: req.method,
-    message: err && err.message,
-    stack: err && err.stack,
-  });
-  res.status(500).json({
-    ok: false,
-    API_OK: "false",
-    error: "internal_error",
-    message: err && err.message ? err.message : "Unexpected error",
-  });
+app.post("/teach_and_quiz", async (req, res) => {
+  const result = await teachAndQuiz(req.body || {});
+  res.status(200).json(result);
 });
 
-// ---------------------------------------------------------------------------
-// Server bootstrap – no auto-listen on require
-// ---------------------------------------------------------------------------
+app.post("/prompt_lesson", async (req, res) => {
+  const result = await promptLesson(req.body || {});
+  res.status(200).json(result);
+});
+
+app.post("/generate_exam", async (req, res) => {
+  const result = await generateExam(req.body || {});
+  res.status(200).json(result);
+});
+
+app.post("/grade_open", async (req, res) => {
+  const result = await gradeOpen(req.body || {});
+  res.status(200).json(result);
+});
+
+// -------------------------
+// Server lifecycle helpers (CI-friendly)
+// -------------------------
 
 let currentServer = null;
 
 function startServer(port) {
-  if (currentServer) return currentServer;
-
-  const listenPort = Number.parseInt(
-    port != null ? String(port) : String(DEFAULT_PORT),
-    10
-  );
-  const server = http.createServer(app);
-
-  server.listen(listenPort, () => {
-    log("info", "Webhook server listening", { port: listenPort });
+  const p = port || process.env.PORT || 10000;
+  const server = app.listen(p, () => {
+    log("info", "Webhook server listening", {
+      port: p,
+      upstream_enabled: UPSTREAM_ENABLED,
+      upstream_timeout_ms: UPSTREAM_TIMEOUT_MS,
+      upstream_max_retries: UPSTREAM_MAX_RETRIES,
+      upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
+      has_openai_key: Boolean(OPENAI_API_KEY),
+      has_webhook_key: Boolean(WEBHOOK_API_KEY),
+      has_business_url: Boolean(BUSINESS_URL),
+      has_prompt_url: Boolean(PROMPT_URL),
+      has_retrieval_url: Boolean(RETRIEVAL_URL),
+    });
   });
 
   server.on("error", (err) => {
     log("error", "HTTP server error", {
-      message: err && err.message,
-      stack: err && err.stack,
+      message: err?.message,
+      stack: err?.stack,
     });
   });
 
   currentServer = server;
   return server;
+}
+
+function closeResources() {
+  return new Promise((resolve) => {
+    if (!currentServer) return resolve();
+    currentServer.close(() => resolve());
+    currentServer = null;
+  });
 }
 
 if (require.main === module) {
