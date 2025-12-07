@@ -27,6 +27,7 @@
  *   Per-endpoint overrides (optional):
  *     UPSTREAM_URL_OPTIMIZE_QUESTION
  *     UPSTREAM_URL_TEACH_AND_QUIZ
+ *     UPSTREAM_URL_GENERATE_LESSON
  *     UPSTREAM_URL_PROMPT_LESSON
  *     UPSTREAM_URL_GENERATE_EXAM
  *     UPSTREAM_URL_GRADE_OPEN
@@ -83,7 +84,6 @@ function log(level, msg, extra) {
     msg,
     ...(extra && typeof extra === "object" ? extra : {}),
   };
-  // Render likes stdout logs.
   console.log(JSON.stringify(payload));
 }
 
@@ -91,7 +91,6 @@ function logLlmPayloadSnippet(obj) {
   if (!DEBUG_WEBHOOK) return;
   try {
     const snippet = JSON.stringify(obj || {}).slice(0, 2000);
-    // Tests expect this exact phrase on stderr.
     console.error(`llm payload snippet: ${snippet}`);
   } catch {
     // ignore
@@ -111,10 +110,8 @@ app.use(express.json({ limit: "2mb" }));
 // -------------------------
 
 function requireApiKey(req, res, next) {
-  // allow health/root without key
   if (req.path === "/health" || req.path === "/") return next();
 
-  // In dev, don’t block people by default
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
@@ -191,7 +188,6 @@ async function fetchWithRetry(
         return { ok: true, status: resp.status, text, headers: resp.headers };
       }
 
-      // Only retry on 429/5xx (explicit requirement)
       if (shouldRetryStatus(resp.status) && attempt < retryMax) {
         const backoff = Math.min(base * Math.pow(2, attempt), 8000);
         log("warn", "Upstream non-2xx; retrying", {
@@ -204,10 +200,8 @@ async function fetchWithRetry(
         continue;
       }
 
-      // Non-retryable error or exhausted retries
       return { ok: false, status: resp.status, text };
     } catch (err) {
-      // Network/timeout errors: retry until attempts exhausted
       if (attempt < retryMax) {
         const backoff = Math.min(base * Math.pow(2, attempt), 8000);
         log("warn", "Upstream fetch error; retrying", {
@@ -242,12 +236,9 @@ function getUpstreamOverride(name) {
 }
 
 function upstreamUrlFor(endpointName) {
-  // EndpointName is one of:
-  // OPTIMIZE_QUESTION, TEACH_AND_QUIZ, PROMPT_LESSON, GENERATE_EXAM, GRADE_OPEN, LLM_ELICIT, RETRIEVAL
   const override = getUpstreamOverride(`UPSTREAM_URL_${endpointName}`);
   if (override) return override;
 
-  // Fallback heuristics: use PROMPT_URL / BUSINESS_URL / RETRIEVAL_URL if present.
   const p = normalizeBaseUrl(PROMPT_URL);
   const b = normalizeBaseUrl(BUSINESS_URL);
   const r = normalizeBaseUrl(RETRIEVAL_URL);
@@ -257,13 +248,12 @@ function upstreamUrlFor(endpointName) {
       return p ? `${p}/prompt_lesson` : "";
     case "GRADE_OPEN":
       return p ? `${p}/grade_open` : "";
-    case "LLM_ELICIT":
-      // CI expects stub when PROMPT_URL is not set; leaving blank will force stub path.
-      return p ? `${p}/llm_elicit` : "";
     case "OPTIMIZE_QUESTION":
       return b ? `${b}/optimize_question` : "";
     case "TEACH_AND_QUIZ":
       return b ? `${b}/teach_and_quiz` : "";
+    case "GENERATE_LESSON":
+      return b ? `${b}/generate_lesson` : ""; // override if your upstream is different
     case "GENERATE_EXAM":
       return b ? `${b}/generate_exam` : "";
     case "RETRIEVAL":
@@ -350,14 +340,22 @@ function failEnvelope(extra = {}) {
 }
 
 // -------------------------
-// Test/Voiceflow response contract normalization
+// Contract normalization
 // -------------------------
+
+function pickFirstString(...vals) {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
 
 function inferReply(out) {
   if (!out || typeof out !== "object") return "ok";
 
   const candidates = [
     out.reply,
+    out.API_Response,
     out.optimized_question,
     out.API_Optimized_Question,
     out.API_OptimizedQuestion,
@@ -366,14 +364,14 @@ function inferReply(out) {
     out.API_Lesson,
     out.API_PromptLesson,
     out.API_PromptLesson_Display,
+    out.lessonTitle,
+    out.API_LessonTitle,
     out.result,
     out.message,
   ];
 
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim()) return c.trim();
-  }
-  return "ok";
+  const r = pickFirstString(...candidates);
+  return r || "ok";
 }
 
 function ensureContract(req, payload, actionHint) {
@@ -420,7 +418,7 @@ function ensureContract(req, payload, actionHint) {
 }
 
 // -------------------------
-// Deterministic stubs (local fallback)
+// Deterministic stubs
 // -------------------------
 
 function truncate(s, max = 900) {
@@ -444,11 +442,11 @@ function stubText(kind) {
   if (kind === "lesson_prompt") {
     return [
       "Prompt engineering lesson (stub):",
-      "1) Role: specify who the model is.",
-      "2) Context: what’s known/unknown.",
-      "3) Constraints: time, scope, format.",
-      "4) Output format: headings/bullets/tables.",
-      "5) Ask clarifying questions if missing info.",
+      "🤖 Role: specify who the model is.",
+      "🤖 Context: what’s known/unknown.",
+      "🤖 Constraints: time, scope, format.",
+      "🤖 Output format: headings/bullets/tables.",
+      "🤖 Ask clarifying questions if missing info.",
     ].join("\n");
   }
 
@@ -498,6 +496,24 @@ function jsonOrNull(s) {
   } catch {
     return null;
   }
+}
+
+function safeMode(input) {
+  const m = (input?.mode || input?.learning_mode || "business")
+    .toString()
+    .trim()
+    .toLowerCase();
+  return m === "prompt" ? "prompt" : "business";
+}
+
+function safeQuestion(input) {
+  return pickFirstString(
+    input?.confirmed_question,
+    input?.question_for_api,
+    input?.question,
+    input?.user_question,
+    input?.open_question
+  );
 }
 
 async function maybeProxy(endpointName, payload) {
@@ -553,23 +569,23 @@ async function maybeProxy(endpointName, payload) {
 }
 
 // -------------------------
-// Core business functions
+// Core functions
 // -------------------------
 
 async function optimizeQuestion(input) {
-  const question = (input?.question || input?.user_question || "")
-    .toString()
-    .trim();
-  const mode = (input?.mode || "business").toString().trim();
+  const question = safeQuestion(input);
+  const mode = safeMode(input);
 
   const prox = await maybeProxy("OPTIMIZE_QUESTION", { question, mode });
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const optimized =
-      out.optimized_question ||
-      out.optimized ||
-      out.question ||
-      out.result ||
+      pickFirstString(
+        out.optimized_question,
+        out.optimized,
+        out.question,
+        out.result
+      ) ||
       prox.text ||
       stubText("optimize_question");
 
@@ -604,7 +620,7 @@ async function optimizeQuestion(input) {
     });
   }
 
-  const optimized = oa.content.trim() || stubText("optimize_question");
+  const optimized = (oa.content || "").trim() || stubText("optimize_question");
   return okEnvelope({
     source: "optimize_local",
     optimized_question: optimized,
@@ -612,19 +628,187 @@ async function optimizeQuestion(input) {
   });
 }
 
+async function generateLesson(input) {
+  const mode = safeMode(input);
+  const question = safeQuestion(input);
+
+  const tenantId = pickFirstString(
+    input?.tenantId,
+    input?.tenant_id,
+    "novain_default"
+  );
+  const firstName = pickFirstString(input?.first_name, input?.firstName, "");
+  const sessionId = pickFirstString(input?.session_id, input?.sessionId, "");
+  const userId = pickFirstString(input?.user_id, input?.userId, "");
+
+  // If you later stand up a real upstream, prefer a single endpoint that accepts mode.
+  const prox = await maybeProxy("GENERATE_LESSON", {
+    mode,
+    question,
+    tenantId,
+    first_name: firstName,
+    session_id: sessionId,
+    user_id: userId,
+  });
+
+  if (prox.proxied && prox.ok) {
+    const out = prox.data || {};
+    // Pass through if upstream already returns these keys
+    const lessonTitle =
+      pickFirstString(out.lessonTitle, out.API_LessonTitle, out.title) ||
+      "Lesson";
+    const reply =
+      pickFirstString(out.reply, out.API_Response, out.response) ||
+      inferReply(out);
+    const lesson =
+      typeof out.lesson === "string"
+        ? out.lesson
+        : JSON.stringify(out.lesson || {});
+    const bulletCount =
+      typeof out.bulletCount === "number"
+        ? out.bulletCount
+        : Array.isArray(out.bullets)
+          ? out.bullets.length
+          : 5;
+
+    return okEnvelope({
+      source: "upstream_generate_lesson",
+      tenantId,
+      session_id: sessionId,
+      user_id: userId,
+      mode,
+      bulletCount,
+      lesson,
+      lessonTitle,
+      reply,
+      API_Response: reply,
+      API_LessonTitle: lessonTitle,
+      API_Lesson_JSON: lesson,
+      upstream_status: prox.status,
+    });
+  }
+
+  const kind = mode === "prompt" ? "lesson_prompt" : "lesson_business";
+
+  const sys =
+    mode === "prompt"
+      ? [
+          "You are a senior prompt engineer.",
+          "Return STRICT JSON ONLY (no markdown, no commentary).",
+          'Schema: {"title": string, "bullets": string[], "reply": string}.',
+          "The reply must include prompt advice lines prefixed with 🤖.",
+          "Teach: role, context, constraints, output format, and 2 examples.",
+        ].join("\n")
+      : [
+          "You are a senior strategy consultant.",
+          "Return STRICT JSON ONLY (no markdown, no commentary).",
+          'Schema: {"title": string, "bullets": string[], "reply": string}.',
+          "Teach: objective, assumptions, 2–3 options, recommendation, risks, next steps.",
+        ].join("\n");
+
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      {
+        role: "user",
+        content:
+          question ||
+          (mode === "prompt"
+            ? "Generate a prompt engineering lesson."
+            : "Generate a business strategy lesson."),
+      },
+    ],
+    { temperature: 0.15, maxTokens: 900 }
+  );
+
+  if (!oa.ok) {
+    const stub = stubText(kind);
+    const lessonTitle =
+      mode === "prompt"
+        ? "🤖 Prompt Engineering Lesson"
+        : "📘 Business Strategy Lesson";
+    const lessonObj = {
+      mode,
+      title: lessonTitle,
+      bullets: stub.split("\n").slice(1),
+      reply: stub,
+    };
+    const lesson = JSON.stringify(lessonObj);
+
+    return okEnvelope({
+      source: "generate_lesson_stub",
+      tenantId,
+      session_id: sessionId,
+      user_id: userId,
+      mode,
+      bulletCount: lessonObj.bullets.length,
+      lesson,
+      lessonTitle,
+      reply: stub,
+      API_Response: stub,
+      API_LessonTitle: lessonTitle,
+      API_Lesson_JSON: lesson,
+      upstream_status: oa.status || 429,
+      upstream_error: oa.error || "openai_failed",
+    });
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse((oa.content || "").trim());
+  } catch {
+    parsed = null;
+  }
+
+  const title =
+    parsed && typeof parsed.title === "string" && parsed.title.trim()
+      ? parsed.title.trim()
+      : mode === "prompt"
+        ? "🤖 Prompt Engineering Lesson"
+        : "📘 Business Strategy Lesson";
+
+  const bullets = Array.isArray(parsed?.bullets)
+    ? parsed.bullets.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+
+  const reply =
+    parsed && typeof parsed.reply === "string" && parsed.reply.trim()
+      ? parsed.reply.trim()
+      : (oa.content || "").trim() || stubText(kind);
+
+  const lessonObj = {
+    mode,
+    title,
+    bullets: bullets.length ? bullets : undefined,
+    reply,
+  };
+  const lesson = JSON.stringify(lessonObj);
+
+  return okEnvelope({
+    source: "generate_lesson_local",
+    tenantId,
+    session_id: sessionId,
+    user_id: userId,
+    mode,
+    bulletCount: bullets.length || 5,
+    lesson,
+    lessonTitle: title,
+    reply,
+    API_Response: reply,
+    API_LessonTitle: title,
+    API_Lesson_JSON: lesson,
+  });
+}
+
 async function promptLesson(input) {
-  const question = (input?.question || input?.user_question || "")
-    .toString()
-    .trim();
-  const goal = (input?.goal || input?.objective || "").toString().trim();
+  const question = safeQuestion(input);
+  const goal = pickFirstString(input?.goal, input?.objective, "");
 
   const prox = await maybeProxy("PROMPT_LESSON", { question, goal });
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const text =
-      out.prompt_lesson ||
-      out.lesson ||
-      out.result ||
+      pickFirstString(out.prompt_lesson, out.lesson, out.result) ||
       prox.text ||
       stubText("lesson_prompt");
 
@@ -663,7 +847,7 @@ async function promptLesson(input) {
     });
   }
 
-  const text = oa.content.trim() || stubText("lesson_prompt");
+  const text = (oa.content || "").trim() || stubText("lesson_prompt");
   return okEnvelope({
     source: "prompt_lesson_local",
     API_PromptLesson: text,
@@ -673,10 +857,8 @@ async function promptLesson(input) {
 }
 
 async function generateExam(input) {
-  const mode = (input?.mode || "business").toString().trim();
-  const question = (input?.question || input?.user_question || "")
-    .toString()
-    .trim();
+  const mode = safeMode(input);
+  const question = safeQuestion(input);
 
   const prox = await maybeProxy("GENERATE_EXAM", { mode, question });
   if (prox.proxied && prox.ok) {
@@ -703,12 +885,32 @@ async function generateExam(input) {
 }
 
 async function gradeOpen(input) {
-  const mode = (input?.mode || "business").toString().trim();
-  const userAnswer = (input?.answer || input?.user_answer || "")
-    .toString()
-    .trim();
+  const mode = safeMode(input);
 
-  const prox = await maybeProxy("GRADE_OPEN", { mode, answer: userAnswer });
+  const userAnswer = pickFirstString(
+    input?.open_user_answer,
+    input?.answer,
+    input?.user_answer
+  );
+
+  const openQuestion = pickFirstString(
+    input?.open_question,
+    input?.question,
+    input?.confirmed_question
+  );
+
+  const context = pickFirstString(
+    input?.question_for_api,
+    input?.confirmed_question
+  );
+
+  const prox = await maybeProxy("GRADE_OPEN", {
+    mode,
+    answer: userAnswer,
+    open_question: openQuestion,
+    context,
+  });
+
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const grade = out.grade ||
@@ -740,29 +942,31 @@ async function gradeOpen(input) {
 }
 
 async function teachAndQuiz(input) {
-  const mode = (input?.mode || "business").toString().trim();
-  const question = (input?.question || input?.user_question || "")
-    .toString()
-    .trim();
+  const mode = safeMode(input);
+  const question = safeQuestion(input);
 
   const prox = await maybeProxy("TEACH_AND_QUIZ", { mode, question });
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
-    const lesson = out.lesson || out.API_Lesson || out.lesson_display || "";
+    const lesson = pickFirstString(
+      out.lesson,
+      out.API_Lesson,
+      out.lesson_display
+    );
     const quiz =
       out.quiz ||
       jsonOrNull(out.API_Quiz_JSON) ||
       out.API_Quiz ||
       stubQuizExam(mode);
 
+    const fallbackLesson = stubText(
+      mode === "prompt" ? "lesson_prompt" : "lesson_business"
+    );
+
     return okEnvelope({
       source: "upstream_teach_and_quiz",
-      API_Lesson:
-        lesson ||
-        stubText(mode === "prompt" ? "lesson_prompt" : "lesson_business"),
-      API_Lesson_Display:
-        lesson ||
-        stubText(mode === "prompt" ? "lesson_prompt" : "lesson_business"),
+      API_Lesson: lesson || fallbackLesson,
+      API_Lesson_Display: lesson || fallbackLesson,
       API_Quiz_JSON: JSON.stringify(quiz),
       upstream_status: prox.status,
     });
@@ -782,7 +986,9 @@ async function teachAndQuiz(input) {
     { temperature: 0.15, maxTokens: 900 }
   );
 
-  const lesson = oa.ok ? oa.content.trim() || stubText(kind) : stubText(kind);
+  const lesson = oa.ok
+    ? (oa.content || "").trim() || stubText(kind)
+    : stubText(kind);
   const quiz = stubQuizExam(mode);
 
   return okEnvelope({
@@ -800,8 +1006,6 @@ async function teachAndQuiz(input) {
 async function llmElicit(input) {
   const payload = input || {};
 
-  // CI expects raw.source to be invoke_component_stub or invoke_component_default
-  // when PROMPT_URL is not set.
   const raw = {
     source: PROMPT_URL ? "invoke_component_default" : "invoke_component_stub",
     action: "llm_elicit",
@@ -836,6 +1040,8 @@ async function invokeComponent(input) {
       return llmElicit(payload);
     case "optimize_question":
       return optimizeQuestion(payload);
+    case "generate_lesson":
+      return generateLesson(payload);
     case "prompt_lesson":
       return promptLesson(payload);
     case "generate_exam":
@@ -855,10 +1061,6 @@ async function invokeComponent(input) {
 app.get("/", (req, res) => res.status(200).send("ok"));
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
-/**
- * Test harness endpoint (used in CI regression tests).
- * Mirrors /webhook behavior but is deterministic and always returns JSON.
- */
 app.post("/invoke_component", async (req, res) => {
   try {
     const result = await invokeComponent(req.body || {});
@@ -874,10 +1076,6 @@ app.post("/invoke_component", async (req, res) => {
   }
 });
 
-/**
- * Generic webhook entry point (optional).
- * Accepts { action: "teach_and_quiz" | "optimize_question" | ... , ...payload }
- */
 app.post("/webhook", async (req, res) => {
   try {
     const action =
@@ -896,6 +1094,9 @@ app.post("/webhook", async (req, res) => {
         break;
       case "optimize_question":
         result = await optimizeQuestion(payload);
+        break;
+      case "generate_lesson":
+        result = await generateLesson(payload);
         break;
       case "prompt_lesson":
         result = await promptLesson(payload);
@@ -927,6 +1128,11 @@ app.post("/webhook", async (req, res) => {
 app.post("/optimize_question", async (req, res) => {
   const result = await optimizeQuestion(req.body || {});
   res.status(200).json(ensureContract(req, result, "optimize_question"));
+});
+
+app.post("/generate_lesson", async (req, res) => {
+  const result = await generateLesson(req.body || {});
+  res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
 app.post("/teach_and_quiz", async (req, res) => {
@@ -998,9 +1204,7 @@ if (require.main === module) {
   startServer();
 }
 
-// Helpers expected by some tests.
 app.startServer = startServer;
 app.closeResources = closeResources;
 
-// Default export is the Express app (in-process handler).
 module.exports = app;
