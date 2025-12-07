@@ -112,6 +112,7 @@ app.use(express.json({ limit: "2mb" }));
 function requireApiKey(req, res, next) {
   if (req.path === "/health" || req.path === "/") return next();
 
+  // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
@@ -236,9 +237,12 @@ function getUpstreamOverride(name) {
 }
 
 function upstreamUrlFor(endpointName) {
+  // EndpointName is one of:
+  // OPTIMIZE_QUESTION, TEACH_AND_QUIZ, GENERATE_LESSON, PROMPT_LESSON, GENERATE_EXAM, GRADE_OPEN, LLM_ELICIT, RETRIEVAL
   const override = getUpstreamOverride(`UPSTREAM_URL_${endpointName}`);
   if (override) return override;
 
+  // Fallback heuristics: use PROMPT_URL / BUSINESS_URL / RETRIEVAL_URL if present.
   const p = normalizeBaseUrl(PROMPT_URL);
   const b = normalizeBaseUrl(BUSINESS_URL);
   const r = normalizeBaseUrl(RETRIEVAL_URL);
@@ -248,12 +252,15 @@ function upstreamUrlFor(endpointName) {
       return p ? `${p}/prompt_lesson` : "";
     case "GRADE_OPEN":
       return p ? `${p}/grade_open` : "";
+    case "LLM_ELICIT":
+      // CI expects stub when PROMPT_URL is not set; leaving blank will force stub path.
+      return p ? `${p}/llm_elicit` : "";
     case "OPTIMIZE_QUESTION":
       return b ? `${b}/optimize_question` : "";
     case "TEACH_AND_QUIZ":
       return b ? `${b}/teach_and_quiz` : "";
     case "GENERATE_LESSON":
-      return b ? `${b}/generate_lesson` : ""; // override if your upstream is different
+      return b ? `${b}/generate_lesson` : "";
     case "GENERATE_EXAM":
       return b ? `${b}/generate_exam` : "";
     case "RETRIEVAL":
@@ -442,11 +449,11 @@ function stubText(kind) {
   if (kind === "lesson_prompt") {
     return [
       "Prompt engineering lesson (stub):",
-      "🤖 Role: specify who the model is.",
-      "🤖 Context: what’s known/unknown.",
-      "🤖 Constraints: time, scope, format.",
-      "🤖 Output format: headings/bullets/tables.",
-      "🤖 Ask clarifying questions if missing info.",
+      "1) Role: specify who the model is.",
+      "2) Context: what’s known/unknown.",
+      "3) Constraints: time, scope, format.",
+      "4) Output format: headings/bullets/tables.",
+      "5) Ask clarifying questions if missing info.",
     ].join("\n");
   }
 
@@ -515,6 +522,10 @@ function safeQuestion(input) {
     input?.open_question
   );
 }
+
+// -------------------------
+// Upstream proxy helper
+// -------------------------
 
 async function maybeProxy(endpointName, payload) {
   if (!UPSTREAM_ENABLED) return { proxied: false };
@@ -641,162 +652,398 @@ async function generateLesson(input) {
   const sessionId = pickFirstString(input?.session_id, input?.sessionId, "");
   const userId = pickFirstString(input?.user_id, input?.userId, "");
 
-  // If you later stand up a real upstream, prefer a single endpoint that accepts mode.
-  const prox = await maybeProxy("GENERATE_LESSON", {
-    mode,
-    question,
-    tenantId,
-    first_name: firstName,
-    session_id: sessionId,
-    user_id: userId,
-  });
+  function asJsonString(obj) {
+    try {
+      return JSON.stringify(obj || {});
+    } catch {
+      return "{}";
+    }
+  }
 
-  if (prox.proxied && prox.ok) {
-    const out = prox.data || {};
-    // Pass through if upstream already returns these keys
-    const lessonTitle =
+  function normalizeLessonFromUpstream(
+    out,
+    fallbackTitle,
+    fallbackReply,
+    fallbackMode
+  ) {
+    // Accept a few common shapes.
+    const title =
       pickFirstString(out.lessonTitle, out.API_LessonTitle, out.title) ||
-      "Lesson";
+      fallbackTitle;
     const reply =
       pickFirstString(out.reply, out.API_Response, out.response) ||
+      fallbackReply ||
       inferReply(out);
-    const lesson =
-      typeof out.lesson === "string"
-        ? out.lesson
-        : JSON.stringify(out.lesson || {});
+
+    // lesson may arrive as stringified JSON, or as an object, or absent.
+    let lessonStr = "";
+    if (typeof out.lesson === "string") lessonStr = out.lesson;
+    else if (out.lesson && typeof out.lesson === "object")
+      lessonStr = asJsonString(out.lesson);
+    else if (typeof out.API_Lesson_JSON === "string")
+      lessonStr = out.API_Lesson_JSON;
+    else if (out.API_Lesson_JSON && typeof out.API_Lesson_JSON === "object")
+      lessonStr = asJsonString(out.API_Lesson_JSON);
+    else lessonStr = "";
+
+    // If it's not JSON, wrap it.
+    let parsed = null;
+    try {
+      parsed = lessonStr ? JSON.parse(lessonStr) : null;
+    } catch {
+      parsed = null;
+    }
+
+    const bullets = Array.isArray(out.bullets)
+      ? out.bullets
+      : Array.isArray(parsed?.bullets)
+        ? parsed.bullets
+        : [];
+
+    const lessonObj =
+      parsed && typeof parsed === "object"
+        ? {
+            ...parsed,
+            mode: fallbackMode,
+            title: parsed.title || title,
+            reply: parsed.reply || reply,
+          }
+        : { mode: fallbackMode, title, bullets, reply };
+
+    lessonStr = lessonStr && parsed ? lessonStr : asJsonString(lessonObj);
+
     const bulletCount =
       typeof out.bulletCount === "number"
         ? out.bulletCount
-        : Array.isArray(out.bullets)
-          ? out.bullets.length
+        : Array.isArray(lessonObj.bullets)
+          ? lessonObj.bullets.length
           : 5;
 
-    return okEnvelope({
-      source: "upstream_generate_lesson",
-      tenantId,
-      session_id: sessionId,
-      user_id: userId,
-      mode,
-      bulletCount,
-      lesson,
-      lessonTitle,
+    return {
+      title,
       reply,
-      API_Response: reply,
-      API_LessonTitle: lessonTitle,
-      API_Lesson_JSON: lesson,
-      upstream_status: prox.status,
-    });
+      bullets: lessonObj.bullets || [],
+      bulletCount,
+      lessonStr,
+      lessonObj,
+    };
   }
 
-  const kind = mode === "prompt" ? "lesson_prompt" : "lesson_business";
+  function makeStubLesson(stubKind, lessonTitle, forcedMode) {
+    const stub = stubText(stubKind);
+    const lines = stub
+      .split("\n")
+      .slice(1)
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
 
-  const sys =
-    mode === "prompt"
-      ? [
-          "You are a senior prompt engineer.",
-          "Return STRICT JSON ONLY (no markdown, no commentary).",
-          'Schema: {"title": string, "bullets": string[], "reply": string}.',
-          "The reply must include prompt advice lines prefixed with 🤖.",
-          "Teach: role, context, constraints, output format, and 2 examples.",
-        ].join("\n")
-      : [
-          "You are a senior strategy consultant.",
-          "Return STRICT JSON ONLY (no markdown, no commentary).",
-          'Schema: {"title": string, "bullets": string[], "reply": string}.',
-          "Teach: objective, assumptions, 2–3 options, recommendation, risks, next steps.",
-        ].join("\n");
+    const m =
+      forcedMode || (stubKind === "lesson_prompt" ? "prompt" : "business");
+    const reply =
+      m === "prompt"
+        ? `🤖 Here’s a prompt-engineering lesson grounded on your topic: "${question}".`
+        : `Here’s a business strategy lesson for: "${question}".`;
 
-  const oa = await openaiChat(
-    [
-      { role: "system", content: sys },
-      {
-        role: "user",
-        content:
-          question ||
-          (mode === "prompt"
-            ? "Generate a prompt engineering lesson."
-            : "Generate a business strategy lesson."),
-      },
-    ],
-    { temperature: 0.15, maxTokens: 900 }
-  );
-
-  if (!oa.ok) {
-    const stub = stubText(kind);
-    const lessonTitle =
-      mode === "prompt"
-        ? "🤖 Prompt Engineering Lesson"
-        : "📘 Business Strategy Lesson";
-    const lessonObj = {
-      mode,
+    const lessonObj = { mode: m, title: lessonTitle, bullets: lines, reply };
+    const lessonStr = asJsonString(lessonObj);
+    return {
       title: lessonTitle,
-      bullets: stub.split("\n").slice(1),
-      reply: stub,
+      reply,
+      bullets: lines,
+      bulletCount: lines.length,
+      lessonStr,
+      lessonObj,
     };
-    const lesson = JSON.stringify(lessonObj);
+  }
 
+  async function getBusinessBaseline() {
+    // 1) Prefer upstream /generate_lesson if enabled
+    const prox = await maybeProxy("GENERATE_LESSON", {
+      mode: "business",
+      question,
+      tenantId,
+      first_name: firstName,
+      session_id: sessionId,
+      user_id: userId,
+    });
+
+    if (prox.proxied && prox.ok) {
+      const out = prox.data || {};
+      const norm = normalizeLessonFromUpstream(
+        out,
+        "📘 Business Strategy Lesson",
+        out.reply,
+        "business"
+      );
+      return {
+        ...norm,
+        upstream_status: prox.status,
+        source: "upstream_generate_lesson",
+      };
+    }
+
+    // 2) Local OpenAI business baseline (strict JSON)
+    const sys = [
+      "You are a senior strategy consultant.",
+      "Return STRICT JSON ONLY (no markdown, no commentary).",
+      'Schema: {"title": string, "bullets": string[], "reply": string}.',
+      "Teach: objective, assumptions, 2–3 options, recommendation, risks, next steps.",
+    ].join("\n");
+
+    const oa = await openaiChat(
+      [
+        { role: "system", content: sys },
+        {
+          role: "user",
+          content: question || "Generate a business strategy lesson.",
+        },
+      ],
+      { temperature: 0.15, maxTokens: 900 }
+    );
+
+    if (!oa.ok) {
+      const stub = makeStubLesson(
+        "lesson_business",
+        "📘 Business Strategy Lesson",
+        "business"
+      );
+      return {
+        ...stub,
+        upstream_status: oa.status || 429,
+        source: "generate_lesson_stub",
+      };
+    }
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse((oa.content || "").trim());
+    } catch {
+      parsed = null;
+    }
+
+    const title = (parsed?.title || "📘 Business Strategy Lesson")
+      .toString()
+      .trim();
+    const bullets = Array.isArray(parsed?.bullets)
+      ? parsed.bullets.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+    const reply =
+      (parsed?.reply || "").toString().trim() ||
+      `Here’s a business strategy lesson for: "${question}".`;
+
+    const lessonObj = { mode: "business", title, bullets, reply };
+    return {
+      title,
+      bullets,
+      reply,
+      bulletCount: bullets.length || 5,
+      lessonObj,
+      lessonStr: asJsonString(lessonObj),
+      source: "generate_lesson_local",
+    };
+  }
+
+  async function getPromptLessonFromBusiness(biz) {
+    // If there is an upstream prompt agent, prefer it.
+    const prox = await maybeProxy("PROMPT_LESSON", {
+      mode: "prompt",
+      question,
+      tenantId,
+      first_name: firstName,
+      session_id: sessionId,
+      user_id: userId,
+      business_baseline: biz?.lessonStr || "",
+      business_lessonTitle: biz?.title || "",
+      business_bullets: Array.isArray(biz?.bullets) ? biz.bullets : [],
+      business_reply: biz?.reply || "",
+    });
+
+    if (prox.proxied && prox.ok) {
+      const out = prox.data || {};
+      // Many prompt-agent endpoints return plain text; wrap if needed.
+      const promptText =
+        pickFirstString(
+          out.prompt_lesson,
+          out.API_PromptLesson,
+          out.lesson,
+          out.reply
+        ) || "";
+
+      if (
+        out.title ||
+        out.lessonTitle ||
+        out.API_LessonTitle ||
+        out.API_Lesson_JSON ||
+        out.lesson
+      ) {
+        const norm = normalizeLessonFromUpstream(
+          out,
+          "🤖 Prompt Engineering Lesson",
+          promptText || out.reply,
+          "prompt"
+        );
+        return {
+          ...norm,
+          upstream_status: prox.status,
+          source: "upstream_prompt_lesson",
+        };
+      }
+
+      const bullets = promptText
+        .split("\n")
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .slice(0, 8);
+
+      const title = "🤖 Prompt Engineering Lesson";
+      const reply =
+        promptText ||
+        `🤖 Here’s a prompt lesson grounded on the business baseline for: "${question}".`;
+      const lessonObj = { mode: "prompt", title, bullets, reply };
+      return {
+        title,
+        bullets,
+        reply,
+        bulletCount: bullets.length || 5,
+        lessonObj,
+        lessonStr: asJsonString(lessonObj),
+        source: "upstream_prompt_lesson",
+        upstream_status: prox.status,
+      };
+    }
+
+    // Local OpenAI prompt lesson grounded in business baseline
+    const sys = [
+      "You are a senior prompt engineer collaborating with a business strategy expert.",
+      "Return STRICT JSON ONLY (no markdown, no commentary).",
+      'Schema: {"title": string, "bullets": string[], "reply": string}.',
+      "The reply must include prompt advice lines prefixed with 🤖.",
+      "Teach: role, context, constraints, output format, and 2 examples.",
+      "You MUST ground the prompt advice in the business strategy lesson context provided.",
+    ].join("\n");
+
+    const contextBlob = asJsonString({
+      business_title: biz?.title || "",
+      business_bullets: Array.isArray(biz?.bullets) ? biz.bullets : [],
+      business_reply: biz?.reply || "",
+    });
+
+    const user = [
+      `User question/topic: ${question || ""}`,
+      "",
+      "Business Strategy Lesson Context (from Agent 1):",
+      contextBlob,
+      "",
+      "Now produce the Prompt Engineering lesson that helps the user get the best AI output for THIS business context.",
+    ].join("\n");
+
+    const oa = await openaiChat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      { temperature: 0.15, maxTokens: 950 }
+    );
+
+    if (!oa.ok) {
+      // Deterministic, client-demo-safe stub grounded on biz title
+      const lessonTitle = "🤖 Prompt Engineering Lesson";
+      const stubLines = [
+        `🤖 Role: You are a senior strategy consultant.`,
+        `🤖 Context: Use the business baseline titled "${(biz?.title || "Business Lesson").slice(0, 80)}".`,
+        "🤖 Constraints: specify timeframe, budget, audience, and format.",
+        "🤖 Output format: force sections + bullets + a KPI table.",
+        "🤖 Verification: ask for assumptions, risks, and next steps.",
+      ];
+      const reply = `🤖 Here’s a prompt lesson grounded on the business baseline for: "${question}".`;
+      const lessonObj = {
+        mode: "prompt",
+        title: lessonTitle,
+        bullets: stubLines,
+        reply,
+      };
+      return {
+        title: lessonTitle,
+        bullets: stubLines,
+        reply,
+        bulletCount: stubLines.length,
+        lessonObj,
+        lessonStr: asJsonString(lessonObj),
+        source: "generate_lesson_stub",
+        upstream_status: oa.status || 429,
+      };
+    }
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse((oa.content || "").trim());
+    } catch {
+      parsed = null;
+    }
+
+    const title = (parsed?.title || "🤖 Prompt Engineering Lesson")
+      .toString()
+      .trim();
+    const bullets = Array.isArray(parsed?.bullets)
+      ? parsed.bullets.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+    const reply =
+      (parsed?.reply || "").toString().trim() ||
+      `🤖 Here’s a prompt lesson grounded on the business baseline for: "${question}".`;
+
+    const lessonObj = { mode: "prompt", title, bullets, reply };
+    return {
+      title,
+      bullets,
+      reply,
+      bulletCount: bullets.length || 5,
+      lessonObj,
+      lessonStr: asJsonString(lessonObj),
+      source: "generate_lesson_local",
+    };
+  }
+
+  // ---- Mode routing ----
+  if (mode !== "prompt") {
+    const biz = await getBusinessBaseline();
     return okEnvelope({
-      source: "generate_lesson_stub",
+      source: biz.source || "generate_lesson_local",
       tenantId,
       session_id: sessionId,
       user_id: userId,
-      mode,
-      bulletCount: lessonObj.bullets.length,
-      lesson,
-      lessonTitle,
-      reply: stub,
-      API_Response: stub,
-      API_LessonTitle: lessonTitle,
-      API_Lesson_JSON: lesson,
-      upstream_status: oa.status || 429,
-      upstream_error: oa.error || "openai_failed",
+      mode: "business",
+      bulletCount: biz.bulletCount,
+      lesson: biz.lessonStr,
+      lessonTitle: biz.title,
+      reply: biz.reply,
+      API_Response: biz.reply,
+      API_LessonTitle: biz.title,
+      API_Lesson_JSON: biz.lessonStr,
+      upstream_status: biz.upstream_status,
     });
   }
 
-  let parsed = null;
-  try {
-    parsed = JSON.parse((oa.content || "").trim());
-  } catch {
-    parsed = null;
-  }
-
-  const title =
-    parsed && typeof parsed.title === "string" && parsed.title.trim()
-      ? parsed.title.trim()
-      : mode === "prompt"
-        ? "🤖 Prompt Engineering Lesson"
-        : "📘 Business Strategy Lesson";
-
-  const bullets = Array.isArray(parsed?.bullets)
-    ? parsed.bullets.map((x) => String(x || "").trim()).filter(Boolean)
-    : [];
-
-  const reply =
-    parsed && typeof parsed.reply === "string" && parsed.reply.trim()
-      ? parsed.reply.trim()
-      : (oa.content || "").trim() || stubText(kind);
-
-  const lessonObj = {
-    mode,
-    title,
-    bullets: bullets.length ? bullets : undefined,
-    reply,
-  };
-  const lesson = JSON.stringify(lessonObj);
+  // Prompt mode: Agent 1 baseline -> Agent 2 prompt lesson grounded on baseline
+  const biz = await getBusinessBaseline();
+  const prompt = await getPromptLessonFromBusiness(biz);
 
   return okEnvelope({
-    source: "generate_lesson_local",
+    source: prompt.source || "generate_lesson_local",
     tenantId,
     session_id: sessionId,
     user_id: userId,
-    mode,
-    bulletCount: bullets.length || 5,
-    lesson,
-    lessonTitle: title,
-    reply,
-    API_Response: reply,
-    API_LessonTitle: title,
-    API_Lesson_JSON: lesson,
+    mode: "prompt",
+    bulletCount: prompt.bulletCount,
+    lesson: prompt.lessonStr,
+    lessonTitle: prompt.title,
+    reply: prompt.reply,
+    API_Response: prompt.reply,
+    API_LessonTitle: prompt.title,
+    API_Lesson_JSON: prompt.lessonStr,
+    // helpful extras for VF (optional)
+    business_baseline: biz.lessonStr,
+    business_lessonTitle: biz.title,
+    upstream_status: prompt.upstream_status || biz.upstream_status,
   });
 }
 
@@ -1061,6 +1308,10 @@ async function invokeComponent(input) {
 app.get("/", (req, res) => res.status(200).send("ok"));
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
+/**
+ * Test harness endpoint (used in CI regression tests).
+ * Mirrors /webhook behavior but is deterministic and always returns JSON.
+ */
 app.post("/invoke_component", async (req, res) => {
   try {
     const result = await invokeComponent(req.body || {});
@@ -1076,6 +1327,10 @@ app.post("/invoke_component", async (req, res) => {
   }
 });
 
+/**
+ * Generic webhook entry point (optional).
+ * Accepts { action: "teach_and_quiz" | "optimize_question" | ... , ...payload }
+ */
 app.post("/webhook", async (req, res) => {
   try {
     const action =
