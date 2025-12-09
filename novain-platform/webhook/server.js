@@ -253,7 +253,6 @@ function upstreamUrlFor(endpointName) {
     case "GRADE_OPEN":
       return p ? `${p}/grade_open` : "";
     case "LLM_ELICIT":
-      // CI expects stub when PROMPT_URL is not set; leaving blank will force stub path.
       return p ? `${p}/llm_elicit` : "";
     case "OPTIMIZE_QUESTION":
       return b ? `${b}/optimize_question` : "";
@@ -666,7 +665,6 @@ async function generateLesson(input) {
     fallbackReply,
     fallbackMode
   ) {
-    // Accept a few common shapes.
     const title =
       pickFirstString(out.lessonTitle, out.API_LessonTitle, out.title) ||
       fallbackTitle;
@@ -675,7 +673,6 @@ async function generateLesson(input) {
       fallbackReply ||
       inferReply(out);
 
-    // lesson may arrive as stringified JSON, or as an object, or absent.
     let lessonStr = "";
     if (typeof out.lesson === "string") lessonStr = out.lesson;
     else if (out.lesson && typeof out.lesson === "object")
@@ -686,7 +683,6 @@ async function generateLesson(input) {
       lessonStr = asJsonString(out.API_Lesson_JSON);
     else lessonStr = "";
 
-    // If it's not JSON, wrap it.
     let parsed = null;
     try {
       parsed = lessonStr ? JSON.parse(lessonStr) : null;
@@ -757,7 +753,6 @@ async function generateLesson(input) {
   }
 
   async function getBusinessBaseline() {
-    // 1) Prefer upstream /generate_lesson if enabled
     const prox = await maybeProxy("GENERATE_LESSON", {
       mode: "business",
       question,
@@ -782,7 +777,6 @@ async function generateLesson(input) {
       };
     }
 
-    // 2) Local OpenAI business baseline (strict JSON)
     const sys = [
       "You are a senior strategy consultant.",
       "Return STRICT JSON ONLY (no markdown, no commentary).",
@@ -844,7 +838,6 @@ async function generateLesson(input) {
   }
 
   async function getPromptLessonFromBusiness(biz) {
-    // If there is an upstream prompt agent, prefer it.
     const prox = await maybeProxy("PROMPT_LESSON", {
       mode: "prompt",
       question,
@@ -860,7 +853,6 @@ async function generateLesson(input) {
 
     if (prox.proxied && prox.ok) {
       const out = prox.data || {};
-      // Many prompt-agent endpoints return plain text; wrap if needed.
       const promptText =
         pickFirstString(
           out.prompt_lesson,
@@ -912,7 +904,6 @@ async function generateLesson(input) {
       };
     }
 
-    // Local OpenAI prompt lesson grounded in business baseline
     const sys = [
       "You are a senior prompt engineer collaborating with a business strategy expert.",
       "Return STRICT JSON ONLY (no markdown, no commentary).",
@@ -946,7 +937,6 @@ async function generateLesson(input) {
     );
 
     if (!oa.ok) {
-      // Deterministic, client-demo-safe stub grounded on biz title
       const lessonTitle = "🤖 Prompt Engineering Lesson";
       const stubLines = [
         `🤖 Role: You are a senior strategy consultant.`,
@@ -1003,7 +993,6 @@ async function generateLesson(input) {
     };
   }
 
-  // ---- Mode routing ----
   if (mode !== "prompt") {
     const biz = await getBusinessBaseline();
     return okEnvelope({
@@ -1023,7 +1012,6 @@ async function generateLesson(input) {
     });
   }
 
-  // Prompt mode: Agent 1 baseline -> Agent 2 prompt lesson grounded on baseline
   const biz = await getBusinessBaseline();
   const prompt = await getPromptLessonFromBusiness(biz);
 
@@ -1040,7 +1028,6 @@ async function generateLesson(input) {
     API_Response: prompt.reply,
     API_LessonTitle: prompt.title,
     API_Lesson_JSON: prompt.lessonStr,
-    // helpful extras for VF (optional)
     business_baseline: biz.lessonStr,
     business_lessonTitle: biz.title,
     upstream_status: prompt.upstream_status || biz.upstream_status,
@@ -1103,6 +1090,11 @@ async function promptLesson(input) {
   });
 }
 
+/**
+ * Generate "exam" object, but ALSO return quiz-shaped keys for Voiceflow compatibility:
+ * - API_Exam_JSON and API_Quiz_JSON both set
+ * - exam and quiz both set
+ */
 async function generateExam(input) {
   const mode = safeMode(input);
   const question = safeQuestion(input);
@@ -1114,21 +1106,51 @@ async function generateExam(input) {
       out.exam ||
       jsonOrNull(out.API_Exam_JSON) ||
       out.API_Exam ||
+      out.quiz ||
+      jsonOrNull(out.API_Quiz_JSON) ||
+      out.API_Quiz ||
       stubQuizExam(mode);
+
+    const examStr = typeof exam === "string" ? exam : JSON.stringify(exam);
 
     return okEnvelope({
       source: "upstream_generate_exam",
-      API_Exam_JSON: typeof exam === "string" ? exam : JSON.stringify(exam),
+      API_Exam_JSON: examStr,
+      API_Quiz_JSON: examStr, // alias for VF
       exam,
+      quiz: exam, // alias for VF
       upstream_status: prox.status,
     });
   }
 
+  const stub = stubQuizExam(mode);
+  const stubStr = JSON.stringify(stub);
+
   return okEnvelope({
     source: "generate_exam_stub",
-    API_Exam_JSON: JSON.stringify(stubQuizExam(mode)),
-    exam: stubQuizExam(mode),
+    API_Exam_JSON: stubStr,
+    API_Quiz_JSON: stubStr, // alias for VF
+    exam: stub,
+    quiz: stub, // alias for VF
   });
+}
+
+/**
+ * Alias: generate_quiz is the same as generate_exam for MVP.
+ * Keeping this avoids refactoring Voiceflow.
+ */
+async function generateQuiz(input) {
+  const res = await generateExam(input);
+  // Ensure both quiz/exam keys exist even if upstream changed shape
+  const examStr = pickFirstString(res.API_Exam_JSON, res.API_Quiz_JSON) || "";
+  const payload = {
+    ...res,
+    API_Exam_JSON: res.API_Exam_JSON || examStr,
+    API_Quiz_JSON: res.API_Quiz_JSON || examStr,
+    exam: res.exam || res.quiz,
+    quiz: res.quiz || res.exam,
+  };
+  return payload;
 }
 
 async function gradeOpen(input) {
@@ -1293,6 +1315,12 @@ async function invokeComponent(input) {
       return promptLesson(payload);
     case "generate_exam":
       return generateExam(payload);
+    case "generate_quiz":
+      return generateQuiz(payload);
+    case "exam":
+      return generateExam(payload);
+    case "quiz":
+      return generateQuiz(payload);
     case "grade_open":
       return gradeOpen(payload);
     case "teach_and_quiz":
@@ -1362,6 +1390,15 @@ app.post("/webhook", async (req, res) => {
       case "generate_exam":
         result = await generateExam(payload);
         break;
+      case "generate_quiz":
+        result = await generateQuiz(payload);
+        break;
+      case "exam":
+        result = await generateExam(payload);
+        break;
+      case "quiz":
+        result = await generateQuiz(payload);
+        break;
       case "teach_and_quiz":
       default:
         result = await teachAndQuiz(payload);
@@ -1400,9 +1437,22 @@ app.post("/prompt_lesson", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
+// Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
   const result = await generateExam(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_exam"));
+});
+
+// ✅ Alias endpoints for Voiceflow MVP compatibility
+app.post("/generate_quiz", async (req, res) => {
+  const result = await generateQuiz(req.body || {});
+  res.status(200).json(ensureContract(req, result, "generate_quiz"));
+});
+
+// Some VF exports call /exam directly
+app.post("/exam", async (req, res) => {
+  const result = await generateExam(req.body || {});
+  res.status(200).json(ensureContract(req, result, "exam"));
 });
 
 app.post("/grade_open", async (req, res) => {
