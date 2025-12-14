@@ -523,6 +523,97 @@ function safeQuestion(input) {
 }
 
 // -------------------------
+// Interpretation helpers
+// -------------------------
+
+function extractFirstJsonObject(text) {
+  if (!text || typeof text !== "string") return null;
+  const s = text.trim();
+
+  // Strip common fenced code blocks
+  const unfenced = s
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  // Try direct parse first
+  const direct = jsonOrNull(unfenced);
+  if (direct && typeof direct === "object") return direct;
+
+  // Fallback: best-effort substring from first { to last }
+  const a = unfenced.indexOf("{");
+  const b = unfenced.lastIndexOf("}");
+  if (a >= 0 && b > a) {
+    const sub = unfenced.slice(a, b + 1);
+    const parsed = jsonOrNull(sub);
+    if (parsed && typeof parsed === "object") return parsed;
+  }
+  return null;
+}
+
+function buildInterpretationHeuristic({ question, optimized_question, mode }) {
+  const q = (optimized_question || question || "").toString().trim();
+  const m =
+    (mode || "business").toString().toLowerCase() === "prompt"
+      ? "prompt"
+      : "business";
+
+  // Very light, deterministic extraction (heuristic only)
+  const lower = q.toLowerCase();
+  const intent =
+    lower.startsWith("how ") || lower.includes(" how do ")
+      ? "how_to"
+      : lower.startsWith("what ") || lower.includes(" what are ")
+        ? "explain"
+        : lower.includes("compare")
+          ? "compare"
+          : lower.includes("analyze")
+            ? "analyze"
+            : lower.includes("strategy")
+              ? "strategy"
+              : "general";
+
+  const domain =
+    m === "prompt"
+      ? "prompt_engineering"
+      : lower.includes("go-to-market") || lower.includes("gtm")
+        ? "go_to_market"
+        : lower.includes("pricing")
+          ? "pricing"
+          : lower.includes("market")
+            ? "market_analysis"
+            : lower.includes("customer")
+              ? "customer"
+              : "business_strategy";
+
+  const deliverable = lower.includes("quiz")
+    ? "lesson_and_quiz"
+    : lower.includes("lesson")
+      ? "lesson"
+      : lower.includes("framework")
+        ? "framework"
+        : lower.includes("plan")
+          ? "action_plan"
+          : "explanation";
+
+  const interpretation = {
+    intent,
+    domain,
+    deliverable,
+    audience: "general",
+    constraints: [],
+    assumptions: [],
+    follow_up_questions: [],
+  };
+
+  const interpretation_summary = q
+    ? `Interpretation: You want a ${deliverable.replace(/_/g, " ")} in ${domain.replace(/_/g, " ")}—focused on: ${truncate(q, 140)}`
+    : "Interpretation: You want a clearer, more actionable question to generate the right lesson and quiz.";
+
+  return { interpretation_summary, interpretation };
+}
+
+// -------------------------
 // Upstream proxy helper
 // -------------------------
 
@@ -599,42 +690,117 @@ async function optimizeQuestion(input) {
       prox.text ||
       stubText("optimize_question");
 
+    const upstreamInterpretationSummary = pickFirstString(
+      out.interpretation_summary,
+      out.interpretationSummary,
+      out.summary
+    );
+
+    // If upstream doesn't provide an interpretation, create a deterministic heuristic one (no extra LLM call).
+    const heur = buildInterpretationHeuristic({
+      question,
+      optimized_question: optimized,
+      mode,
+    });
+
+    const interpretation_summary =
+      (upstreamInterpretationSummary || "").toString().trim() ||
+      heur.interpretation_summary;
+
+    const interpretation_obj =
+      (out.interpretation &&
+        typeof out.interpretation === "object" &&
+        out.interpretation) ||
+      heur.interpretation;
+
     return okEnvelope({
       source: "upstream_optimize_question",
       optimized_question: optimized,
       API_OptimizedQuestion: optimized,
+      interpretation_summary,
+      interpretation: interpretation_obj,
+      interpretation_json: JSON.stringify(interpretation_obj),
       upstream_status: prox.status,
     });
   }
 
+  // Local (OpenAI) path: ask for BOTH an improved question and a client-impressive interpretation.
+  const sys = [
+    "You are a senior consultant building a client-facing learning assistant.",
+    "Return STRICT JSON only (no markdown, no code fences).",
+    "Keys:",
+    '  - "optimized_question": a concise, actionable rewrite of the user\'s question.',
+    '  - "interpretation_summary": 1–2 sentences explaining the underlying intent, desired deliverable, and any implied constraints.',
+    '  - "interpretation": an object with keys { intent, domain, deliverable, audience, constraints, assumptions, follow_up_questions }.',
+    "Constraints:",
+    "  - Keep optimized_question under 220 characters if possible.",
+    "  - follow_up_questions must be an array (can be empty).",
+  ].join("\n");
+
   const oa = await openaiChat(
     [
+      { role: "system", content: sys },
       {
-        role: "system",
+        role: "user",
         content:
-          "You are a senior strategy consultant. Rewrite the user question into a clearer, more actionable version. Keep it concise.",
+          question ||
+          "Optimize the question and interpret the user's intent for lesson + quiz generation.",
       },
-      { role: "user", content: question || "Optimize this question." },
     ],
-    { temperature: 0.1, maxTokens: 250 }
+    { temperature: 0, maxTokens: 420 }
   );
 
+  // If OpenAI fails, fall back deterministically so the flow never breaks.
   if (!oa.ok) {
     const stub = stubText("optimize_question");
+    const heur = buildInterpretationHeuristic({
+      question,
+      optimized_question: stub,
+      mode,
+    });
+
     return okEnvelope({
       source: "optimize_stub",
       optimized_question: stub,
       API_OptimizedQuestion: stub,
+      interpretation_summary: heur.interpretation_summary,
+      interpretation: heur.interpretation,
+      interpretation_json: JSON.stringify(heur.interpretation),
       upstream_status: oa.status || 429,
       upstream_error: oa.error || "openai_failed",
     });
   }
 
-  const optimized = (oa.content || "").trim() || stubText("optimize_question");
+  const parsed = extractFirstJsonObject(oa.content);
+  const fallbackOptimized =
+    (oa.content || "").trim() || stubText("optimize_question");
+
+  const optimized =
+    pickFirstString(parsed?.optimized_question) || fallbackOptimized;
+
+  const heur = buildInterpretationHeuristic({
+    question,
+    optimized_question: optimized,
+    mode,
+  });
+
+  const interpretation_obj =
+    (parsed?.interpretation &&
+      typeof parsed.interpretation === "object" &&
+      parsed.interpretation) ||
+    heur.interpretation;
+
+  const interpretation_summary =
+    pickFirstString(parsed?.interpretation_summary) ||
+    heur.interpretation_summary;
+
   return okEnvelope({
     source: "optimize_local",
     optimized_question: optimized,
     API_OptimizedQuestion: optimized,
+    interpretation_summary,
+    interpretation: interpretation_obj,
+    interpretation_json: JSON.stringify(interpretation_obj),
   });
 }
 
