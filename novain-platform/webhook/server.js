@@ -505,11 +505,27 @@ function jsonOrNull(s) {
 }
 
 function safeMode(input) {
-  const m = (input?.mode || input?.learning_mode || "business")
-    .toString()
+  // Be liberal in what we accept from Voiceflow/UI labels:
+  // - "prompt" / "Prompt Engineering" / "\"prompt\"" should all resolve to "prompt"
+  // - anything else defaults to "business"
+  const raw = pickFirstString(
+    input?.mode,
+    input?.learning_mode,
+    input?.lens,
+    input?.agent_mode,
+    "business"
+  );
+
+  const m = String(raw || "")
     .trim()
     .toLowerCase();
-  return m === "prompt" ? "prompt" : "business";
+
+  if (!m) return "business";
+  if (m === "prompt") return "prompt";
+  if (m === "business") return "business";
+  if (m.includes("prompt")) return "prompt";
+  if (m.includes("business")) return "business";
+  return "business";
 }
 
 // Normalize request bodies: Voiceflow sometimes sends a JSON string (e.g. '"{...}"') instead of an object.
@@ -1369,7 +1385,8 @@ app.get("/health", (req, res) => res.status(200).send("ok"));
  */
 app.post("/invoke_component", async (req, res) => {
   try {
-    const result = await invokeComponent(req.body || {});
+    const body = normalizeIncomingBody(req.body) || {};
+    const result = await invokeComponent(body);
     return res
       .status(200)
       .json(ensureContract(req, result, "invoke_component"));
@@ -1388,14 +1405,13 @@ app.post("/invoke_component", async (req, res) => {
  */
 app.post("/webhook", async (req, res) => {
   try {
+    const body = normalizeIncomingBody(req.body) || {};
     const action =
-      (req.body?.action && typeof req.body.action === "string"
-        ? req.body.action
-        : "") ||
-      (req.body?.action?.name ? String(req.body.action.name) : "") ||
-      (req.body?.type ? String(req.body.type) : "");
+      (body?.action && typeof body.action === "string" ? body.action : "") ||
+      (body?.action?.name ? String(body.action.name) : "") ||
+      (body?.type ? String(body.type) : "");
 
-    const payload = req.body || {};
+    const payload = body || {};
 
     let result;
     switch ((action || "").toLowerCase()) {
@@ -1451,7 +1467,8 @@ app.post("/optimize_question", async (req, res) => {
 });
 
 app.post("/generate_lesson", async (req, res) => {
-  const result = await generateLesson(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await generateLesson(body);
   res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
@@ -1462,30 +1479,35 @@ app.post("/teach_and_quiz", async (req, res) => {
 });
 
 app.post("/prompt_lesson", async (req, res) => {
-  const result = await promptLesson(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await promptLesson(body);
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await generateExam(body);
   res.status(200).json(ensureContract(req, result, "generate_exam"));
 });
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const result = await generateQuiz(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await generateQuiz(body);
   res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await generateExam(body);
   res.status(200).json(ensureContract(req, result, "exam"));
 });
 
 app.post("/grade_open", async (req, res) => {
-  const result = await gradeOpen(req.body || {});
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await gradeOpen(body);
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 
