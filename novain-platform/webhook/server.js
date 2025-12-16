@@ -63,6 +63,10 @@ const UPSTREAM_RETRY_BASE_MS = parseInt(
 const UPSTREAM_ENABLED =
   String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
 
+const PROXY_OPTIMIZE_QUESTION =
+  String(process.env.PROXY_OPTIMIZE_QUESTION || "false").toLowerCase() ===
+  "true";
+
 const BUSINESS_URL = (process.env.BUSINESS_URL || "").trim();
 const PROMPT_URL = (process.env.PROMPT_URL || "").trim();
 const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
@@ -669,14 +673,13 @@ async function interpretQuestion({
     },
   };
 
-  const oa = await openaiChat({
-    model: OPENAI_MODEL,
-    messages: [
+  const oa = await openaiChat(
+    [
       { role: "system", content: system },
       { role: "user", content: JSON.stringify(user) },
     ],
-    temperature: 0.2,
-  });
+    { temperature: 0.2, maxTokens: 700 }
+  );
 
   if (!oa.ok) {
     return buildInterpretationHeuristic({
@@ -786,7 +789,9 @@ async function optimizeQuestion(input) {
   const question = safeQuestion(input);
   const mode = safeMode(input);
 
-  const prox = await maybeProxy("OPTIMIZE_QUESTION", { question, mode });
+  const prox = PROXY_OPTIMIZE_QUESTION
+    ? await maybeProxy("OPTIMIZE_QUESTION", { question, mode })
+    : { proxied: false, ok: false, status: null, data: null, raw: null };
 
   if (prox.proxied && prox.ok) {
     const base = prox.data && typeof prox.data === "object" ? prox.data : {};
