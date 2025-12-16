@@ -505,27 +505,11 @@ function jsonOrNull(s) {
 }
 
 function safeMode(input) {
-  // Be liberal in what we accept from Voiceflow/UI labels:
-  // - "prompt" / "Prompt Engineering" / "\"prompt\"" should all resolve to "prompt"
-  // - anything else defaults to "business"
-  const raw = pickFirstString(
-    input?.mode,
-    input?.learning_mode,
-    input?.lens,
-    input?.agent_mode,
-    "business"
-  );
-
-  const m = String(raw || "")
+  const m = (input?.mode || input?.learning_mode || "business")
+    .toString()
     .trim()
     .toLowerCase();
-
-  if (!m) return "business";
-  if (m === "prompt") return "prompt";
-  if (m === "business") return "business";
-  if (m.includes("prompt")) return "prompt";
-  if (m.includes("business")) return "business";
-  return "business";
+  return m === "prompt" ? "prompt" : "business";
 }
 
 // Normalize request bodies: Voiceflow sometimes sends a JSON string (e.g. '"{...}"') instead of an object.
@@ -563,6 +547,179 @@ function safeQuestion(input) {
     input?.user_question,
     input?.open_question
   );
+}
+
+// -------------------------
+// Interpretation helpers
+// -------------------------
+function extractFirstJsonObject(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  const s = text.trim();
+
+  // Fast path: whole string is JSON.
+  try {
+    return JSON.parse(s);
+  } catch {}
+
+  // Find first {...} block that parses.
+  const firstBrace = s.indexOf("{");
+  if (firstBrace < 0) return null;
+
+  // Simple brace-matching scan.
+  let depth = 0;
+  for (let i = firstBrace; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    if (depth === 0) {
+      const candidate = s.slice(firstBrace, i + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // keep scanning in case we matched too early
+      }
+    }
+  }
+  return null;
+}
+
+function buildInterpretationHeuristic({
+  original_question,
+  optimized_question,
+  mode,
+}) {
+  const oq = (original_question || "").trim();
+  const q = (optimized_question || oq || "").trim();
+
+  const lower = q.toLowerCase();
+  const wants = [];
+  if (/\broadmap|plan|steps|next step|approach\b/.test(lower))
+    wants.push("a structured plan");
+  if (/\bpricing|price|package|offer\b/.test(lower))
+    wants.push("pricing / packaging options");
+  if (/\bquiz|test|questions\b/.test(lower)) wants.push("a quiz / assessment");
+  if (/\bprompt|prompts|system prompt|few-shot\b/.test(lower))
+    wants.push("prompt design guidance");
+  if (/\bstrategy|market|position|go-to-market|gtm\b/.test(lower))
+    wants.push("business strategy guidance");
+
+  const deliverable = wants.length
+    ? wants.join(", ")
+    : "a clear, actionable answer";
+
+  const domain =
+    mode === "prompt"
+      ? "Prompt Engineering"
+      : mode === "business"
+        ? "Business Strategy"
+        : "Strategy";
+
+  const interpretation_summary =
+    `My interpretation (${domain} lens): you want ${deliverable} for: "${q}". ` +
+    `If I’m missing the mark, tell me what to change (goal, constraints, audience, or output format).`;
+
+  const interpretation = {
+    mode: mode || "",
+    original_question: oq,
+    confirmed_question: q,
+    objective: null,
+    constraints: null,
+    deliverable,
+  };
+
+  return {
+    interpretation_summary,
+    interpretation_json: JSON.stringify(interpretation),
+  };
+}
+
+async function interpretQuestion({
+  original_question,
+  optimized_question,
+  mode,
+}) {
+  const oq = (original_question || "").trim();
+  const q = (optimized_question || oq || "").trim();
+
+  // If no key, fall back to heuristic.
+  if (!OPENAI_API_KEY)
+    return buildInterpretationHeuristic({
+      original_question: oq,
+      optimized_question: q,
+      mode,
+    });
+
+  const system =
+    "You are a helpful assistant that must output STRICT JSON only (no markdown). " +
+    "Return a compact interpretation of the user's intent so the user can confirm it.";
+  const user = {
+    task: "interpret_question",
+    mode: mode || "",
+    original_question: oq,
+    confirmed_question: q,
+    output_schema: {
+      interpretation_summary: "string (1-2 sentences, plain English)",
+      interpretation: {
+        objective: "string|null",
+        audience: "string|null",
+        constraints: "string|null",
+        deliverable: "string|null",
+        key_terms: "string[]",
+      },
+    },
+  };
+
+  const oa = await openaiChat({
+    model: OPENAI_MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: JSON.stringify(user) },
+    ],
+    temperature: 0.2,
+  });
+
+  if (!oa.ok) {
+    return buildInterpretationHeuristic({
+      original_question: oq,
+      optimized_question: q,
+      mode,
+    });
+  }
+
+  const parsed = extractFirstJsonObject(oa.content || "");
+  if (!parsed || typeof parsed !== "object") {
+    return buildInterpretationHeuristic({
+      original_question: oq,
+      optimized_question: q,
+      mode,
+    });
+  }
+
+  const summary =
+    typeof parsed.interpretation_summary === "string"
+      ? parsed.interpretation_summary.trim()
+      : "";
+  const interpretation_obj =
+    parsed.interpretation && typeof parsed.interpretation === "object"
+      ? parsed.interpretation
+      : {};
+  const interpretation = {
+    mode: mode || "",
+    original_question: oq,
+    confirmed_question: q,
+    ...interpretation_obj,
+  };
+
+  return {
+    interpretation_summary:
+      summary ||
+      buildInterpretationHeuristic({
+        original_question: oq,
+        optimized_question: q,
+        mode,
+      }).interpretation_summary,
+    interpretation_json: JSON.stringify(interpretation),
+  };
 }
 
 // -------------------------
@@ -630,23 +787,42 @@ async function optimizeQuestion(input) {
   const mode = safeMode(input);
 
   const prox = await maybeProxy("OPTIMIZE_QUESTION", { question, mode });
+
   if (prox.proxied && prox.ok) {
-    const out = prox.data || {};
+    const base = prox.data && typeof prox.data === "object" ? prox.data : {};
     const optimized =
-      pickFirstString(
-        out.optimized_question,
-        out.optimized,
-        out.question,
-        out.result
-      ) ||
-      prox.text ||
+      pickFirstString(base.optimized_question, base.API_OptimizedQuestion) ||
       stubText("optimize_question");
 
+    let interpretation_summary = pickFirstString(
+      base.interpretation_summary,
+      base.API_Interpretation_Summary
+    );
+    let interpretation_json = pickFirstString(
+      base.interpretation_json,
+      base.API_Interpretation_JSON
+    );
+    if (!interpretation_summary || !interpretation_json) {
+      const interp = await interpretQuestion({
+        original_question: question,
+        optimized_question: optimized,
+        mode,
+      });
+      interpretation_summary = interp.interpretation_summary;
+      interpretation_json = interp.interpretation_json;
+    }
+
     return okEnvelope({
-      source: "upstream_optimize_question",
+      source: prox.source || "optimize_upstream",
+      mode,
       optimized_question: optimized,
+      confirmed_question: optimized,
+      interpretation_summary,
+      interpretation_json,
       API_OptimizedQuestion: optimized,
-      upstream_status: prox.status,
+      API_Interpretation_Summary: interpretation_summary,
+      API_Interpretation_JSON: interpretation_json,
+      ...base,
     });
   }
 
@@ -674,10 +850,21 @@ async function optimizeQuestion(input) {
   }
 
   const optimized = (oa.content || "").trim() || stubText("optimize_question");
+  const interp = await interpretQuestion({
+    original_question: question,
+    optimized_question: optimized,
+    mode,
+  });
   return okEnvelope({
     source: "optimize_local",
+    mode,
     optimized_question: optimized,
+    confirmed_question: optimized,
+    interpretation_summary: interp.interpretation_summary,
+    interpretation_json: interp.interpretation_json,
     API_OptimizedQuestion: optimized,
+    API_Interpretation_Summary: interp.interpretation_summary,
+    API_Interpretation_JSON: interp.interpretation_json,
   });
 }
 
@@ -1385,8 +1572,7 @@ app.get("/health", (req, res) => res.status(200).send("ok"));
  */
 app.post("/invoke_component", async (req, res) => {
   try {
-    const body = normalizeIncomingBody(req.body) || {};
-    const result = await invokeComponent(body);
+    const result = await invokeComponent(req.body || {});
     return res
       .status(200)
       .json(ensureContract(req, result, "invoke_component"));
@@ -1405,13 +1591,14 @@ app.post("/invoke_component", async (req, res) => {
  */
 app.post("/webhook", async (req, res) => {
   try {
-    const body = normalizeIncomingBody(req.body) || {};
     const action =
-      (body?.action && typeof body.action === "string" ? body.action : "") ||
-      (body?.action?.name ? String(body.action.name) : "") ||
-      (body?.type ? String(body.type) : "");
+      (req.body?.action && typeof req.body.action === "string"
+        ? req.body.action
+        : "") ||
+      (req.body?.action?.name ? String(req.body.action.name) : "") ||
+      (req.body?.type ? String(req.body.type) : "");
 
-    const payload = body || {};
+    const payload = req.body || {};
 
     let result;
     switch ((action || "").toLowerCase()) {
@@ -1467,8 +1654,7 @@ app.post("/optimize_question", async (req, res) => {
 });
 
 app.post("/generate_lesson", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await generateLesson(body);
+  const result = await generateLesson(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
@@ -1479,35 +1665,30 @@ app.post("/teach_and_quiz", async (req, res) => {
 });
 
 app.post("/prompt_lesson", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await promptLesson(body);
+  const result = await promptLesson(req.body || {});
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await generateExam(body);
+  const result = await generateExam(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_exam"));
 });
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await generateQuiz(body);
+  const result = await generateQuiz(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await generateExam(body);
+  const result = await generateExam(req.body || {});
   res.status(200).json(ensureContract(req, result, "exam"));
 });
 
 app.post("/grade_open", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await gradeOpen(body);
+  const result = await gradeOpen(req.body || {});
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 
