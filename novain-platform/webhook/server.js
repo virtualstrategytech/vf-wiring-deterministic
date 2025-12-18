@@ -75,6 +75,8 @@ const DEBUG_WEBHOOK =
   String(
     process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
   ).toLowerCase() === "true";
+const VF_ALWAYS_200_ERRORS =
+  String(process.env.VF_ALWAYS_200_ERRORS || "false").toLowerCase() === "true";
 
 // -------------------------
 // Logging
@@ -107,49 +109,27 @@ function logLlmPayloadSnippet(obj) {
 
 const app = express();
 app.disable("x-powered-by");
+// Body parsing:
+// Voiceflow can send bodies that look like JSON but aren’t strictly valid JSON (e.g. unquoted keys/values),
+// especially when using Raw/Text with variable interpolation. To make the webhook resilient, we read the
+// body as TEXT and parse it ourselves in normalizeIncomingBody().
 app.use(
-  express.json({
+  express.text({
+    type: ["application/json", "application/*+json", "text/*"],
     limit: "2mb",
-    // Capture the raw body so we can return a clean error when JSON is malformed.
-    verify: (req, _res, buf) => {
-      // Keep this small-ish; it’s for debugging only.
-      req.rawBody = buf ? buf.toString("utf8") : "";
-    },
-    // Only parse JSON when it *claims* to be JSON.
-    type: (req) => {
-      const ct = String(req.headers["content-type"] || "").toLowerCase();
-      return ct.includes("application/json") || ct.includes("+json");
-    },
   })
 );
+app.use(express.urlencoded({ extended: false, limit: "2mb" }));
 
-// If the request body is invalid JSON, never crash or hang—return a deterministic JSON error.
-// This prevents Voiceflow from “busy/spinning” with no usable response.
-app.use((err, req, res, next) => {
-  const isBadJson =
-    err &&
-    (err.type === "entity.parse.failed" ||
-      err.status === 400 ||
-      /json/i.test(String(err.message || "")));
-
-  if (!isBadJson) return next(err);
-
-  const raw = typeof req.rawBody === "string" ? req.rawBody : "";
-  const rawPreview = raw.length > 500 ? raw.slice(0, 500) + "…" : raw;
-
-  return res
-    .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 400)
-    .json({
-      ok: false,
-      API_OK: false,
-      component_result: "invalid_json",
-      error: "invalid_json",
-      error_detail: String(err.message || "Invalid JSON"),
-      path: req.originalUrl || req.path || "",
-      method: req.method || "",
-      raw_body_len: raw.length,
-      raw_body_preview: rawPreview,
-    });
+// Keep a copy of the raw body for debugging.
+app.use((req, _res, next) => {
+  req.rawBody =
+    typeof req.body === "string"
+      ? req.body
+      : req.body
+        ? JSON.stringify(req.body)
+        : "";
+  next();
 });
 
 // -------------------------
@@ -163,27 +143,35 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res
-      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
-      .json({
-        ok: false,
-        API_OK: false,
-        component_result: "fail",
-        error: "WEBHOOK_API_KEY is not configured on the server",
-      });
+    return res.status(VF_ALWAYS_200_ERRORS ? 200 : 401).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "unauthorized",
+          error: "WEBHOOK_API_KEY is not configured on the server",
+        },
+        "auth"
+      )
+    );
   }
 
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res
-      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
-      .json({
-        ok: false,
-        API_OK: false,
-        component_result: "fail",
-        error: "unauthorized",
-      });
+    return res.status(VF_ALWAYS_200_ERRORS ? 200 : 401).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "unauthorized",
+          error: "unauthorized",
+        },
+        "auth"
+      )
+    );
   }
 
   return next();
@@ -567,13 +555,79 @@ function safeMode(input) {
 // This makes the server resilient and ensures fields like `mode` are honored.
 function parseJsonIfString(v) {
   if (typeof v !== "string") return v;
+
   const s = v.trim();
-  if (!s) return v;
+  if (!s) return {};
+
+  // 1) Strict JSON first
   try {
     return JSON.parse(s);
   } catch {
-    return v;
+    // fall through
   }
+
+  // 2) Power-user/Voiceflow "almost JSON" fallback:
+  //    Examples seen in the wild:
+  //      {question_for_api:test,session_id:local,debug:true,turn_count:1}
+  //      question_for_api:test, session_id:local
+  //      question_for_api=test&session_id=local
+  const loose = s.startsWith("{") && s.endsWith("}") ? s.slice(1, -1) : s;
+
+  // URL-encoded (k=v&k2=v2)
+  if (loose.includes("&") && loose.includes("=")) {
+    const out = {};
+    for (const pair of loose.split("&")) {
+      if (!pair) continue;
+      const [kRaw, ...rest] = pair.split("=");
+      const k = (kRaw || "").trim();
+      const vRaw = rest.join("=").trim();
+      if (!k) continue;
+      out[k] = coerceScalar(decodeURIComponent(vRaw || ""));
+    }
+    return out;
+  }
+
+  // Colon/comma separated (k:v,k2:v2) — what your logs show.
+  if (loose.includes(":")) {
+    const out = {};
+    for (const part of loose.split(",")) {
+      const p = part.trim();
+      if (!p) continue;
+      const idx = p.indexOf(":") >= 0 ? p.indexOf(":") : p.indexOf("=");
+      if (idx < 0) continue;
+
+      const k = p
+        .slice(0, idx)
+        .trim()
+        .replace(/^["']|["']$/g, "");
+      let val = p.slice(idx + 1).trim();
+
+      // Handle empty values like confirmed_question:
+      val = val.replace(/^["']|["']$/g, "");
+      if (!k) continue;
+
+      out[k] = coerceScalar(val);
+    }
+    return out;
+  }
+
+  // If we can't make sense of it, return the original string for higher-level handling.
+  return v;
+}
+
+function coerceScalar(v) {
+  if (v === "") return "";
+  const lower = String(v).toLowerCase();
+  if (lower === "true") return true;
+  if (lower === "false") return false;
+  if (lower === "null") return null;
+  if (lower === "undefined") return undefined;
+
+  // number?
+  const n = Number(v);
+  if (Number.isFinite(n) && String(v).trim() === String(n)) return n;
+
+  return String(v);
 }
 
 function normalizeIncomingBody(body) {
@@ -1624,7 +1678,7 @@ app.get("/health", (req, res) => res.status(200).send("ok"));
  */
 app.post("/invoke_component", async (req, res) => {
   try {
-    const result = await invokeComponent(req.body || {});
+    const result = await invokeComponent(normalizeIncomingBody(req.body) || {});
     return res
       .status(200)
       .json(ensureContract(req, result, "invoke_component"));
@@ -1705,8 +1759,14 @@ app.post("/optimize_question", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "optimize_question"));
 });
 
+app.post("/optimize_question/optimize_question", async (req, res) => {
+  const body = normalizeIncomingBody(req.body) || {};
+  const result = await optimizeQuestion(body);
+  res.status(200).json(ensureContract(req, result, "optimize_question"));
+});
+
 app.post("/generate_lesson", async (req, res) => {
-  const result = await generateLesson(req.body || {});
+  const result = await generateLesson(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
@@ -1717,30 +1777,30 @@ app.post("/teach_and_quiz", async (req, res) => {
 });
 
 app.post("/prompt_lesson", async (req, res) => {
-  const result = await promptLesson(req.body || {});
+  const result = await promptLesson(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const result = await generateExam(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "generate_exam"));
 });
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const result = await generateQuiz(req.body || {});
+  const result = await generateQuiz(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const result = await generateExam(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "exam"));
 });
 
 app.post("/grade_open", async (req, res) => {
-  const result = await gradeOpen(req.body || {});
+  const result = await gradeOpen(normalizeIncomingBody(req.body) || {});
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 
