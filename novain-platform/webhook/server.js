@@ -131,7 +131,8 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res.status(401).json({
+    return res.status(200).json({
+      http_status: 401,
       ok: false,
       API_OK: false,
       component_result: "fail",
@@ -142,7 +143,8 @@ function requireApiKey(req, res, next) {
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res.status(401).json({
+    return res.status(200).json({
+      http_status: 401,
       ok: false,
       API_OK: false,
       component_result: "fail",
