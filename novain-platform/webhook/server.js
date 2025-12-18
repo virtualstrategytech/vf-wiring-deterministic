@@ -75,8 +75,6 @@ const DEBUG_WEBHOOK =
   String(
     process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
   ).toLowerCase() === "true";
-const VF_ALWAYS_200_ERRORS =
-  String(process.env.VF_ALWAYS_200_ERRORS || "false").toLowerCase() === "true";
 
 // -------------------------
 // Logging
@@ -108,29 +106,23 @@ function logLlmPayloadSnippet(obj) {
 // -------------------------
 
 const app = express();
+// In tests (Jest), leaving a server listening can keep the process alive.
+// To make CI resilient even if a test forgets to close a server, we "unref" servers
+// started via app.listen when running under Jest.
+const _origListen = app.listen.bind(app);
+app.listen = (...args) => {
+  const srv = _origListen(...args);
+  if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === "test") {
+    try {
+      srv.unref();
+    } catch {
+      /* ignore */
+    }
+  }
+  return srv;
+};
 app.disable("x-powered-by");
-// Body parsing:
-// Voiceflow can send bodies that look like JSON but aren’t strictly valid JSON (e.g. unquoted keys/values),
-// especially when using Raw/Text with variable interpolation. To make the webhook resilient, we read the
-// body as TEXT and parse it ourselves in normalizeIncomingBody().
-app.use(
-  express.text({
-    type: ["application/json", "application/*+json", "text/*"],
-    limit: "2mb",
-  })
-);
-app.use(express.urlencoded({ extended: false, limit: "2mb" }));
-
-// Keep a copy of the raw body for debugging.
-app.use((req, _res, next) => {
-  req.rawBody =
-    typeof req.body === "string"
-      ? req.body
-      : req.body
-        ? JSON.stringify(req.body)
-        : "";
-  next();
-});
+app.use(express.json({ limit: "2mb" }));
 
 // -------------------------
 // Auth middleware
@@ -143,35 +135,23 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res.status(VF_ALWAYS_200_ERRORS ? 200 : 401).json(
-      ensureContract(
-        req,
-        {
-          ok: false,
-          API_OK: false,
-          component_result: "unauthorized",
-          error: "WEBHOOK_API_KEY is not configured on the server",
-        },
-        "auth"
-      )
-    );
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "WEBHOOK_API_KEY is not configured on the server",
+    });
   }
 
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res.status(VF_ALWAYS_200_ERRORS ? 200 : 401).json(
-      ensureContract(
-        req,
-        {
-          ok: false,
-          API_OK: false,
-          component_result: "unauthorized",
-          error: "unauthorized",
-        },
-        "auth"
-      )
-    );
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "unauthorized",
+    });
   }
 
   return next();
@@ -553,92 +533,184 @@ function safeMode(input) {
 
 // Normalize request bodies: Voiceflow sometimes sends a JSON string (e.g. '"{...}"') instead of an object.
 // This makes the server resilient and ensures fields like `mode` are honored.
-function parseJsonIfString(v) {
-  if (typeof v !== "string") return v;
+// ------------------------
+// Body parsing (Voiceflow-tolerant)
+// ------------------------
+//
+// Voiceflow "API" blocks can send bodies as:
+// 1) Proper JSON (application/json)  -> req.body is an object (if express.json is used)
+// 2) Raw text that is JSON           -> req.body is a string like {"a":"b"}
+// 3) Raw text that is "almost JSON"  -> {a:b, debug:true} (unquoted keys/values)
+// 4) URL-encoded form-like text      -> a=b&debug=true
+//
+// We normalize all of these into a plain object so routes can be deterministic.
 
-  const s = v.trim();
-  if (!s) return {};
-
-  // 1) Strict JSON first
+function tryJsonParse(s) {
   try {
     return JSON.parse(s);
   } catch {
-    // fall through
+    return null;
   }
+}
 
-  // 2) Power-user/Voiceflow "almost JSON" fallback:
-  //    Examples seen in the wild:
-  //      {question_for_api:test,session_id:local,debug:true,turn_count:1}
-  //      question_for_api:test, session_id:local
-  //      question_for_api=test&session_id=local
-  const loose = s.startsWith("{") && s.endsWith("}") ? s.slice(1, -1) : s;
-
-  // URL-encoded (k=v&k2=v2)
-  if (loose.includes("&") && loose.includes("=")) {
-    const out = {};
-    for (const pair of loose.split("&")) {
-      if (!pair) continue;
-      const [kRaw, ...rest] = pair.split("=");
-      const k = (kRaw || "").trim();
-      const vRaw = rest.join("=").trim();
-      if (!k) continue;
-      out[k] = coerceScalar(decodeURIComponent(vRaw || ""));
+function splitTopLevel(str, sepChar) {
+  // splits by sepChar ignoring separators inside quotes
+  const out = [];
+  let buf = "";
+  let inS = false;
+  let inD = false;
+  let esc = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (esc) {
+      buf += ch;
+      esc = false;
+      continue;
     }
-    return out;
-  }
-
-  // Colon/comma separated (k:v,k2:v2) — what your logs show.
-  if (loose.includes(":")) {
-    const out = {};
-    for (const part of loose.split(",")) {
-      const p = part.trim();
-      if (!p) continue;
-      const idx = p.indexOf(":") >= 0 ? p.indexOf(":") : p.indexOf("=");
-      if (idx < 0) continue;
-
-      const k = p
-        .slice(0, idx)
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      let val = p.slice(idx + 1).trim();
-
-      // Handle empty values like confirmed_question:
-      val = val.replace(/^["']|["']$/g, "");
-      if (!k) continue;
-
-      out[k] = coerceScalar(val);
+    if (ch === "\\\\") {
+      buf += ch;
+      esc = true;
+      continue;
     }
-    return out;
+    if (ch === "'" && !inD) {
+      inS = !inS;
+      buf += ch;
+      continue;
+    }
+    if (ch === '"' && !inS) {
+      inD = !inD;
+      buf += ch;
+      continue;
+    }
+    if (!inS && !inD && ch === sepChar) {
+      out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
   }
+  if (buf.length) out.push(buf);
+  return out;
+}
 
-  // If we can't make sense of it, return the original string for higher-level handling.
-  return v;
+function stripOuterQuotes(s) {
+  const t = String(s).trim();
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    return t.slice(1, -1);
+  }
+  return t;
 }
 
 function coerceScalar(v) {
-  if (v === "") return "";
-  const lower = String(v).toLowerCase();
-  if (lower === "true") return true;
-  if (lower === "false") return false;
-  if (lower === "null") return null;
-  if (lower === "undefined") return undefined;
-
+  const t = String(v).trim();
+  if (t === "") return "";
+  const low = t.toLowerCase();
+  if (low === "true") return true;
+  if (low === "false") return false;
+  if (low === "null") return null;
+  if (low === "undefined") return undefined;
   // number?
-  const n = Number(v);
-  if (Number.isFinite(n) && String(v).trim() === String(n)) return n;
+  if (/^-?\d+(\.\d+)?$/.test(t)) {
+    const n = Number(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return stripOuterQuotes(t);
+}
 
-  return String(v);
+function parseLooseObjectString(s) {
+  const raw = String(s || "").trim();
+  if (!raw) return null;
+
+  // URL-encoded form-like: a=b&c=d
+  if (raw.includes("&") && raw.includes("=") && !raw.trim().startsWith("{")) {
+    try {
+      const params = new URLSearchParams(raw);
+      const obj = {};
+      for (const [k, v] of params.entries()) obj[k] = coerceScalar(v);
+      return Object.keys(obj).length ? obj : null;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Strip outer braces if present
+  let inner = raw;
+  if (inner.startsWith("{") && inner.endsWith("}")) inner = inner.slice(1, -1);
+
+  // If nothing left, stop.
+  if (!inner.trim()) return null;
+
+  const parts = splitTopLevel(inner, ",");
+  const obj = {};
+  for (const part of parts) {
+    const p = String(part).trim();
+    if (!p) continue;
+
+    // allow ":" or "="
+    const colon = p.indexOf(":");
+    const eq = p.indexOf("=");
+    let ix = -1;
+    if (colon !== -1 && eq !== -1) ix = Math.min(colon, eq);
+    else ix = colon !== -1 ? colon : eq;
+
+    if (ix === -1) continue;
+
+    const k = stripOuterQuotes(p.slice(0, ix).trim()).replace(
+      /^[{ ]+|[ }]+$/g,
+      ""
+    );
+    const v = p.slice(ix + 1).trim();
+
+    if (!k) continue;
+    obj[k] = coerceScalar(v);
+  }
+
+  return Object.keys(obj).length ? obj : null;
+}
+
+function parseBodyToObject(body) {
+  if (body == null) return {};
+  if (typeof body === "object" && !Array.isArray(body)) return body;
+
+  // body is string (or something else)
+  const s0 = String(body).trim();
+  if (!s0) return {};
+
+  // 1) Try JSON parse once
+  const j1 = tryJsonParse(s0);
+  if (j1 && typeof j1 === "object") return j1;
+
+  // 2) Sometimes it's a JSON string that itself contains JSON (double-encoded)
+  if (typeof j1 === "string") {
+    const j2 = tryJsonParse(j1.trim());
+    if (j2 && typeof j2 === "object") return j2;
+  }
+
+  // 3) Try loose parsing (Voiceflow often sends {a:b,...})
+  const loose = parseLooseObjectString(s0);
+  if (loose) return loose;
+
+  // If we can't parse, return empty object; routes will handle missing fields safely.
+  return {};
 }
 
 function normalizeIncomingBody(body) {
-  let b = parseJsonIfString(body);
+  const b = parseBodyToObject(body);
 
-  // If wrapped under a single key (common in low-code tools), unwrap once.
-  if (b && typeof b === "object") {
-    if (typeof b.tq_payload_json === "string")
-      b = parseJsonIfString(b.tq_payload_json) || b;
-    if (typeof b.opt_payload_json === "string")
-      b = parseJsonIfString(b.opt_payload_json) || b;
+  // If Voiceflow sent a safe pre-built JSON payload string in a field, unwrap it.
+  // (We support multiple legacy names.)
+  const payloadKey =
+    (typeof b.opt_payload_json === "string" && "opt_payload_json") ||
+    (typeof b.payload_json === "string" && "payload_json") ||
+    (typeof b.body_json === "string" && "body_json") ||
+    null;
+
+  if (payloadKey) {
+    const inner = parseBodyToObject(b[payloadKey]);
+    if (inner && typeof inner === "object") return inner;
   }
 
   return b;
@@ -1678,7 +1750,7 @@ app.get("/health", (req, res) => res.status(200).send("ok"));
  */
 app.post("/invoke_component", async (req, res) => {
   try {
-    const result = await invokeComponent(normalizeIncomingBody(req.body) || {});
+    const result = await invokeComponent(req.body || {});
     return res
       .status(200)
       .json(ensureContract(req, result, "invoke_component"));
@@ -1759,14 +1831,8 @@ app.post("/optimize_question", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "optimize_question"));
 });
 
-app.post("/optimize_question/optimize_question", async (req, res) => {
-  const body = normalizeIncomingBody(req.body) || {};
-  const result = await optimizeQuestion(body);
-  res.status(200).json(ensureContract(req, result, "optimize_question"));
-});
-
 app.post("/generate_lesson", async (req, res) => {
-  const result = await generateLesson(normalizeIncomingBody(req.body) || {});
+  const result = await generateLesson(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
@@ -1777,30 +1843,30 @@ app.post("/teach_and_quiz", async (req, res) => {
 });
 
 app.post("/prompt_lesson", async (req, res) => {
-  const result = await promptLesson(normalizeIncomingBody(req.body) || {});
+  const result = await promptLesson(req.body || {});
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const result = await generateExam(normalizeIncomingBody(req.body) || {});
+  const result = await generateExam(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_exam"));
 });
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const result = await generateQuiz(normalizeIncomingBody(req.body) || {});
+  const result = await generateQuiz(req.body || {});
   res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const result = await generateExam(normalizeIncomingBody(req.body) || {});
+  const result = await generateExam(req.body || {});
   res.status(200).json(ensureContract(req, result, "exam"));
 });
 
 app.post("/grade_open", async (req, res) => {
-  const result = await gradeOpen(normalizeIncomingBody(req.body) || {});
+  const result = await gradeOpen(req.body || {});
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 
