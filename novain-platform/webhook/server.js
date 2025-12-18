@@ -110,15 +110,45 @@ app.disable("x-powered-by");
 app.use(
   express.json({
     limit: "2mb",
+    // Capture the raw body so we can return a clean error when JSON is malformed.
     verify: (req, _res, buf) => {
-      try {
-        req.rawBody = buf?.toString("utf8");
-      } catch {
-        req.rawBody = undefined;
-      }
+      // Keep this small-ish; it’s for debugging only.
+      req.rawBody = buf ? buf.toString("utf8") : "";
+    },
+    // Only parse JSON when it *claims* to be JSON.
+    type: (req) => {
+      const ct = String(req.headers["content-type"] || "").toLowerCase();
+      return ct.includes("application/json") || ct.includes("+json");
     },
   })
 );
+
+// If the request body is invalid JSON, never crash or hang—return a deterministic JSON error.
+// This prevents Voiceflow from “busy/spinning” with no usable response.
+app.use((err, req, res, next) => {
+  const isBadJson =
+    err &&
+    (err.type === "entity.parse.failed" ||
+      err.status === 400 ||
+      /json/i.test(String(err.message || "")));
+
+  if (!isBadJson) return next(err);
+
+  const raw = typeof req.rawBody === "string" ? req.rawBody : "";
+  const rawPreview = raw.length > 500 ? raw.slice(0, 500) + "…" : raw;
+
+  return res.status(400).json({
+    ok: false,
+    API_OK: false,
+    component_result: "invalid_json",
+    error: "invalid_json",
+    error_detail: String(err.message || "Invalid JSON"),
+    path: req.originalUrl || req.path || "",
+    method: req.method || "",
+    raw_body_len: raw.length,
+    raw_body_preview: rawPreview,
+  });
+});
 
 // -------------------------
 // Auth middleware
@@ -131,8 +161,7 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res.status(200).json({
-      http_status: 401,
+    return res.status(401).json({
       ok: false,
       API_OK: false,
       component_result: "fail",
@@ -143,8 +172,7 @@ function requireApiKey(req, res, next) {
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res.status(200).json({
-      http_status: 401,
+    return res.status(401).json({
       ok: false,
       API_OK: false,
       component_result: "fail",
@@ -1754,43 +1782,6 @@ function closeResources() {
     }
   });
 }
-
-/**
- * JSON parse error handler
- * -----------------------
- * Voiceflow (especially Agent Canvas) can occasionally send malformed JSON
- * when variables are interpolated without proper escaping (quotes/newlines).
- * Express' JSON parser will throw before routes run; without this handler
- * Voiceflow sees a hard failure and can get stuck in retry loops.
- *
- * We return HTTP 200 with a deterministic error envelope so the client
- * can capture `API_OK=false` and route to its fail-path gracefully.
- */
-app.use((err, req, res, next) => {
-  const isJsonParseError =
-    err &&
-    (err.type === "entity.parse.failed" ||
-      err instanceof SyntaxError ||
-      /JSON/.test(String(err.message || "")));
-
-  if (!isJsonParseError) return next(err);
-
-  const raw = req && req.rawBody ? String(req.rawBody) : "";
-  const out = ensureContract(
-    req,
-    failEnvelope({
-      component_result: "bad_json",
-      error: "bad_json",
-      msg: "Malformed JSON body sent to webhook",
-      detail: String(err.message || err),
-      raw_body_snippet: raw.slice(0, 800),
-    }),
-    "bad_json"
-  );
-
-  // Important: 200 keeps Voiceflow in the Success path so it can capture fields
-  return res.status(200).json(out);
-});
 
 if (require.main === module) {
   startServer();
