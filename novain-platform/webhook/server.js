@@ -107,7 +107,18 @@ function logLlmPayloadSnippet(obj) {
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      try {
+        req.rawBody = buf?.toString("utf8");
+      } catch {
+        req.rawBody = undefined;
+      }
+    },
+  })
+);
 
 // -------------------------
 // Auth middleware
@@ -1741,6 +1752,43 @@ function closeResources() {
     }
   });
 }
+
+/**
+ * JSON parse error handler
+ * -----------------------
+ * Voiceflow (especially Agent Canvas) can occasionally send malformed JSON
+ * when variables are interpolated without proper escaping (quotes/newlines).
+ * Express' JSON parser will throw before routes run; without this handler
+ * Voiceflow sees a hard failure and can get stuck in retry loops.
+ *
+ * We return HTTP 200 with a deterministic error envelope so the client
+ * can capture `API_OK=false` and route to its fail-path gracefully.
+ */
+app.use((err, req, res, next) => {
+  const isJsonParseError =
+    err &&
+    (err.type === "entity.parse.failed" ||
+      err instanceof SyntaxError ||
+      /JSON/.test(String(err.message || "")));
+
+  if (!isJsonParseError) return next(err);
+
+  const raw = req && req.rawBody ? String(req.rawBody) : "";
+  const out = ensureContract(
+    req,
+    failEnvelope({
+      component_result: "bad_json",
+      error: "bad_json",
+      msg: "Malformed JSON body sent to webhook",
+      detail: String(err.message || err),
+      raw_body_snippet: raw.slice(0, 800),
+    }),
+    "bad_json"
+  );
+
+  // Important: 200 keeps Voiceflow in the Success path so it can capture fields
+  return res.status(200).json(out);
+});
 
 if (require.main === module) {
   startServer();
