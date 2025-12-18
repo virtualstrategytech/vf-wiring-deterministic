@@ -60,21 +60,17 @@ const UPSTREAM_RETRY_BASE_MS = parseInt(
   10
 );
 
-const UPSTREAM_ENABLED =
-  String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
+const UPSTREAM_ENABLED = envIsTrue(process.env.UPSTREAM_ENABLED);
 
-const PROXY_OPTIMIZE_QUESTION =
-  String(process.env.PROXY_OPTIMIZE_QUESTION || "false").toLowerCase() ===
-  "true";
+const PROXY_OPTIMIZE_QUESTION = envIsTrue(process.env.PROXY_OPTIMIZE_QUESTION);
 
 const BUSINESS_URL = (process.env.BUSINESS_URL || "").trim();
 const PROMPT_URL = (process.env.PROMPT_URL || "").trim();
 const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
 
-const DEBUG_WEBHOOK =
-  String(
-    process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
-  ).toLowerCase() === "true";
+const DEBUG_WEBHOOK = envIsTrue(
+  process.env.DEBUG_WEBHOOK ?? process.env.DEBUG_WEBHOOK_ENABLED
+);
 
 // -------------------------
 // Logging
@@ -107,50 +103,7 @@ function logLlmPayloadSnippet(obj) {
 
 const app = express();
 app.disable("x-powered-by");
-app.use(
-  express.json({
-    limit: "2mb",
-    // Capture the raw body so we can return a clean error when JSON is malformed.
-    verify: (req, _res, buf) => {
-      // Keep this small-ish; it’s for debugging only.
-      req.rawBody = buf ? buf.toString("utf8") : "";
-    },
-    // Only parse JSON when it *claims* to be JSON.
-    type: (req) => {
-      const ct = String(req.headers["content-type"] || "").toLowerCase();
-      return ct.includes("application/json") || ct.includes("+json");
-    },
-  })
-);
-
-// If the request body is invalid JSON, never crash or hang—return a deterministic JSON error.
-// This prevents Voiceflow from “busy/spinning” with no usable response.
-app.use((err, req, res, next) => {
-  const isBadJson =
-    err &&
-    (err.type === "entity.parse.failed" ||
-      err.status === 400 ||
-      /json/i.test(String(err.message || "")));
-
-  if (!isBadJson) return next(err);
-
-  const raw = typeof req.rawBody === "string" ? req.rawBody : "";
-  const rawPreview = raw.length > 500 ? raw.slice(0, 500) + "…" : raw;
-
-  return res
-    .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 400)
-    .json({
-      ok: false,
-      API_OK: false,
-      component_result: "invalid_json",
-      error: "invalid_json",
-      error_detail: String(err.message || "Invalid JSON"),
-      path: req.originalUrl || req.path || "",
-      method: req.method || "",
-      raw_body_len: raw.length,
-      raw_body_preview: rawPreview,
-    });
-});
+app.use(express.json({ limit: "2mb" }));
 
 // -------------------------
 // Auth middleware
@@ -163,27 +116,23 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res
-      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
-      .json({
-        ok: false,
-        API_OK: false,
-        component_result: "fail",
-        error: "WEBHOOK_API_KEY is not configured on the server",
-      });
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "WEBHOOK_API_KEY is not configured on the server",
+    });
   }
 
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res
-      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
-      .json({
-        ok: false,
-        API_OK: false,
-        component_result: "fail",
-        error: "unauthorized",
-      });
+    return res.status(401).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "unauthorized",
+    });
   }
 
   return next();
@@ -193,6 +142,13 @@ app.use(requireApiKey);
 
 // -------------------------
 // Helpers: timing, retry, HTTP
+function envIsTrue(v) {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "y" || s === "on";
+}
+
 // -------------------------
 
 function sleep(ms) {
@@ -1643,14 +1599,16 @@ app.post("/invoke_component", async (req, res) => {
  */
 app.post("/webhook", async (req, res) => {
   try {
-    const action =
-      (req.body?.action && typeof req.body.action === "string"
-        ? req.body.action
-        : "") ||
-      (req.body?.action?.name ? String(req.body.action.name) : "") ||
-      (req.body?.type ? String(req.body.type) : "");
+    const bodyObj = normalizeIncomingBody(req.body);
 
-    const payload = req.body || {};
+    const action =
+      (bodyObj?.action && typeof bodyObj.action === "string"
+        ? bodyObj.action
+        : "") ||
+      (bodyObj?.action?.name ? String(bodyObj.action.name) : "") ||
+      (bodyObj?.type ? String(bodyObj.type) : "");
+
+    const payload = bodyObj || {};
 
     let result;
     switch ((action || "").toLowerCase()) {
