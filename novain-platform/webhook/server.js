@@ -60,21 +60,17 @@ const UPSTREAM_RETRY_BASE_MS = parseInt(
   10
 );
 
-const UPSTREAM_ENABLED =
-  String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
+const UPSTREAM_ENABLED = envIsTrue(process.env.UPSTREAM_ENABLED);
 
-const PROXY_OPTIMIZE_QUESTION =
-  String(process.env.PROXY_OPTIMIZE_QUESTION || "false").toLowerCase() ===
-  "true";
+const PROXY_OPTIMIZE_QUESTION = envIsTrue(process.env.PROXY_OPTIMIZE_QUESTION);
 
 const BUSINESS_URL = (process.env.BUSINESS_URL || "").trim();
 const PROMPT_URL = (process.env.PROMPT_URL || "").trim();
 const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
 
-const DEBUG_WEBHOOK =
-  String(
-    process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
-  ).toLowerCase() === "true";
+const DEBUG_WEBHOOK = envIsTrue(
+  process.env.DEBUG_WEBHOOK ?? process.env.DEBUG_WEBHOOK_ENABLED
+);
 
 // -------------------------
 // Logging
@@ -106,21 +102,6 @@ function logLlmPayloadSnippet(obj) {
 // -------------------------
 
 const app = express();
-// In tests (Jest), leaving a server listening can keep the process alive.
-// To make CI resilient even if a test forgets to close a server, we "unref" servers
-// started via app.listen when running under Jest.
-const _origListen = app.listen.bind(app);
-app.listen = (...args) => {
-  const srv = _origListen(...args);
-  if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === "test") {
-    try {
-      srv.unref();
-    } catch {
-      /* ignore */
-    }
-  }
-  return srv;
-};
 app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
 
@@ -161,6 +142,13 @@ app.use(requireApiKey);
 
 // -------------------------
 // Helpers: timing, retry, HTTP
+function envIsTrue(v) {
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "y" || s === "on";
+}
+
 // -------------------------
 
 function sleep(ms) {
@@ -533,184 +521,26 @@ function safeMode(input) {
 
 // Normalize request bodies: Voiceflow sometimes sends a JSON string (e.g. '"{...}"') instead of an object.
 // This makes the server resilient and ensures fields like `mode` are honored.
-// ------------------------
-// Body parsing (Voiceflow-tolerant)
-// ------------------------
-//
-// Voiceflow "API" blocks can send bodies as:
-// 1) Proper JSON (application/json)  -> req.body is an object (if express.json is used)
-// 2) Raw text that is JSON           -> req.body is a string like {"a":"b"}
-// 3) Raw text that is "almost JSON"  -> {a:b, debug:true} (unquoted keys/values)
-// 4) URL-encoded form-like text      -> a=b&debug=true
-//
-// We normalize all of these into a plain object so routes can be deterministic.
-
-function tryJsonParse(s) {
+function parseJsonIfString(v) {
+  if (typeof v !== "string") return v;
+  const s = v.trim();
+  if (!s) return v;
   try {
     return JSON.parse(s);
   } catch {
-    return null;
+    return v;
   }
-}
-
-function splitTopLevel(str, sepChar) {
-  // splits by sepChar ignoring separators inside quotes
-  const out = [];
-  let buf = "";
-  let inS = false;
-  let inD = false;
-  let esc = false;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (esc) {
-      buf += ch;
-      esc = false;
-      continue;
-    }
-    if (ch === "\\\\") {
-      buf += ch;
-      esc = true;
-      continue;
-    }
-    if (ch === "'" && !inD) {
-      inS = !inS;
-      buf += ch;
-      continue;
-    }
-    if (ch === '"' && !inS) {
-      inD = !inD;
-      buf += ch;
-      continue;
-    }
-    if (!inS && !inD && ch === sepChar) {
-      out.push(buf);
-      buf = "";
-      continue;
-    }
-    buf += ch;
-  }
-  if (buf.length) out.push(buf);
-  return out;
-}
-
-function stripOuterQuotes(s) {
-  const t = String(s).trim();
-  if (
-    (t.startsWith('"') && t.endsWith('"')) ||
-    (t.startsWith("'") && t.endsWith("'"))
-  ) {
-    return t.slice(1, -1);
-  }
-  return t;
-}
-
-function coerceScalar(v) {
-  const t = String(v).trim();
-  if (t === "") return "";
-  const low = t.toLowerCase();
-  if (low === "true") return true;
-  if (low === "false") return false;
-  if (low === "null") return null;
-  if (low === "undefined") return undefined;
-  // number?
-  if (/^-?\d+(\.\d+)?$/.test(t)) {
-    const n = Number(t);
-    if (Number.isFinite(n)) return n;
-  }
-  return stripOuterQuotes(t);
-}
-
-function parseLooseObjectString(s) {
-  const raw = String(s || "").trim();
-  if (!raw) return null;
-
-  // URL-encoded form-like: a=b&c=d
-  if (raw.includes("&") && raw.includes("=") && !raw.trim().startsWith("{")) {
-    try {
-      const params = new URLSearchParams(raw);
-      const obj = {};
-      for (const [k, v] of params.entries()) obj[k] = coerceScalar(v);
-      return Object.keys(obj).length ? obj : null;
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Strip outer braces if present
-  let inner = raw;
-  if (inner.startsWith("{") && inner.endsWith("}")) inner = inner.slice(1, -1);
-
-  // If nothing left, stop.
-  if (!inner.trim()) return null;
-
-  const parts = splitTopLevel(inner, ",");
-  const obj = {};
-  for (const part of parts) {
-    const p = String(part).trim();
-    if (!p) continue;
-
-    // allow ":" or "="
-    const colon = p.indexOf(":");
-    const eq = p.indexOf("=");
-    let ix = -1;
-    if (colon !== -1 && eq !== -1) ix = Math.min(colon, eq);
-    else ix = colon !== -1 ? colon : eq;
-
-    if (ix === -1) continue;
-
-    const k = stripOuterQuotes(p.slice(0, ix).trim()).replace(
-      /^[{ ]+|[ }]+$/g,
-      ""
-    );
-    const v = p.slice(ix + 1).trim();
-
-    if (!k) continue;
-    obj[k] = coerceScalar(v);
-  }
-
-  return Object.keys(obj).length ? obj : null;
-}
-
-function parseBodyToObject(body) {
-  if (body == null) return {};
-  if (typeof body === "object" && !Array.isArray(body)) return body;
-
-  // body is string (or something else)
-  const s0 = String(body).trim();
-  if (!s0) return {};
-
-  // 1) Try JSON parse once
-  const j1 = tryJsonParse(s0);
-  if (j1 && typeof j1 === "object") return j1;
-
-  // 2) Sometimes it's a JSON string that itself contains JSON (double-encoded)
-  if (typeof j1 === "string") {
-    const j2 = tryJsonParse(j1.trim());
-    if (j2 && typeof j2 === "object") return j2;
-  }
-
-  // 3) Try loose parsing (Voiceflow often sends {a:b,...})
-  const loose = parseLooseObjectString(s0);
-  if (loose) return loose;
-
-  // If we can't parse, return empty object; routes will handle missing fields safely.
-  return {};
 }
 
 function normalizeIncomingBody(body) {
-  const b = parseBodyToObject(body);
+  let b = parseJsonIfString(body);
 
-  // If Voiceflow sent a safe pre-built JSON payload string in a field, unwrap it.
-  // (We support multiple legacy names.)
-  const payloadKey =
-    (typeof b.opt_payload_json === "string" && "opt_payload_json") ||
-    (typeof b.payload_json === "string" && "payload_json") ||
-    (typeof b.body_json === "string" && "body_json") ||
-    null;
-
-  if (payloadKey) {
-    const inner = parseBodyToObject(b[payloadKey]);
-    if (inner && typeof inner === "object") return inner;
+  // If wrapped under a single key (common in low-code tools), unwrap once.
+  if (b && typeof b === "object") {
+    if (typeof b.tq_payload_json === "string")
+      b = parseJsonIfString(b.tq_payload_json) || b;
+    if (typeof b.opt_payload_json === "string")
+      b = parseJsonIfString(b.opt_payload_json) || b;
   }
 
   return b;
@@ -1769,14 +1599,16 @@ app.post("/invoke_component", async (req, res) => {
  */
 app.post("/webhook", async (req, res) => {
   try {
-    const action =
-      (req.body?.action && typeof req.body.action === "string"
-        ? req.body.action
-        : "") ||
-      (req.body?.action?.name ? String(req.body.action.name) : "") ||
-      (req.body?.type ? String(req.body.type) : "");
+    const bodyObj = normalizeIncomingBody(req.body);
 
-    const payload = req.body || {};
+    const action =
+      (bodyObj?.action && typeof bodyObj.action === "string"
+        ? bodyObj.action
+        : "") ||
+      (bodyObj?.action?.name ? String(bodyObj.action.name) : "") ||
+      (bodyObj?.type ? String(bodyObj.type) : "");
+
+    const payload = bodyObj || {};
 
     let result;
     switch ((action || "").toLowerCase()) {
