@@ -137,17 +137,19 @@ app.use((err, req, res, next) => {
   const raw = typeof req.rawBody === "string" ? req.rawBody : "";
   const rawPreview = raw.length > 500 ? raw.slice(0, 500) + "…" : raw;
 
-  return res.status(400).json({
-    ok: false,
-    API_OK: false,
-    component_result: "invalid_json",
-    error: "invalid_json",
-    error_detail: String(err.message || "Invalid JSON"),
-    path: req.originalUrl || req.path || "",
-    method: req.method || "",
-    raw_body_len: raw.length,
-    raw_body_preview: rawPreview,
-  });
+  return res
+    .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 400)
+    .json({
+      ok: false,
+      API_OK: false,
+      component_result: "invalid_json",
+      error: "invalid_json",
+      error_detail: String(err.message || "Invalid JSON"),
+      path: req.originalUrl || req.path || "",
+      method: req.method || "",
+      raw_body_len: raw.length,
+      raw_body_preview: rawPreview,
+    });
 });
 
 // -------------------------
@@ -161,23 +163,27 @@ function requireApiKey(req, res, next) {
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
   if (!WEBHOOK_API_KEY) {
-    return res.status(401).json({
-      ok: false,
-      API_OK: false,
-      component_result: "fail",
-      error: "WEBHOOK_API_KEY is not configured on the server",
-    });
+    return res
+      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
+      .json({
+        ok: false,
+        API_OK: false,
+        component_result: "fail",
+        error: "WEBHOOK_API_KEY is not configured on the server",
+      });
   }
 
   const provided =
     req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
   if (provided !== WEBHOOK_API_KEY) {
-    return res.status(401).json({
-      ok: false,
-      API_OK: false,
-      component_result: "fail",
-      error: "unauthorized",
-    });
+    return res
+      .status(process.env.VF_ALWAYS_200_ERRORS === "true" ? 200 : 401)
+      .json({
+        ok: false,
+        API_OK: false,
+        component_result: "fail",
+        error: "unauthorized",
+      });
   }
 
   return next();
