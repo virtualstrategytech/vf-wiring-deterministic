@@ -60,17 +60,21 @@ const UPSTREAM_RETRY_BASE_MS = parseInt(
   10
 );
 
-const UPSTREAM_ENABLED = envIsTrue(process.env.UPSTREAM_ENABLED);
+const UPSTREAM_ENABLED =
+  String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
 
-const PROXY_OPTIMIZE_QUESTION = envIsTrue(process.env.PROXY_OPTIMIZE_QUESTION);
+const PROXY_OPTIMIZE_QUESTION =
+  String(process.env.PROXY_OPTIMIZE_QUESTION || "false").toLowerCase() ===
+  "true";
 
 const BUSINESS_URL = (process.env.BUSINESS_URL || "").trim();
 const PROMPT_URL = (process.env.PROMPT_URL || "").trim();
 const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
 
-const DEBUG_WEBHOOK = envIsTrue(
-  process.env.DEBUG_WEBHOOK ?? process.env.DEBUG_WEBHOOK_ENABLED
-);
+const DEBUG_WEBHOOK =
+  String(
+    process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
+  ).toLowerCase() === "true";
 
 // -------------------------
 // Logging
@@ -102,8 +106,78 @@ function logLlmPayloadSnippet(obj) {
 // -------------------------
 
 const app = express();
+// ---- Runtime helpers ----
+function envBool(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "")
+    return defaultValue;
+  const v = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(v)) return true;
+  if (["0", "false", "no", "n", "off"].includes(v)) return false;
+  return defaultValue;
+}
+
+const BODY_LIMIT = process.env.BODY_LIMIT || "2mb";
+// When true, the server will return HTTP 200 for parse/auth errors so Voiceflow does not route to the API "Failure path".
+const ALWAYS_200_ERRORS =
+  envBool(process.env.VF_ALWAYS_200_ERRORS, false) ||
+  envBool(process.env.ALWAYS_200_ERRORS, false);
+
 app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
+// Body parsing:
+// - Accept text/plain (Voiceflow "Raw/Text" bodies) via express.text
+// - Accept application/json via express.json
+// - Preserve raw body for debugging/fallback parsing
+app.use(express.text({ type: ["text/*"], limit: BODY_LIMIT }));
+app.use(
+  express.json({
+    limit: BODY_LIMIT,
+    verify: (req, _res, buf) => {
+      // Keep a copy of the raw body for debug + tolerant parsing fallbacks
+      req.rawBody = buf.toString("utf8");
+    },
+  })
+);
+
+// Ensure rawBody exists for text/* bodies too.
+app.use((req, _res, next) => {
+  if (req.rawBody == null && typeof req.body === "string")
+    req.rawBody = req.body;
+  next();
+});
+
+// If JSON parsing fails, do NOT hard-fail the request (Voiceflow treats non-2xx as an API "Failure").
+// Instead, pass the raw string downstream so route handlers can interpret it (or we can return a structured error).
+app.use((err, req, res, next) => {
+  const isJsonParseError =
+    err &&
+    (err.type === "entity.parse.failed" ||
+      err instanceof SyntaxError ||
+      /Unexpected token|Expected property name|JSON/i.test(
+        String(err.message || "")
+      ));
+
+  if (!isJsonParseError) return next(err);
+
+  const raw = req.rawBody || "";
+  // When ALWAYS_200_ERRORS is on, we proceed with req.body as a string so handlers can recover.
+  if (ALWAYS_200_ERRORS) {
+    req.body = raw;
+    req._json_parse_error = String(err.message || err);
+    return next();
+  }
+
+  return res.status(400).json({
+    ok: false,
+    API_OK: false,
+    component_result: "invalid_json",
+    error: "invalid_json",
+    error_detail: String(err.message || err),
+    raw_body_len: raw.length,
+    raw_body_preview: raw.slice(0, 180),
+    path: req.originalUrl || req.path,
+    method: req.method,
+  });
+});
 
 // -------------------------
 // Auth middleware
@@ -115,24 +189,37 @@ function requireApiKey(req, res, next) {
   // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
+  const provided =
+    req.get("x-api-key") ||
+    req.get("X-API-Key") ||
+    req.get("X-API-KEY") ||
+    req.get("x-api_key") ||
+    (req.get("authorization") || "").replace(/^Bearer\s+/i, "") ||
+    (req.query && (req.query.api_key || req.query.key)) ||
+    "";
+
   if (!WEBHOOK_API_KEY) {
-    return res.status(401).json({
+    const payload = {
       ok: false,
       API_OK: false,
-      component_result: "fail",
+      component_result: "unauthorized",
       error: "WEBHOOK_API_KEY is not configured on the server",
-    });
+      path: req.originalUrl || req.path,
+      method: req.method,
+    };
+    return res.status(ALWAYS_200_ERRORS ? 200 : 401).json(payload);
   }
 
-  const provided =
-    req.get("x-api-key") || req.get("X-API-Key") || req.get("X-API-KEY") || "";
-  if (provided !== WEBHOOK_API_KEY) {
-    return res.status(401).json({
+  if (String(provided) !== String(WEBHOOK_API_KEY)) {
+    const payload = {
       ok: false,
       API_OK: false,
-      component_result: "fail",
+      component_result: "unauthorized",
       error: "unauthorized",
-    });
+      path: req.originalUrl || req.path,
+      method: req.method,
+    };
+    return res.status(ALWAYS_200_ERRORS ? 200 : 401).json(payload);
   }
 
   return next();
@@ -142,13 +229,6 @@ app.use(requireApiKey);
 
 // -------------------------
 // Helpers: timing, retry, HTTP
-function envIsTrue(v) {
-  const s = String(v ?? "")
-    .trim()
-    .toLowerCase();
-  return s === "true" || s === "1" || s === "yes" || s === "y" || s === "on";
-}
-
 // -------------------------
 
 function sleep(ms) {
@@ -1599,16 +1679,14 @@ app.post("/invoke_component", async (req, res) => {
  */
 app.post("/webhook", async (req, res) => {
   try {
-    const bodyObj = normalizeIncomingBody(req.body);
-
     const action =
-      (bodyObj?.action && typeof bodyObj.action === "string"
-        ? bodyObj.action
+      (req.body?.action && typeof req.body.action === "string"
+        ? req.body.action
         : "") ||
-      (bodyObj?.action?.name ? String(bodyObj.action.name) : "") ||
-      (bodyObj?.type ? String(bodyObj.type) : "");
+      (req.body?.action?.name ? String(req.body.action.name) : "") ||
+      (req.body?.type ? String(req.body.type) : "");
 
-    const payload = bodyObj || {};
+    const payload = req.body || {};
 
     let result;
     switch ((action || "").toLowerCase()) {
