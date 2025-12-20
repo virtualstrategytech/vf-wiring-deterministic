@@ -38,6 +38,10 @@
 "use strict";
 
 const express = require("express");
+const crypto = require("crypto");
+const { AsyncLocalStorage } = require("async_hooks");
+
+const requestContext = new AsyncLocalStorage();
 
 const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
 const IS_PROD = NODE_ENV === "production";
@@ -76,16 +80,77 @@ const DEBUG_WEBHOOK =
     process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
   ).toLowerCase() === "true";
 
+// Optional hardened logging controls
+const LOG_LEVEL = String(
+  process.env.LOG_LEVEL || (DEBUG_WEBHOOK ? "debug" : "info")
+).toLowerCase();
+const LOG_REQUESTS =
+  String(process.env.LOG_REQUESTS || "true").toLowerCase() === "true";
+const LOG_REQUEST_BODY =
+  String(process.env.LOG_REQUEST_BODY || "false").toLowerCase() === "true";
+const LOG_RESPONSE_BODY =
+  String(process.env.LOG_RESPONSE_BODY || "false").toLowerCase() === "true";
+const LOG_HEADERS =
+  String(process.env.LOG_HEADERS || "false").toLowerCase() === "true";
+const LOG_BODY_MAX = parseInt(process.env.LOG_BODY_MAX || "1500", 10);
+const REQUEST_ID_HEADER = process.env.REQUEST_ID_HEADER || "x-request-id";
+
+const REDACT_HEADER_KEYS = new Set([
+  "authorization",
+  "x-api-key",
+  "x-api_key",
+  "cookie",
+  "set-cookie",
+]);
+
+function redactHeaders(headersObj) {
+  const h = headersObj || {};
+  const out = {};
+  for (const k of Object.keys(h)) {
+    const lk = String(k).toLowerCase();
+    if (REDACT_HEADER_KEYS.has(lk)) {
+      out[k] = "[REDACTED]";
+    } else {
+      out[k] = h[k];
+    }
+  }
+  return out;
+}
+
+function safeStringifyForLog(obj, maxLen) {
+  const lim = typeof maxLen === "number" ? maxLen : 1500;
+  try {
+    const s = JSON.stringify(obj);
+    return s.length > lim ? s.slice(0, lim) + "…" : s;
+  } catch {
+    try {
+      const s = String(obj);
+      return s.length > lim ? s.slice(0, lim) + "…" : s;
+    } catch {
+      return "[unstringifiable]";
+    }
+  }
+}
+
 // -------------------------
 // Logging
 // -------------------------
 
 function log(level, msg, extra) {
+  // Level filtering (debug < info < warn < error)
+  const order = { debug: 10, info: 20, warn: 30, error: 40 };
+  const lvl = String(level || "info").toLowerCase();
+  const min = order[String(LOG_LEVEL || "info").toLowerCase()] || 20;
+  const cur = order[lvl] || 20;
+  if (cur < min) return;
+
+  const ctx = requestContext.getStore ? requestContext.getStore() : null;
   const payload = {
     ts: new Date().toISOString(),
-    level,
+    level: lvl,
     env: NODE_ENV,
     msg,
+    ...(ctx && ctx.req_id ? { req_id: ctx.req_id } : {}),
     ...(extra && typeof extra === "object" ? extra : {}),
   };
   console.log(JSON.stringify(payload));
@@ -123,6 +188,86 @@ const ALWAYS_200_ERRORS =
   envBool(process.env.ALWAYS_200_ERRORS, false);
 
 app.disable("x-powered-by");
+
+// -------------------------
+// Request context + access logging
+// -------------------------
+
+app.use((req, res, next) => {
+  const incoming = req.get(REQUEST_ID_HEADER) || "";
+  const rid =
+    incoming && String(incoming).trim()
+      ? String(incoming).trim()
+      : crypto.randomUUID
+        ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+
+  // Run downstream handlers inside an AsyncLocalStorage context so all log() calls can include req_id automatically.
+  requestContext.run({ req_id: rid }, () => {
+    res.setHeader(REQUEST_ID_HEADER, rid);
+    req.req_id = rid;
+
+    const t0 = Date.now();
+    let resBodySnippet = "";
+
+    // Optionally capture small response body snippet for debugging.
+    if (LOG_RESPONSE_BODY || DEBUG_WEBHOOK) {
+      const origJson = res.json.bind(res);
+      const origSend = res.send.bind(res);
+      res.json = (body) => {
+        try {
+          resBodySnippet = safeStringifyForLog(body, LOG_BODY_MAX);
+        } catch {}
+        return origJson(body);
+      };
+      res.send = (body) => {
+        try {
+          resBodySnippet = safeStringifyForLog(body, LOG_BODY_MAX);
+        } catch {}
+        return origSend(body);
+      };
+    }
+
+    res.on("finish", () => {
+      if (!LOG_REQUESTS && !DEBUG_WEBHOOK) return;
+      const duration_ms = Date.now() - t0;
+      const entry = {
+        method: req.method,
+        path: req.originalUrl || req.path,
+        status: res.statusCode,
+        duration_ms,
+      };
+      if (LOG_HEADERS || DEBUG_WEBHOOK) {
+        entry.headers = redactHeaders(req.headers);
+      }
+      if (LOG_REQUEST_BODY || (DEBUG_WEBHOOK && req.method !== "GET")) {
+        const raw =
+          typeof req.rawBody === "string"
+            ? req.rawBody
+            : typeof req.body === "string"
+              ? req.body
+              : safeStringifyForLog(req.body, LOG_BODY_MAX);
+        entry.body =
+          typeof raw === "string" && raw.length > LOG_BODY_MAX
+            ? raw.slice(0, LOG_BODY_MAX) + "…"
+            : raw;
+      }
+      if (resBodySnippet) {
+        entry.res_body = resBodySnippet;
+      }
+
+      const lvl =
+        res.statusCode >= 500
+          ? "error"
+          : res.statusCode >= 400
+            ? "warn"
+            : "info";
+      log(lvl, "request", entry);
+    });
+
+    next();
+  });
+});
 // Body parsing:
 // - Accept text/plain (Voiceflow "Raw/Text" bodies) via express.text
 // - Accept application/json via express.json
@@ -263,17 +408,28 @@ async function fetchWithRetry(
 ) {
   const retryMax = clampNumber(maxRetries, 0, 10);
   const base = clampNumber(baseMs, 50, 5000);
+  const tAll = Date.now();
 
   for (let attempt = 0; attempt <= retryMax; attempt++) {
     let resp;
     let text = "";
+    const t0 = Date.now();
 
     try {
       resp = await fetchWithTimeout(url, options, timeoutMs);
       text = await resp.text();
+      const attempt_ms = Date.now() - t0;
 
       if (resp.ok) {
-        return { ok: true, status: resp.status, text, headers: resp.headers };
+        return {
+          ok: true,
+          status: resp.status,
+          text,
+          headers: resp.headers,
+          attempt,
+          attempt_ms,
+          duration_ms: Date.now() - tAll,
+        };
       }
 
       if (shouldRetryStatus(resp.status) && attempt < retryMax) {
@@ -282,35 +438,59 @@ async function fetchWithRetry(
           url,
           status: resp.status,
           attempt,
+          attempt_ms,
+          backoff_ms: backoff,
+          text: truncate(text || "", 400),
+        });
+        await sleep(backoff);
+        continue;
+      }
+
+      // No retry
+      return {
+        ok: false,
+        status: resp.status,
+        text,
+        attempt,
+        attempt_ms,
+        duration_ms: Date.now() - tAll,
+      };
+    } catch (err) {
+      const attempt_ms = Date.now() - t0;
+      const msg = err && err.name === "AbortError" ? "timeout" : "fetch_error";
+
+      if (attempt < retryMax) {
+        const backoff = Math.min(base * Math.pow(2, attempt), 8000);
+        log("warn", "Upstream exception; retrying", {
+          url,
+          error: msg,
+          attempt,
+          attempt_ms,
           backoff_ms: backoff,
         });
         await sleep(backoff);
         continue;
       }
 
-      return { ok: false, status: resp.status, text };
-    } catch (err) {
-      if (attempt < retryMax) {
-        const backoff = Math.min(base * Math.pow(2, attempt), 8000);
-        log("warn", "Upstream fetch error; retrying", {
-          url,
-          attempt,
-          backoff_ms: backoff,
-          error: String(err?.message || err),
-        });
-        await sleep(backoff);
-        continue;
-      }
       return {
         ok: false,
         status: 0,
         text: "",
-        error: String(err?.message || err),
+        error: msg,
+        attempt,
+        attempt_ms,
+        duration_ms: Date.now() - tAll,
       };
     }
   }
 
-  return { ok: false, status: 0, text: "", error: "retry_exhausted" };
+  return {
+    ok: false,
+    status: 0,
+    text: "",
+    error: "retry_exhausted",
+    duration_ms: Date.now() - tAll,
+  };
 }
 
 function normalizeBaseUrl(base) {
@@ -1825,6 +2005,23 @@ function closeResources() {
   });
 }
 
+// -------------------------
+// Process-level safety nets
+// -------------------------
+
+process.on("unhandledRejection", (reason) => {
+  log("error", "unhandledRejection", {
+    reason: safeStringifyForLog(reason, 2000),
+  });
+});
+
+process.on("uncaughtException", (err) => {
+  log("error", "uncaughtException", {
+    error:
+      err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
+  });
+  // Do not exit automatically; let the platform restart if needed.
+});
 if (require.main === module) {
   startServer();
 }
