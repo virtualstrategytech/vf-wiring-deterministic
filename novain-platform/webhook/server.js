@@ -1083,8 +1083,9 @@ async function optimizeQuestion(input) {
     return okEnvelope({
       source: prox.source || "optimize_upstream",
       mode,
+      input_question: question,
       optimized_question: optimized,
-      confirmed_question: optimized,
+      confirmed_question: question,
       interpretation_summary,
       interpretation_json,
       API_OptimizedQuestion: optimized,
@@ -1126,8 +1127,9 @@ async function optimizeQuestion(input) {
   return okEnvelope({
     source: "optimize_local",
     mode,
+    input_question: question,
     optimized_question: optimized,
-    confirmed_question: optimized,
+    confirmed_question: question,
     interpretation_summary: interp.interpretation_summary,
     interpretation_json: interp.interpretation_json,
     API_OptimizedQuestion: optimized,
