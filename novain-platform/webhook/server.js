@@ -132,39 +132,6 @@ function safeStringifyForLog(obj, maxLen) {
   }
 }
 
-// If an upstream/helper accidentally returns a JSON string, normalize it back to an object.
-// Voiceflow capture mappings require a JSON object response (not a string containing JSON).
-function maybeParseJsonString(value) {
-  try {
-    if (typeof value !== "string") return value;
-    const s = value.trim();
-    // Case A: raw JSON object/array string
-    if (
-      (s.startsWith("{") && s.endsWith("}")) ||
-      (s.startsWith("[") && s.endsWith("]"))
-    ) {
-      return JSON.parse(s);
-    }
-    // Case B: JSON string that itself contains JSON (double-encoded)
-    if (s.startsWith('"{') && s.endsWith('}"')) {
-      const once = JSON.parse(s);
-      if (typeof once === "string") {
-        const ss = once.trim();
-        if (
-          (ss.startsWith("{") && ss.endsWith("}")) ||
-          (ss.startsWith("[") && ss.endsWith("]"))
-        ) {
-          return JSON.parse(ss);
-        }
-      }
-      return once;
-    }
-    return value;
-  } catch {
-    return value;
-  }
-}
-
 // -------------------------
 // Logging
 // -------------------------
@@ -248,17 +215,25 @@ app.use((req, res, next) => {
       const origJson = res.json.bind(res);
       const origSend = res.send.bind(res);
       res.json = (body) => {
-        body = maybeParseJsonString(body);
         try {
           resBodySnippet = safeStringifyForLog(body, LOG_BODY_MAX);
         } catch {}
         return origJson(body);
       };
       res.send = (body) => {
-        body = maybeParseJsonString(body);
         try {
           resBodySnippet = safeStringifyForLog(body, LOG_BODY_MAX);
         } catch {}
+
+        // IMPORTANT: In Express, origSend(object) delegates to res.json(object).
+        // Because we also patch res.json for logging, that can recurse and blow the stack.
+        // Normalize object bodies to go through the ORIGINAL res.json instead.
+        const isObjectBody = body !== null && typeof body === "object";
+        const isBinaryBody =
+          isObjectBody && (Buffer.isBuffer(body) || ArrayBuffer.isView(body));
+        if (isObjectBody && !isBinaryBody) {
+          return origJson(body);
+        }
         return origSend(body);
       };
     }
@@ -683,7 +658,6 @@ function inferReply(out) {
 }
 
 function ensureContract(req, payload, actionHint) {
-  payload = maybeParseJsonString(payload);
   const out =
     payload && typeof payload === "object" ? { ...payload } : { ok: true };
 
