@@ -224,6 +224,16 @@ app.use((req, res, next) => {
         try {
           resBodySnippet = safeStringifyForLog(body, LOG_BODY_MAX);
         } catch {}
+
+        // IMPORTANT: In Express, origSend(object) delegates to res.json(object).
+        // Because we also patch res.json for logging, that can recurse and blow the stack.
+        // Normalize object bodies to go through the ORIGINAL res.json instead.
+        const isObjectBody = body !== null && typeof body === "object";
+        const isBinaryBody =
+          isObjectBody && (Buffer.isBuffer(body) || ArrayBuffer.isView(body));
+        if (isObjectBody && !isBinaryBody) {
+          return origJson(body);
+        }
         return origSend(body);
       };
     }
