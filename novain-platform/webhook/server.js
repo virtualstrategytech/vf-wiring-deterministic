@@ -212,6 +212,12 @@ app.use((req, res, next) => {
 
     // Optionally capture small response body snippet for debugging.
     if (LOG_RESPONSE_BODY || DEBUG_WEBHOOK) {
+      // Prevent double-wrapping (can cause recursion in some test/runtime setups)
+      if (res.__vf_logged_body_wrapped) {
+        return next();
+      }
+      res.__vf_logged_body_wrapped = true;
+
       const origJson = res.json.bind(res);
       const origSend = res.send.bind(res);
       res.json = (body) => {
