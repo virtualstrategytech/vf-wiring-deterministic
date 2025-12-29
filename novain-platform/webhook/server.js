@@ -119,6 +119,16 @@ function redactHeaders(headersObj) {
 
 function safeStringifyForLog(obj, maxLen) {
   const lim = typeof maxLen === "number" ? maxLen : 1500;
+
+  // Important: if obj is already a string (e.g., Express may pass the JSON string to res.send),
+  // do NOT JSON.stringify it again, otherwise logs look like '"{\"ok\":true...}"'.
+  try {
+    if (typeof obj === "string") {
+      const s = obj;
+      return s.length > lim ? s.slice(0, lim) + "…" : s;
+    }
+  } catch {}
+
   try {
     const s = JSON.stringify(obj);
     return s.length > lim ? s.slice(0, lim) + "…" : s;
@@ -664,8 +674,28 @@ function inferReply(out) {
 }
 
 function ensureContract(req, payload, actionHint) {
+  // Normalize payload: some upstream helpers may return JSON as a string.
+  // Voiceflow integrations are far more stable when we always respond with a JSON OBJECT.
+  let normalizedPayload = payload;
+  if (typeof normalizedPayload === "string") {
+    // Try parsing once (or twice if the string is itself JSON-string-wrapped).
+    const p1 = parseJsonIfString(normalizedPayload);
+    const p2 = typeof p1 === "string" ? parseJsonIfString(p1) : p1;
+    if (p2 && typeof p2 === "object") normalizedPayload = p2;
+    else {
+      normalizedPayload = {
+        ok: true,
+        API_OK: true,
+        component_result: "success",
+        reply: String(normalizedPayload),
+      };
+    }
+  }
+
   const out =
-    payload && typeof payload === "object" ? { ...payload } : { ok: true };
+    normalizedPayload && typeof normalizedPayload === "object"
+      ? { ...normalizedPayload }
+      : { ok: true };
 
   if (out.ok === true && typeof out.API_OK !== "boolean") out.API_OK = true;
   if (out.ok !== true && typeof out.API_OK !== "boolean") out.API_OK = false;
@@ -1101,7 +1131,7 @@ async function optimizeQuestion(input) {
       mode,
       input_question: question,
       optimized_question: optimized,
-      confirmed_question: question,
+      confirmed_question: optimized,
       interpretation_summary,
       interpretation_json,
       API_OptimizedQuestion: optimized,
@@ -1145,7 +1175,7 @@ async function optimizeQuestion(input) {
     mode,
     input_question: question,
     optimized_question: optimized,
-    confirmed_question: question,
+    confirmed_question: optimized,
     interpretation_summary: interp.interpretation_summary,
     interpretation_json: interp.interpretation_json,
     API_OptimizedQuestion: optimized,
