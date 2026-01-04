@@ -775,342 +775,446 @@ function stubText(kind) {
 
   return "ok";
 }
+function stubLessonMarkdown(mode, question) {
+  const m = safeMode({ mode: mode });
+  const q =
+    safeStr(question) ||
+    (m === "prompt"
+      ? "your prompt engineering topic"
+      : "your business strategy topic");
 
-function stubQuizExam(mode, question) {
-  const m = String(mode || "business")
-    .trim()
-    .toLowerCase();
-  const topic = String(question || "").trim();
-
-  const isPrompt =
-    m === "prompt" || m === "prompt_engineering" || m === "prompt-engineering";
-  const title = isPrompt ? "Prompt Engineering Quiz" : "Business Strategy Quiz";
-
-  // Keep it deterministic (no randomness) so debugging is stable.
-  const mcq = [];
-  const tf = [];
-  const open = [];
-
-  // --- Multiple Choice (10) ---
-  if (isPrompt) {
-    mcq.push({
-      question: topic
-        ? `Which prompt element most improves reliability for the task: "${topic}"?`
-        : "Which prompt element most improves reliability?",
-      options: [
-        "More emojis",
-        "Clear constraints and success criteria",
-        "Longer preambles",
-        "Multiple unrelated tasks",
-      ],
-      answer: "Clear constraints and success criteria",
-      explanation:
-        "Constraints and success criteria reduce ambiguity and guide the model toward the intended output.",
-    });
-    mcq.push({
-      question: "What is the best way to reduce hallucinations in a prompt?",
-      options: [
-        "Ask for 'creativity' only",
-        "Provide grounded context + ask for citations/quotes when needed",
-        "Remove all context",
-        "Use all caps",
-      ],
-      answer: "Provide grounded context + ask for citations/quotes when needed",
-      explanation:
-        "Grounding + explicit sourcing requests reduces speculation and improves factuality.",
-    });
-    mcq.push({
-      question:
-        "Which instruction is most useful when you need structured output?",
-      options: [
-        "'Be detailed'",
-        "'Answer however you like'",
-        "'Return valid JSON matching this schema'",
-        "'Tell a story'",
-      ],
-      answer: "Return valid JSON matching this schema",
-      explanation:
-        "A schema creates a contract that is easier to parse and validate.",
-    });
-    mcq.push({
-      question: "What is a good use of few-shot examples?",
-      options: [
-        "To increase token usage",
-        "To demonstrate the desired format and edge cases",
-        "To hide the real task",
-        "To prevent the model from answering",
-      ],
-      answer: "To demonstrate the desired format and edge cases",
-      explanation:
-        "Examples show the model what 'good' looks like, especially for tricky formatting.",
-    });
-    mcq.push({
-      question:
-        "If a model response is too verbose, what is the best prompt tweak?",
-      options: [
-        "Remove the question",
-        "Add 'be concise' plus a target length",
-        "Add more unrelated context",
-        "Ask for jokes",
-      ],
-      answer: "Add 'be concise' plus a target length",
-      explanation:
-        "Clear length constraints are easier to follow than vague brevity requests.",
-    });
-    mcq.push({
-      question: "Which is the safest way to request step-by-step reasoning?",
-      options: [
-        "Ask for hidden chain-of-thought",
-        "Ask for a brief explanation and final answer",
-        "Ask for internal system prompts",
-        "Ask for training data",
-      ],
-      answer: "Ask for a brief explanation and final answer",
-      explanation:
-        "You can request a short explanation without requiring hidden internal reasoning.",
-    });
-    mcq.push({
-      question: "What does 'tool use' typically mean in an agent workflow?",
-      options: [
-        "Using emojis",
-        "Calling external functions/APIs to fetch or act on information",
-        "Writing poetry",
-        "Changing fonts",
-      ],
-      answer: "Calling external functions/APIs to fetch or act on information",
-      explanation:
-        "Tools extend capabilities beyond the model's built-in knowledge.",
-    });
-    mcq.push({
-      question: "Which prompt pattern helps when tasks are ambiguous?",
-      options: [
-        "Assume everything",
-        "Ask clarifying questions or list assumptions",
-        "Refuse to answer",
-        "Only output keywords",
-      ],
-      answer: "Ask clarifying questions or list assumptions",
-      explanation:
-        "Clarifying questions or explicit assumptions prevent misalignment.",
-    });
-    mcq.push({
-      question:
-        "What is a 'system' instruction in chat models primarily used for?",
-      options: [
-        "Styling only",
-        "High-priority behavior and constraints",
-        "Making responses longer",
-        "Changing the user's message",
-      ],
-      answer: "High-priority behavior and constraints",
-      explanation: "System messages define top-level behavior and guardrails.",
-    });
-    mcq.push({
-      question: "Which evaluation method best checks prompt robustness?",
-      options: [
-        "One happy-path test",
-        "A test set with variations + scoring rubric",
-        "Only manual vibes",
-        "Ignoring failures",
-      ],
-      answer: "A test set with variations + scoring rubric",
-      explanation:
-        "Robustness comes from testing multiple variants against consistent criteria.",
-    });
-
-    // --- True/False (3) ---
-    tf.push({
-      question:
-        "Adding explicit constraints (tone, format, length) generally improves output consistency.",
-      answer: "True",
-    });
-    tf.push({
-      question: "Few-shot examples are only useful for creative writing tasks.",
-      answer: "False",
-    });
-    tf.push({
-      question: "A good prompt can specify both what to do and what to avoid.",
-      answer: "True",
-    });
-
-    // --- Open-ended (1) ---
-    open.push({
-      question: topic
-        ? `Write a short prompt that would help a model produce a high-quality answer for: "${topic}". Include role, constraints, and output format.`
-        : "Write a short prompt that includes role, constraints, and a JSON output schema for a business question.",
-      model_answer:
-        "Example: You are a senior analyst. Clarify assumptions, then provide 3 options with tradeoffs. Output valid JSON: {summary, assumptions[], options[{name, pros[], cons[], recommendation}]}. Keep it under 200 words.",
-    });
-  } else {
-    mcq.push({
-      question: topic
-        ? `What is the best first step when approaching: "${topic}"?`
-        : "What is the best first step in strategy work?",
-      options: [
-        "Pick a solution immediately",
-        "Clarify goals and success metrics",
-        "Build slides",
-        "Hire more people",
-      ],
-      answer: "Clarify goals and success metrics",
-      explanation:
-        "A clear objective and metrics guide all downstream decisions.",
-    });
-    mcq.push({
-      question: "Which artifact most commonly captures business requirements?",
-      options: [
-        "A PRD or BRD",
-        "A logo",
-        "A password manager",
-        "A vacation calendar",
-      ],
-      answer: "A PRD or BRD",
-      explanation:
-        "Requirements are typically documented in a PRD/BRD for alignment and accountability.",
-    });
-    mcq.push({
-      question: "What is a common risk of unclear requirements?",
-      options: [
-        "Faster delivery",
-        "Scope creep and rework",
-        "Lower costs",
-        "Automatic alignment",
-      ],
-      answer: "Scope creep and rework",
-      explanation:
-        "Ambiguity leads to misinterpretation, rework, and uncontrolled scope.",
-    });
-    mcq.push({
-      question:
-        "Which technique best validates requirements with stakeholders?",
-      options: [
-        "Silent assumptions",
-        "Requirements review + sign-off",
-        "Skipping meetings",
-        "Only email CCs",
-      ],
-      answer: "Requirements review + sign-off",
-      explanation:
-        "Formal review/sign-off reduces mismatch and creates shared understanding.",
-    });
-    mcq.push({
-      question: "What is a good way to prioritize requirements?",
-      options: [
-        "Alphabetical order",
-        "MoSCoW (Must/Should/Could/Won't)",
-        "Random selection",
-        "Whatever is loudest",
-      ],
-      answer: "MoSCoW (Must/Should/Could/Won't)",
-      explanation:
-        "MoSCoW is a simple framework to prioritize and manage tradeoffs.",
-    });
-    mcq.push({
-      question: "A 'constraint' in strategy is best described as:",
-      options: [
-        "A hidden preference",
-        "A limitation that shapes options",
-        "A bonus feature",
-        "A competitor rumor",
-      ],
-      answer: "A limitation that shapes options",
-      explanation:
-        "Constraints (budget, time, resources) bound feasible solutions.",
-    });
-    mcq.push({
-      question: "Which metric is most useful for confirming success criteria?",
-      options: [
-        "Vanity metrics only",
-        "A measurable KPI tied to the objective",
-        "Number of meetings",
-        "Team happiness only",
-      ],
-      answer: "A measurable KPI tied to the objective",
-      explanation:
-        "Success criteria should be measurable and directly linked to outcomes.",
-    });
-    mcq.push({
-      question: "What is a reasonable way to handle changing requirements?",
-      options: [
-        "Ignore changes",
-        "Change control: assess impact + re-baseline scope",
-        "Panic",
-        "Only blame the team",
-      ],
-      answer: "Change control: assess impact + re-baseline scope",
-      explanation:
-        "Change control manages scope/time/cost tradeoffs transparently.",
-    });
-    mcq.push({
-      question: "Which is an example of a deliverable in requirements work?",
-      options: [
-        "A documented requirements list",
-        "A new chair",
-        "A coffee order",
-        "A meme",
-      ],
-      answer: "A documented requirements list",
-      explanation:
-        "Deliverables are tangible outputs like documented requirements and acceptance criteria.",
-    });
-    mcq.push({
-      question: "Acceptance criteria are primarily used to:",
-      options: [
-        "Make requirements vague",
-        "Define what 'done' means",
-        "Increase meetings",
-        "Avoid testing",
-      ],
-      answer: "Define what 'done' means",
-      explanation:
-        "Acceptance criteria provide testable conditions for completion.",
-    });
-
-    tf.push({
-      question:
-        "Business requirements should be testable and measurable whenever possible.",
-      answer: "True",
-    });
-    tf.push({
-      question:
-        "Stakeholder alignment is optional if engineering is confident.",
-      answer: "False",
-    });
-    tf.push({
-      question:
-        "Constraints like budget and timeline can change the recommended option.",
-      answer: "True",
-    });
-
-    open.push({
-      question: topic
-        ? `Write 5 bullet business requirements and 3 acceptance criteria for: "${topic}".`
-        : "Write 5 bullet business requirements and 3 acceptance criteria for a generic project.",
-      model_answer:
-        "Example requirements: (1) Define target users and use cases. (2) Document scope and non-goals. (3) Identify constraints (budget/time/resources). (4) Prioritize requirements (MoSCoW). (5) Define success metrics and ownership. Acceptance criteria: (a) Stakeholders sign off on PRD/BRD. (b) Each 'Must' has measurable criteria. (c) Change-control process documented.",
-    });
+  if (m === "prompt") {
+    return [
+      "### Prompt Engineering Lesson",
+      "",
+      "**Your topic:** " + q,
+      "",
+      "#### 1) Define the role + goal",
+      "- *Role:* Who is the model (e.g., 'senior consultant', 'technical writer')?",
+      "- *Goal:* What must be produced (deliverable + success criteria)?",
+      "",
+      "#### 2) Provide the minimum necessary context",
+      "- What’s known, unknown, and assumed?",
+      "- Who is the audience and what decisions will they make with the output?",
+      "",
+      "#### 3) Add constraints that make outputs reliable",
+      "- Length limits, tone, and formatting rules.",
+      "- Allowed sources (and what not to invent).",
+      "- Edge cases to handle explicitly.",
+      "",
+      "#### 4) Specify output format (this is the cheat code)",
+      "- Use headings, bullet lists, or JSON schema.",
+      "- If you need deterministic parsing, require strict JSON.",
+      "",
+      "#### 5) Add a self-check",
+      "- Ask the model to verify it followed constraints and flag missing inputs.",
+      "",
+      "#### Copy/paste prompt template",
+      "Role: You are a [ROLE].",
+      "Context: [WHAT'S HAPPENING], [AUDIENCE], [CONSTRAINTS].",
+      'Task: Solve "' + q + '".',
+      "Output: Provide [FORMAT].",
+      "Checks: List any missing info you needed; otherwise confirm compliance.",
+    ].join("\n");
   }
 
-  // Back-compat: expose a single-question view too.
-  const first = mcq[0] || {
-    question: "",
-    options: [],
-    answer: "",
-    explanation: "",
-  };
+  // business (default)
+  return [
+    "### Business Strategy Lesson",
+    "",
+    "**Your topic:** " + q,
+    "",
+    "#### Objective",
+    "- Translate an ambiguous problem into **clear requirements** and **measurable success**.",
+    "",
+    "#### Step-by-step approach (consultant-grade)",
+    "1) **Clarify the objective**: What decision must be made? What does “good” look like?",
+    "2) **Define scope + constraints**: What’s in/out? Budget, timeline, regulatory, capacity.",
+    "3) **Map stakeholders**: Who owns the decision, who executes, who is impacted?",
+    "4) **Elicit requirements**: User needs, business rules, non-functional (performance, security).",
+    "5) **Prioritize**: MoSCoW / RICE / simple impact vs effort.",
+    "6) **Validate**: Review with stakeholders; confirm acceptance criteria.",
+    "",
+    "#### Artifacts you should produce",
+    "- PRD/BRD outline (problem, users, requirements, success metrics, risks).",
+    "- Acceptance criteria (testable statements).",
+    "- Open questions list + owner + due date.",
+    "",
+    "#### Common failure modes (avoid these)",
+    "- Vague requirements ('make it better').",
+    "- No success metric (can’t tell if you won).",
+    "- Skipping stakeholder alignment (causes rework).",
+    "",
+    "#### Next steps",
+    "- List 3–5 requirements, 1 metric, 1 constraint, and 3 open questions — then validate with stakeholders.",
+  ].join("\n");
+}
+
+function stubQuizExam(mode, question) {
+  const m = safeMode({ mode: mode });
+  const topic =
+    safeStr(question) ||
+    (m === "prompt" ? "prompt design" : "business strategy");
+  const title =
+    m === "prompt" ? "Prompt Engineering Quiz" : "Business Strategy Quiz";
+
+  function pad2(n) {
+    const s = String(n);
+    return s.length === 1 ? "0" + s : s;
+  }
+
+  function mcq(idNum, q, opts, ans, exp) {
+    return {
+      id: "mcq_" + pad2(idNum),
+      question: q,
+      options: opts,
+      answer: ans,
+      explanation: exp,
+    };
+  }
+
+  // Deterministic 10 MCQs, 3 TF, 1 Open — matches C_Quiz_10_3_1 expectations.
+  let mcqList = [];
+  if (m === "prompt") {
+    mcqList = [
+      mcq(
+        1,
+        'What is the best first step before writing a prompt for: "' +
+          topic +
+          '"?',
+        [
+          "Define the role + goal",
+          "Add emojis",
+          "Ask for a poem",
+          "Skip context",
+        ],
+        "Define the role + goal",
+        "Role and goal anchor the model’s behavior and output."
+      ),
+      mcq(
+        2,
+        "Which element most reduces hallucinations?",
+        [
+          "Vague instructions",
+          "Clear constraints + sources",
+          "Longer output",
+          "More exclamation marks",
+        ],
+        "Clear constraints + sources",
+        "Constraints and allowed sources tighten the solution space."
+      ),
+      mcq(
+        3,
+        "What is the purpose of an output schema?",
+        [
+          "To confuse the model",
+          "To control format and consistency",
+          "To increase tokens",
+          "To remove reasoning",
+        ],
+        "To control format and consistency",
+        "Schemas reduce variability and speed downstream parsing."
+      ),
+      mcq(
+        4,
+        "When should you ask clarifying questions?",
+        [
+          "Only after answering",
+          "When inputs are ambiguous or missing",
+          "Never",
+          "Only for creative writing",
+        ],
+        "When inputs are ambiguous or missing",
+        "Clarification prevents wrong assumptions and rework."
+      ),
+      mcq(
+        5,
+        "Which is the best example of a constraint?",
+        [
+          "Be helpful",
+          "Use bullet points and <= 150 words",
+          "Try your best",
+          "Do something nice",
+        ],
+        "Use bullet points and <= 150 words",
+        "Good constraints are specific and measurable."
+      ),
+      mcq(
+        6,
+        "What is the strongest way to provide context?",
+        [
+          "Random facts",
+          "Relevant background + objective",
+          "Unrelated links",
+          "A long story",
+        ],
+        "Relevant background + objective",
+        "Context should be directly tied to the goal."
+      ),
+      mcq(
+        7,
+        "What does 'few-shot' prompting mean?",
+        [
+          "Using fewer words",
+          "Providing examples of desired outputs",
+          "Asking fewer questions",
+          "Removing constraints",
+        ],
+        "Providing examples of desired outputs",
+        "Examples teach style, structure, and decision rules."
+      ),
+      mcq(
+        8,
+        "How do you make prompts more robust?",
+        [
+          "Remove evaluation steps",
+          "Add checks and edge cases",
+          "Ask for longer essays",
+          "Avoid specifying users",
+        ],
+        "Add checks and edge cases",
+        "Built-in checks catch failures early."
+      ),
+      mcq(
+        9,
+        "What is a good way to reduce variance?",
+        [
+          "Leave format open",
+          "Use a rubric and explicit criteria",
+          "Ask for creativity",
+          "Use sarcasm",
+        ],
+        "Use a rubric and explicit criteria",
+        "Rubrics stabilize scoring and outputs."
+      ),
+      mcq(
+        10,
+        "What is the best way to iterate prompts?",
+        [
+          "Change everything at once",
+          "Change one variable and test",
+          "Never test",
+          "Only test once",
+        ],
+        "Change one variable and test",
+        "Single-variable iteration isolates cause and effect."
+      ),
+    ];
+  } else {
+    mcqList = [
+      mcq(
+        1,
+        'What is the best first step when approaching: "' + topic + '"?',
+        [
+          "Pick a solution immediately",
+          "Clarify goals and success metrics",
+          "Build slides first",
+          "Hire more people",
+        ],
+        "Clarify goals and success metrics",
+        "Clear objectives and metrics guide all downstream decisions."
+      ),
+      mcq(
+        2,
+        "Which artifact most commonly captures business requirements?",
+        ["A PRD/BRD", "A logo", "A password manager", "A vacation calendar"],
+        "A PRD/BRD",
+        "Requirements are documented for alignment and accountability."
+      ),
+      mcq(
+        3,
+        "What is a common risk of unclear requirements?",
+        [
+          "Faster delivery",
+          "Scope creep and rework",
+          "Lower costs",
+          "Automatic alignment",
+        ],
+        "Scope creep and rework",
+        "Ambiguity leads to misinterpretation and churn."
+      ),
+      mcq(
+        4,
+        "Which stakeholder input is most critical early?",
+        [
+          "Only engineering",
+          "Only sales",
+          "Cross-functional stakeholders",
+          "No stakeholders",
+        ],
+        "Cross-functional stakeholders",
+        "Requirements must reflect business, user, and delivery realities."
+      ),
+      mcq(
+        5,
+        "Which is a good success metric?",
+        [
+          "'Make it better'",
+          "Conversion rate increase",
+          "More meetings",
+          "More slides",
+        ],
+        "Conversion rate increase",
+        "A measurable metric enables decision-making and tradeoffs."
+      ),
+      mcq(
+        6,
+        "What helps prevent scope creep?",
+        [
+          "No documentation",
+          "Explicit in-scope/out-of-scope",
+          "Avoiding timelines",
+          "Changing goals weekly",
+        ],
+        "Explicit in-scope/out-of-scope",
+        "Boundaries reduce ambiguity and rework."
+      ),
+      mcq(
+        7,
+        "Which is a constraint?",
+        [
+          "Team morale",
+          "Budget and timeline limits",
+          "Curiosity",
+          "Brand colors",
+        ],
+        "Budget and timeline limits",
+        "Constraints shape feasible solution sets."
+      ),
+      mcq(
+        8,
+        "What is a strong requirement characteristic?",
+        [
+          "Unverifiable",
+          "Testable and specific",
+          "Vague and broad",
+          "Optional and unclear",
+        ],
+        "Testable and specific",
+        "Testability enables validation and acceptance."
+      ),
+      mcq(
+        9,
+        "What is a good next step after drafting requirements?",
+        [
+          "Ship immediately",
+          "Validate with stakeholders",
+          "Rewrite from scratch",
+          "Ignore feedback",
+        ],
+        "Validate with stakeholders",
+        "Validation de-risks misunderstandings early."
+      ),
+      mcq(
+        10,
+        "When tradeoffs appear, what should you do?",
+        [
+          "Hide them",
+          "Make them explicit and decide",
+          "Add more features",
+          "Delay indefinitely",
+        ],
+        "Make them explicit and decide",
+        "Tradeoffs are inevitable; transparency enables alignment."
+      ),
+    ];
+  }
+
+  const tf =
+    m === "prompt"
+      ? [
+          {
+            id: "tf_01",
+            statement:
+              "A good prompt always includes role, context, and constraints.",
+            answer: true,
+            explanation:
+              "These elements reduce ambiguity and improve reliability.",
+          },
+          {
+            id: "tf_02",
+            statement:
+              "Leaving output format unspecified increases consistency.",
+            answer: false,
+            explanation:
+              "Format ambiguity increases variance and parsing failures.",
+          },
+          {
+            id: "tf_03",
+            statement:
+              "Rubrics can be used to grade outputs deterministically.",
+            answer: true,
+            explanation:
+              "Rubrics define scoring criteria and reduce subjectivity.",
+          },
+        ]
+      : [
+          {
+            id: "tf_01",
+            statement:
+              "Business requirements should be measurable or testable when possible.",
+            answer: true,
+            explanation: "Testable requirements reduce interpretation risk.",
+          },
+          {
+            id: "tf_02",
+            statement:
+              "Stakeholder alignment is optional if timelines are tight.",
+            answer: false,
+            explanation:
+              "Skipping alignment often creates larger downstream delays.",
+          },
+          {
+            id: "tf_03",
+            statement:
+              "Constraints like budget and timeline influence solution tradeoffs.",
+            answer: true,
+            explanation: "Constraints shape what is feasible and optimal.",
+          },
+        ];
+
+  const open =
+    m === "prompt"
+      ? {
+          id: "open_01",
+          question:
+            'Write a structured prompt to solve: "' +
+            topic +
+            '". Include role, context, constraints, and output format.',
+          rubric: [
+            "Includes role + goal",
+            "Provides relevant context",
+            "Defines constraints (length, sources, tone)",
+            "Specifies output format/schema",
+            "Includes a validation/check step",
+          ],
+          example_answer:
+            "Role: You are a senior analyst...\nContext: ...\nConstraints: ...\nOutput: ...\nChecks: ...",
+        }
+      : {
+          id: "open_01",
+          question:
+            'Draft 5 clear business requirements for: "' +
+            topic +
+            '". Include one success metric and one constraint.',
+          rubric: [
+            "Requirements are specific and testable",
+            "Includes at least one success metric",
+            "Includes at least one constraint",
+            "Mentions key stakeholders or users",
+            "Avoids vague language",
+          ],
+          example_answer:
+            "1) ...\n2) ...\n3) ...\nMetric: ...\nConstraint: ...",
+        };
 
   return {
-    title,
-    mode: isPrompt ? "prompt" : "business",
-    topic: topic || (isPrompt ? "prompt engineering" : "business strategy"),
-    mcq,
+    title: title,
+    mode: m,
+    topic: topic,
+    mcq: mcqList,
     true_false: tf,
     open_end: open,
-    // Single-question shape for older parsers
-    question: first.question,
-    options: first.options,
-    answer: first.answer,
-    explanation: first.explanation,
   };
 }
 
@@ -1587,16 +1691,16 @@ async function generateLesson(input) {
 
     const m =
       forcedMode || (stubKind === "lesson_prompt" ? "prompt" : "business");
-    const reply =
-      m === "prompt"
-        ? `🤖 Here’s a prompt-engineering lesson grounded on your topic: "${question}".`
-        : `Here’s a business strategy lesson for: "${question}".`;
+    const reply = stubLessonMarkdown(m, question);
 
     const lessonObj = { mode: m, title: lessonTitle, bullets: lines, reply };
     const lessonStr = asJsonString(lessonObj);
     return {
       title: lessonTitle,
       reply,
+      API_Response: reply,
+      lesson_text: reply,
+      API_Lesson_Text: reply,
       bullets: lines,
       bulletCount: lines.length,
       lessonStr,
@@ -1975,7 +2079,7 @@ async function generateExam(input) {
     });
   }
 
-  const stub = stubQuizExam(mode, safeQuestion);
+  const stub = stubQuizExam(mode, question);
   const stubStr = JSON.stringify(stub);
 
   return okEnvelope({
