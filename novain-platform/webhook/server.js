@@ -10,6 +10,7 @@
  *
  * Environment variables (recommended):
  *   WEBHOOK_API_KEY            (required in prod; client sends header x-api-key)
+ *   SERVICE_API_KEY            (optional; used only when UPSTREAM_ENABLED=true; forwarded to upstream via header x-api-key)
  *   NODE_ENV                   ("production" / "development")
  *
  *   OPENAI_API_KEY             (optional if you want local generation/grading)
@@ -47,6 +48,7 @@ const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
 const IS_PROD = NODE_ENV === "production";
 
 const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "";
+const SERVICE_API_KEY = (process.env.SERVICE_API_KEY || "").trim();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -1425,7 +1427,10 @@ async function maybeProxy(endpointName, payload) {
     url,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: Object.assign(
+        { "Content-Type": "application/json" },
+        SERVICE_API_KEY ? { "x-api-key": SERVICE_API_KEY } : null
+      ),
       body: JSON.stringify(payload || {}),
     },
     {
