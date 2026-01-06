@@ -46,16 +46,9 @@ const requestContext = new AsyncLocalStorage();
 const NODE_ENV = (process.env.NODE_ENV || "development").toLowerCase();
 const IS_PROD = NODE_ENV === "production";
 
-const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "";
+const WEBHOOK_API_KEY = WEBHOOK_API_KEY || "";
 
-// Option B security model:
-// - WEBHOOK_API_KEY: public key used by Voiceflow -> vf-webhook-service
-// - SERVICE_API_KEY: internal key used by vf-webhook-service -> upstream agent services
-//   (business/prompt/retrieval). If SERVICE_API_KEY is unset, we fall back to forwarding
-//   the inbound x-api-key for backwards compatibility.
-const SERVICE_API_KEY =
-  process.env.SERVICE_API_KEY || process.env.UPSTREAM_SERVICE_API_KEY || "";
-
+const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
@@ -1429,20 +1422,23 @@ async function maybeProxy(endpointName, payload, req) {
   const url = upstreamUrlFor(endpointName);
   if (!url) return { proxied: false };
 
-  // Option B: upstream services should be protected by an *internal* key (SERVICE_API_KEY).
-  // If SERVICE_API_KEY is not set, fall back to forwarding the inbound x-api-key for backwards compatibility.
+  // Option B upstream auth:
+  // - Voiceflow → vf-webhook-service uses WEBHOOK_API_KEY (public).
+  // - vf-webhook-service → upstream agents uses SERVICE_API_KEY (internal), when set.
+  // Fallback keeps dev working if SERVICE_API_KEY is not configured.
   const inboundKey =
     (req &&
       req.headers &&
       (req.headers["x-api-key"] || req.headers["X-API-Key"])) ||
     (req && typeof req.get === "function" ? req.get("x-api-key") : "") ||
+    WEBHOOK_API_KEY ||
     "";
-  const outboundKey = String(
-    SERVICE_API_KEY || inboundKey || WEBHOOK_API_KEY || ""
-  );
+
+  const svcKey = SERVICE_API_KEY || "";
+  const forwardKey = String(svcKey || inboundKey || "");
 
   const headers = { "Content-Type": "application/json" };
-  if (outboundKey) headers["x-api-key"] = outboundKey;
+  if (forwardKey) headers["x-api-key"] = forwardKey;
 
   const resp = await fetchWithRetry(
     url,
@@ -2318,6 +2314,14 @@ app.post("/webhook", async (req, res) => {
 
     let result;
     switch ((action || "").toLowerCase()) {
+      case "ping":
+        result = okEnvelope({
+          source: "ping",
+          reply: "pong",
+          action: "ping",
+          port: PORT,
+        });
+        break;
       case "llm_elicit":
         result = await llmElicit(payload, req);
         break;
