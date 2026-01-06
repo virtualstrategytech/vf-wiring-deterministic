@@ -48,6 +48,14 @@ const IS_PROD = NODE_ENV === "production";
 
 const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY || "";
 
+// Option B security model:
+// - WEBHOOK_API_KEY: public key used by Voiceflow -> vf-webhook-service
+// - SERVICE_API_KEY: internal key used by vf-webhook-service -> upstream agent services
+//   (business/prompt/retrieval). If SERVICE_API_KEY is unset, we fall back to forwarding
+//   the inbound x-api-key for backwards compatibility.
+const SERVICE_API_KEY =
+  process.env.SERVICE_API_KEY || process.env.UPSTREAM_SERVICE_API_KEY || "";
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
@@ -1421,23 +1429,20 @@ async function maybeProxy(endpointName, payload, req) {
   const url = upstreamUrlFor(endpointName);
   if (!url) return { proxied: false };
 
-  // Forward an API key to upstream services.
-  // Priority:
-  //  1) SERVICE_API_KEY (service-to-service key you control)
-  //  2) inbound Voiceflow x-api-key (so upstream can enforce the same auth)
-  //  3) WEBHOOK_API_KEY fallback (local/dev convenience)
+  // Option B: upstream services should be protected by an *internal* key (SERVICE_API_KEY).
+  // If SERVICE_API_KEY is not set, fall back to forwarding the inbound x-api-key for backwards compatibility.
   const inboundKey =
     (req &&
       req.headers &&
       (req.headers["x-api-key"] || req.headers["X-API-Key"])) ||
     (req && typeof req.get === "function" ? req.get("x-api-key") : "") ||
     "";
-
-  const serviceKey = envStr("SERVICE_API_KEY", "");
-  const fwdKey = serviceKey || inboundKey || process.env.WEBHOOK_API_KEY || "";
+  const outboundKey = String(
+    SERVICE_API_KEY || inboundKey || WEBHOOK_API_KEY || ""
+  );
 
   const headers = { "Content-Type": "application/json" };
-  if (fwdKey) headers["x-api-key"] = String(fwdKey);
+  if (outboundKey) headers["x-api-key"] = outboundKey;
 
   const resp = await fetchWithRetry(
     url,
