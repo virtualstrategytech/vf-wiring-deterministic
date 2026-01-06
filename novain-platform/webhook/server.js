@@ -1415,17 +1415,35 @@ async function interpretQuestion({
 // Upstream proxy helper
 // -------------------------
 
-async function maybeProxy(endpointName, payload) {
+async function maybeProxy(endpointName, payload, req) {
   if (!UPSTREAM_ENABLED) return { proxied: false };
 
   const url = upstreamUrlFor(endpointName);
   if (!url) return { proxied: false };
 
+  // Forward an API key to upstream services.
+  // Priority:
+  //  1) SERVICE_API_KEY (service-to-service key you control)
+  //  2) inbound Voiceflow x-api-key (so upstream can enforce the same auth)
+  //  3) WEBHOOK_API_KEY fallback (local/dev convenience)
+  const inboundKey =
+    (req &&
+      req.headers &&
+      (req.headers["x-api-key"] || req.headers["X-API-Key"])) ||
+    (req && typeof req.get === "function" ? req.get("x-api-key") : "") ||
+    "";
+
+  const serviceKey = envStr("SERVICE_API_KEY", "");
+  const fwdKey = serviceKey || inboundKey || process.env.WEBHOOK_API_KEY || "";
+
+  const headers = { "Content-Type": "application/json" };
+  if (fwdKey) headers["x-api-key"] = String(fwdKey);
+
   const resp = await fetchWithRetry(
     url,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload || {}),
     },
     {
@@ -1471,12 +1489,12 @@ async function maybeProxy(endpointName, payload) {
 // Core functions
 // -------------------------
 
-async function optimizeQuestion(input) {
+async function optimizeQuestion(input, req) {
   const question = safeQuestion(input);
   const mode = safeMode(input);
 
   const prox = PROXY_OPTIMIZE_QUESTION
-    ? await maybeProxy("OPTIMIZE_QUESTION", { question, mode })
+    ? await maybeProxy("OPTIMIZE_QUESTION", { question, mode }, req)
     : { proxied: false, ok: false, status: null, data: null, raw: null };
 
   if (prox.proxied && prox.ok) {
@@ -1561,7 +1579,7 @@ async function optimizeQuestion(input) {
   });
 }
 
-async function generateLesson(input) {
+async function generateLesson(input, _req) {
   const mode = safeMode(input);
   const question = safeQuestion(input);
 
@@ -1961,7 +1979,7 @@ async function promptLesson(input) {
   const question = safeQuestion(input);
   const goal = pickFirstString(input?.goal, input?.objective, "");
 
-  const prox = await maybeProxy("PROMPT_LESSON", { question, goal });
+  const prox = await maybeProxy("PROMPT_LESSON", { question, goal }, req);
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const text =
@@ -2022,7 +2040,7 @@ async function generateExam(input) {
   const mode = safeMode(input);
   const question = safeQuestion(input);
 
-  const prox = await maybeProxy("GENERATE_EXAM", { mode, question });
+  const prox = await maybeProxy("GENERATE_EXAM", { mode, question }, req);
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const exam =
@@ -2062,7 +2080,7 @@ async function generateExam(input) {
  * Alias: generate_quiz is the same as generate_exam for MVP.
  * Keeping this avoids refactoring Voiceflow.
  */
-async function generateQuiz(input) {
+async function generateQuiz(input, _req) {
   const res = await generateExam(input);
   // Ensure both quiz/exam keys exist even if upstream changed shape
   const examStr = pickFirstString(res.API_Exam_JSON, res.API_Quiz_JSON) || "";
@@ -2076,7 +2094,7 @@ async function generateQuiz(input) {
   return payload;
 }
 
-async function gradeOpen(input) {
+async function gradeOpen(input, _req) {
   const mode = safeMode(input);
 
   const userAnswer = pickFirstString(
@@ -2137,7 +2155,7 @@ async function teachAndQuiz(input) {
   const mode = safeMode(input);
   const question = safeQuestion(input);
 
-  const prox = await maybeProxy("TEACH_AND_QUIZ", { mode, question });
+  const prox = await maybeProxy("TEACH_AND_QUIZ", { mode, question }, req);
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
     const lesson = pickFirstString(
@@ -2195,7 +2213,7 @@ async function teachAndQuiz(input) {
 // CI/test harness functions
 // -------------------------
 
-async function llmElicit(input) {
+async function llmElicit(input, _req) {
   const payload = input || {};
 
   const raw = {
@@ -2229,23 +2247,23 @@ async function invokeComponent(input) {
 
   switch (String(action).toLowerCase()) {
     case "llm_elicit":
-      return llmElicit(payload);
+      return llmElicit(payload, req);
     case "optimize_question":
-      return optimizeQuestion(payload);
+      return optimizeQuestion(payload, req);
     case "generate_lesson":
-      return generateLesson(payload);
+      return generateLesson(payload, req);
     case "prompt_lesson":
       return promptLesson(payload);
     case "generate_exam":
       return generateExam(payload);
     case "generate_quiz":
-      return generateQuiz(payload);
+      return generateQuiz(payload, req);
     case "exam":
       return generateExam(payload);
     case "quiz":
-      return generateQuiz(payload);
+      return generateQuiz(payload, req);
     case "grade_open":
-      return gradeOpen(payload);
+      return gradeOpen(payload, req);
     case "teach_and_quiz":
     default:
       return teachAndQuiz(payload);
@@ -2296,31 +2314,31 @@ app.post("/webhook", async (req, res) => {
     let result;
     switch ((action || "").toLowerCase()) {
       case "llm_elicit":
-        result = await llmElicit(payload);
+        result = await llmElicit(payload, req);
         break;
       case "optimize_question":
-        result = await optimizeQuestion(payload);
+        result = await optimizeQuestion(payload, req);
         break;
       case "generate_lesson":
-        result = await generateLesson(payload);
+        result = await generateLesson(payload, req);
         break;
       case "prompt_lesson":
         result = await promptLesson(payload);
         break;
       case "grade_open":
-        result = await gradeOpen(payload);
+        result = await gradeOpen(payload, req);
         break;
       case "generate_exam":
         result = await generateExam(payload);
         break;
       case "generate_quiz":
-        result = await generateQuiz(payload);
+        result = await generateQuiz(payload, req);
         break;
       case "exam":
         result = await generateExam(payload);
         break;
       case "quiz":
-        result = await generateQuiz(payload);
+        result = await generateQuiz(payload, req);
         break;
       case "teach_and_quiz":
       default:
@@ -2342,12 +2360,12 @@ app.post("/webhook", async (req, res) => {
 
 app.post("/optimize_question", async (req, res) => {
   const body = normalizeIncomingBody(req.body) || {};
-  const result = await optimizeQuestion(body);
+  const result = await optimizeQuestion(body, req);
   res.status(200).json(ensureContract(req, result, "optimize_question"));
 });
 
 app.post("/generate_lesson", async (req, res) => {
-  const result = await generateLesson(req.body || {});
+  const result = await generateLesson(req.body || {}, req);
   res.status(200).json(ensureContract(req, result, "generate_lesson"));
 });
 
@@ -2370,7 +2388,7 @@ app.post("/generate_exam", async (req, res) => {
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const result = await generateQuiz(req.body || {});
+  const result = await generateQuiz(req.body || {}, req);
   res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
@@ -2381,7 +2399,7 @@ app.post("/exam", async (req, res) => {
 });
 
 app.post("/grade_open", async (req, res) => {
-  const result = await gradeOpen(req.body || {});
+  const result = await gradeOpen(req.body || {}, req);
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 
