@@ -1202,6 +1202,136 @@ function safeMode(input) {
     .trim()
     .toLowerCase();
   return m === "prompt" ? "prompt" : "business";
+} /**
+ * Normalize exam payload for Voiceflow consumption.
+ * Ensures open-ended items include `model_answer` (aka reference/best answer) and `rubric`.
+ * Also mirrors to `open_list` for convenience in VF JS blocks.
+ */
+function normalizeExamPayload(examObj) {
+  if (!examObj || typeof examObj !== "object") return examObj;
+
+  function asArray(x) {
+    if (Array.isArray(x)) return x;
+    return null;
+  }
+
+  // ---- MCQ normalization (ensure answer is A/B/C/D) ----
+  var mcq =
+    examObj.mcq ||
+    examObj.mcq_list ||
+    examObj.mcqs ||
+    examObj.multiple_choice ||
+    null;
+
+  if (Array.isArray(mcq)) {
+    var mcqNorm = mcq.map(function (it) {
+      it = it && typeof it === "object" ? it : {};
+
+      // normalize options into array [A,B,C,D]
+      var opts = it.options || it.choices || it.answers || it.items || null;
+      if (opts && typeof opts === "object" && !Array.isArray(opts)) {
+        opts = [
+          safeStr(opts.A || opts.a || ""),
+          safeStr(opts.B || opts.b || ""),
+          safeStr(opts.C || opts.c || ""),
+          safeStr(opts.D || opts.d || ""),
+        ];
+      }
+      opts = Array.isArray(opts)
+        ? opts.slice(0, 4).map(function (x) {
+            return safeStr(x);
+          })
+        : ["", "", "", ""];
+
+      var ans = safeStr(
+        it.answer || it.correct_answer || it.correct || it.correctOption || ""
+      ).trim();
+
+      // If upstream returned the full option text, convert it to a letter
+      if (ans && ans.length > 1) {
+        var ansNorm = oneLine(ans).toLowerCase();
+        var idx = -1;
+        for (var k = 0; k < opts.length; k++) {
+          if (oneLine(opts[k]).toLowerCase() === ansNorm) {
+            idx = k;
+            break;
+          }
+        }
+        if (idx >= 0) ans = ["A", "B", "C", "D"][idx];
+      }
+
+      ans = String(ans || "")
+        .trim()
+        .toUpperCase();
+      if (["A", "B", "C", "D"].indexOf(ans) === -1) ans = "";
+
+      // Keep original fields, but also provide normalized ones for VF
+      it.options = opts;
+      it.answer = ans;
+
+      return it;
+    });
+
+    examObj.mcq = mcqNorm;
+    examObj.mcq_list = mcqNorm; // VF-friendly alias
+  }
+
+  // ---- True/False normalization (ensure answer is "True" or "False") ----
+  var tf = examObj.tf || examObj.tf_list || examObj.true_false || null;
+
+  if (Array.isArray(tf)) {
+    var tfNorm = tf.map(function (it) {
+      it = it && typeof it === "object" ? it : {};
+      var ans = it.answer || it.correct || it.correct_answer;
+      if (typeof ans === "boolean") ans = ans ? "True" : "False";
+      ans = safeStr(ans).trim();
+      var a = ans.toLowerCase();
+      if (a === "t" || a === "true" || a === "yes") ans = "True";
+      else if (a === "f" || a === "false" || a === "no") ans = "False";
+      it.answer = ans;
+      return it;
+    });
+
+    examObj.tf = tfNorm;
+    examObj.tf_list = tfNorm; // VF-friendly alias
+  }
+
+  // ---- Open-ended normalization (ensure model_answer + rubric) ----
+  var open =
+    examObj.open ||
+    examObj.open_list ||
+    examObj.openQuestions ||
+    examObj.open_questions ||
+    null;
+
+  if (Array.isArray(open)) {
+    var openNorm = open.map(function (it) {
+      it = it && typeof it === "object" ? it : {};
+      var q = safeStr(it.question || it.q || it.prompt || "");
+      var rubric = oneLine(it.rubric || it.grading_rubric || it.criteria || "");
+      var model = oneLine(
+        it.model_answer ||
+          it.modelAnswer ||
+          it.best_answer ||
+          it.reference_answer ||
+          it.sample_answer ||
+          it.answer ||
+          ""
+      );
+
+      // Normalize fields on the item
+      it.question = q;
+      it.rubric = rubric;
+      it.model_answer = model;
+
+      return it;
+    });
+
+    examObj.open = openNorm;
+    examObj.open_list = openNorm; // VF-friendly alias
+  }
+
+  return examObj;
 }
 
 // Normalize request bodies: Voiceflow sometimes sends a JSON string (e.g. '"{...}"') instead of an object.
@@ -1273,6 +1403,75 @@ function extractFirstJsonObject(text) {
     }
   }
   return null;
+} /**
+ * Local OpenAI-based grader for open-ended questions.
+ * Returns: { score: 0|1, feedback: string, model_answer: string }
+ */
+async function openaiGradeOpen(input) {
+  input = input || {};
+  const mode = safeMode(input.mode || "");
+  const question = safeQuestion(input.question || "");
+  const answer = safeStr(input.answer || "");
+  const context = safeStr(input.context || "");
+
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      score: 0,
+      feedback: "OpenAI grading is not configured (missing OPENAI_API_KEY).",
+      model_answer: "",
+    };
+  }
+
+  const ctx = String(context || "");
+  const ctxTrim =
+    ctx.length > 6000 ? ctx.slice(0, 6000) + "\n...[truncated]" : ctx;
+
+  const system =
+    "You are a strict examiner. Grade the student's answer against the question and context. " +
+    "Return JSON ONLY with keys: score (0 or 1), feedback (1-2 sentences), model_answer (2-4 sentences). " +
+    "Score=1 only if the answer captures the key ideas accurately.";
+
+  const user =
+    "Mode: " +
+    mode +
+    "\n" +
+    "Question: " +
+    question +
+    "\n\n" +
+    "Context (lesson):\n" +
+    ctxTrim +
+    "\n\n" +
+    "Student answer:\n" +
+    answer +
+    "\n\n" +
+    "Return JSON only.";
+
+  const r = await openaiChat(
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    { temperature: 0.1, maxTokens: 500 }
+  );
+
+  if (!r || !r.ok) {
+    return {
+      score: 0,
+      feedback: "I couldn't auto-grade this response right now.",
+      model_answer: "",
+    };
+  }
+
+  const jsonText = extractFirstJsonObject(r.content) || r.content || "";
+  const obj = jsonOrNull(jsonText) || {};
+
+  return {
+    score: obj.score,
+    feedback: safeStr(obj.feedback || ""),
+    model_answer: oneLine(
+      obj.model_answer || obj.best_answer || obj.reference_answer || ""
+    ),
+  };
 }
 
 function buildInterpretationHeuristic({
@@ -2023,43 +2222,58 @@ async function promptLesson(input) {
  * - API_Exam_JSON and API_Quiz_JSON both set
  * - exam and quiz both set
  */
-async function generateExam(input) {
-  const mode = safeMode(input);
-  const question = safeQuestion(input);
+async function generateExam(body) {
+  body = body || {};
 
+  const mode = safeMode(body.mode || body.mode_selected || body.lens || "");
+  const question = safeQuestion(
+    body.question || body.confirmed_question || body.question_for_api || ""
+  );
+
+  // Prefer upstream (Option A), but always fall back to a deterministic stub
   const prox = await maybeProxy("GENERATE_EXAM", { mode, question });
+
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
-    const exam =
+
+    // Try multiple possible upstream shapes
+    let examObj =
       out.exam ||
       jsonOrNull(out.API_Exam_JSON) ||
       out.API_Exam ||
       out.quiz ||
       jsonOrNull(out.API_Quiz_JSON) ||
       out.API_Quiz ||
-      stubQuizExam(mode, question);
+      null;
 
-    const examStr = typeof exam === "string" ? exam : JSON.stringify(exam);
+    if (!examObj || typeof examObj !== "object") {
+      examObj = stubQuizExam(mode, question);
+    }
+
+    examObj = normalizeExamPayload(examObj);
+
+    const examStr = JSON.stringify(examObj);
 
     return okEnvelope({
-      source: "upstream_generate_exam",
+      source: "generate_exam_upstream",
+      upstream_ok: true,
+      upstream_status: prox.status || 200,
       API_Exam_JSON: examStr,
-      API_Quiz_JSON: examStr, // alias for VF
-      exam,
-      quiz: exam, // alias for VF
-      upstream_status: prox.status,
+      API_Quiz_JSON: examStr, // legacy alias used in some VF blocks
+      exam: examObj,
+      quiz: examObj,
     });
   }
 
-  const stub = stubQuizExam(mode, question);
+  const stub = normalizeExamPayload(stubQuizExam(mode, question));
   const stubStr = JSON.stringify(stub);
 
   return okEnvelope({
     source: "generate_exam_stub",
     API_Exam_JSON: stubStr,
-    API_Quiz_JSON: stubStr, // alias for VF
+    API_Quiz_JSON: stubStr,
     exam: stub,
-    quiz: stub, // alias for VF
+    quiz: stub,
   });
 }
 
@@ -2081,60 +2295,88 @@ async function generateQuiz(input) {
   return payload;
 }
 
-async function gradeOpen(input) {
-  const mode = safeMode(input);
+async function gradeOpen(body) {
+  body = body || {};
 
-  const userAnswer = pickFirstString(
-    input?.open_user_answer,
-    input?.answer,
-    input?.user_answer
+  const mode = safeMode(body.mode || body.mode_selected || body.lens || "");
+  const question = safeQuestion(body.question || body.open_q || body.q || "");
+  const answer = safeStr(body.answer || body.open_user_answer || "");
+  const context = safeStr(
+    body.context || body.lesson || body.API_Lesson_JSON || ""
   );
 
-  const openQuestion = pickFirstString(
-    input?.open_question,
-    input?.question,
-    input?.confirmed_question
+  // If VF already has a model answer (from generate_exam), let it flow through
+  const modelIn = oneLine(
+    body.model_answer ||
+      body.open_model_answer ||
+      body.best_answer ||
+      body.reference_answer ||
+      ""
   );
 
-  const context = pickFirstString(
-    input?.question_for_api,
-    input?.confirmed_question
-  );
+  function to01(x) {
+    const n = Number(x);
+    if (!isFinite(n)) return 0;
+    return n >= 1 ? 1 : 0;
+  }
 
+  // 1) Try upstream first (Option A)
   const prox = await maybeProxy("GRADE_OPEN", {
     mode,
-    answer: userAnswer,
-    open_question: openQuestion,
+    question,
+    answer,
     context,
+    model_answer: modelIn,
   });
 
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
-    const grade = out.grade ||
-      jsonOrNull(out.API_Grade_JSON) ||
-      out.API_Grade || {
-        score: 7,
-        feedback:
-          "Good structure; add clearer assumptions and a success metric.",
-      };
+    const g = out.grade || out.data?.grade || out;
+
+    const grade = {
+      score: to01(g?.score),
+      feedback: safeStr(g?.feedback || g?.explanation || ""),
+      model_answer: oneLine(
+        g?.model_answer ||
+          g?.modelAnswer ||
+          g?.best_answer ||
+          g?.reference_answer ||
+          modelIn ||
+          ""
+      ),
+    };
+
+    // If upstream didn't return a model answer, generate one locally
+    if (!grade.model_answer) {
+      const llm = await openaiGradeOpen({ mode, question, answer, context });
+      if (llm && llm.model_answer)
+        grade.model_answer = oneLine(llm.model_answer);
+      if (!grade.feedback && llm && llm.feedback)
+        grade.feedback = safeStr(llm.feedback);
+      if (typeof llm?.score !== "undefined") grade.score = to01(llm.score);
+    }
 
     return okEnvelope({
-      source: "upstream_grade_open",
-      API_Grade_JSON: typeof grade === "string" ? grade : JSON.stringify(grade),
+      source: "grade_open_upstream",
+      upstream_ok: true,
+      upstream_status: prox.status || 200,
       grade,
-      upstream_status: prox.status,
     });
   }
 
-  const grade = {
-    score: 7,
-    feedback: "Good structure; add clearer assumptions and a success metric.",
+  // 2) Local OpenAI grading (fallback when upstream disabled/unavailable)
+  const llm = await openaiGradeOpen({ mode, question, answer, context });
+
+  // Final guardrails (never return empty strings)
+  const finalGrade = {
+    score: to01(llm?.score),
+    feedback: safeStr(llm?.feedback || "I couldn't auto-grade this response."),
+    model_answer: oneLine(llm?.model_answer || modelIn || ""),
   };
 
   return okEnvelope({
-    source: "grade_open_stub",
-    API_Grade_JSON: JSON.stringify(grade),
-    grade,
+    source: "grade_open_openai",
+    grade: finalGrade,
   });
 }
 
