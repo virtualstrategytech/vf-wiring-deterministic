@@ -1210,11 +1210,6 @@ function safeMode(input) {
 function normalizeExamPayload(examObj) {
   if (!examObj || typeof examObj !== "object") return examObj;
 
-  function asArray(x) {
-    if (Array.isArray(x)) return x;
-    return null;
-  }
-
   // ---- MCQ normalization (ensure answer is A/B/C/D) ----
   var mcq =
     examObj.mcq ||
