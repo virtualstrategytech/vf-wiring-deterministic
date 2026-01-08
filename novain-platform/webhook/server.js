@@ -1197,16 +1197,65 @@ function jsonOrNull(s) {
 }
 
 function safeMode(input) {
-  const m = (input?.mode || input?.learning_mode || "business")
-    .toString()
-    .trim()
-    .toLowerCase();
-  return m === "prompt" ? "prompt" : "business";
-} /**
- * Normalize exam payload for Voiceflow consumption.
- * Ensures open-ended items include `model_answer` (aka reference/best answer) and `rubric`.
- * Also mirrors to `open_list` for convenience in VF JS blocks.
- */
+  // Accept string or object; normalize common variants.
+  var raw = "";
+  try {
+    if (typeof input === "string") raw = input;
+    else if (input && typeof input === "object") {
+      raw =
+        input.mode ??
+        input.mode_selected ??
+        input.learning_mode ??
+        input.lens ??
+        input.base_mode ??
+        input.selected_mode ??
+        input.last_clicked_button ??
+        "";
+    }
+  } catch {
+    // ignore errors reading input properties
+  }
+
+  raw = raw === null || raw === undefined ? "" : String(raw);
+  raw = raw.trim().toLowerCase();
+
+  // Strip wrapping quotes (VF sometimes passes "business" literally with quotes)
+  raw = raw.replace(/^['"]+|['"]+$/g, "");
+
+  if (!raw) return "business";
+
+  // Prompt-mode synonyms / variants
+  if (
+    raw === "prompt" ||
+    raw === "pe" ||
+    raw === "prompt_engineering" ||
+    raw === "promptengineering" ||
+    raw === "prompt engineering" ||
+    raw === "prompt_lens" ||
+    raw === "prompt-lens" ||
+    raw.indexOf("prompt") === 0
+  )
+    return "prompt";
+
+  // Business-mode synonyms / variants
+  if (
+    raw === "business" ||
+    raw === "strategy" ||
+    raw === "business_strategy" ||
+    raw === "business strategy" ||
+    raw === "business_lens" ||
+    raw === "business-lens" ||
+    raw.indexOf("business") === 0 ||
+    raw.indexOf("strategy") === 0
+  )
+    return "business";
+
+  // Last-resort: contains "prompt" anywhere
+  if (raw.indexOf("prompt") !== -1) return "prompt";
+
+  return "business";
+}
+
 function normalizeExamPayload(examObj) {
   if (!examObj || typeof examObj !== "object") return examObj;
 
