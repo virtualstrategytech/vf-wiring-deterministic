@@ -1400,6 +1400,8 @@ function normalizeIncomingBody(body) {
       b = parseJsonIfString(b.tq_payload_json) || b;
     if (typeof b.opt_payload_json === "string")
       b = parseJsonIfString(b.opt_payload_json) || b;
+    if (typeof b.exam_payload_json === "string")
+      b = parseJsonIfString(b.exam_payload_json) || b;
   }
 
   return b;
@@ -2655,7 +2657,8 @@ app.post("/prompt_lesson", async (req, res) => {
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const body = normalizeIncomingBody(req.body);
+  const result = await generateExam(body);
   res.status(200).json(ensureContract(req, result, "generate_exam"));
 });
 
@@ -2667,7 +2670,8 @@ app.post("/generate_quiz", async (req, res) => {
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const result = await generateExam(req.body || {});
+  const body = normalizeIncomingBody(req.body);
+  const result = await generateExam(body);
   res.status(200).json(ensureContract(req, result, "exam"));
 });
 
