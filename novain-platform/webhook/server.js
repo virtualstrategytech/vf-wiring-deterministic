@@ -1196,6 +1196,14 @@ function jsonOrNull(s) {
   }
 }
 
+// ---------- Shared helpers (must be in global scope) ----------
+function safeStr(x) {
+  return x === null || x === undefined ? "" : String(x);
+}
+function oneLine(x) {
+  return safeStr(x).replace(/\s+/g, " ").trim();
+}
+
 function safeMode(input) {
   // Accept string or object; normalize common variants.
   var raw = "";
@@ -2686,8 +2694,25 @@ app.post("/generate_exam", async (req, res) => {
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  const result = await generateQuiz(req.body || {});
-  res.status(200).json(ensureContract(req, result, "generate_quiz"));
+  try {
+    const body = normalizeIncomingBody(req.body);
+    const result = await generateQuiz(body || {});
+    res.status(200).json(ensureContract(req, result, "generate_quiz"));
+  } catch (err) {
+    res.status(200).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "fail",
+          error: "generate_quiz_failed",
+          message: err && err.message ? String(err.message) : "Unknown error",
+        },
+        "generate_quiz"
+      )
+    );
+  }
 });
 
 // Some VF exports call /exam directly
