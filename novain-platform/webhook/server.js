@@ -1395,6 +1395,7 @@ function normalizeIncomingBody(body) {
   let b = parseJsonIfString(body);
 
   // If wrapped under a single key (common in low-code tools), unwrap once.
+  // Voiceflow often sends a JSON STRING inside a field like *_payload_json.
   if (b && typeof b === "object") {
     if (typeof b.tq_payload_json === "string")
       b = parseJsonIfString(b.tq_payload_json) || b;
@@ -1402,6 +1403,10 @@ function normalizeIncomingBody(body) {
       b = parseJsonIfString(b.opt_payload_json) || b;
     if (typeof b.exam_payload_json === "string")
       b = parseJsonIfString(b.exam_payload_json) || b;
+    if (typeof b.quiz_payload_json === "string")
+      b = parseJsonIfString(b.quiz_payload_json) || b;
+    if (typeof b.lesson_payload_json === "string")
+      b = parseJsonIfString(b.lesson_payload_json) || b;
   }
 
   return b;
@@ -2657,9 +2662,26 @@ app.post("/prompt_lesson", async (req, res) => {
 
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
-  const body = normalizeIncomingBody(req.body);
-  const result = await generateExam(body);
-  res.status(200).json(ensureContract(req, result, "generate_exam"));
+  try {
+    const body = normalizeIncomingBody(req.body);
+    const result = await generateExam(body || {});
+    res.status(200).json(ensureContract(req, result, "generate_exam"));
+  } catch (err) {
+    // Always return a 200 + deterministic contract so Voiceflow stays on the Success path
+    res.status(200).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "fail",
+          error: "generate_exam_failed",
+          message: err && err.message ? String(err.message) : "Unknown error",
+        },
+        "generate_exam"
+      )
+    );
+  }
 });
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
@@ -2670,9 +2692,26 @@ app.post("/generate_quiz", async (req, res) => {
 
 // Some VF exports call /exam directly
 app.post("/exam", async (req, res) => {
-  const body = normalizeIncomingBody(req.body);
-  const result = await generateExam(body);
-  res.status(200).json(ensureContract(req, result, "exam"));
+  try {
+    const body = normalizeIncomingBody(req.body);
+    const result = await generateExam(body || {});
+    res.status(200).json(ensureContract(req, result, "exam"));
+  } catch (err) {
+    // Always return a 200 + deterministic contract so Voiceflow stays on the Success path
+    res.status(200).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "fail",
+          error: "generate_exam_failed",
+          message: err && err.message ? String(err.message) : "Unknown error",
+        },
+        "exam"
+      )
+    );
+  }
 });
 
 app.post("/grade_open", async (req, res) => {
