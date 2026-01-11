@@ -1458,71 +1458,102 @@ function extractFirstJsonObject(text) {
  * Local OpenAI-based grader for open-ended questions.
  * Returns: { score: 0|1, feedback: string, model_answer: string }
  */
-async function openaiGradeOpen(input) {
-  input = input || {};
-  const mode = safeMode(input.mode || "");
-  const question = safeQuestion(input.question || "");
-  const answer = safeStr(input.answer || "");
-  const context = safeStr(input.context || "");
+async function openaiGradeOpen(opts) {
+  opts = opts || {};
+  const question = oneLine(opts.question || "");
+  const userAnswer = trimStr(opts.user_answer || "");
+  const context = safeStr(opts.context || "");
+  const mode = safeMode(opts.mode || opts.lens || "");
+  const refIn = safeStr(opts.model_answer || opts.reference_answer || "");
+  let rubric = trimStr(opts.rubric || "");
 
-  if (!process.env.OPENAI_API_KEY) {
+  // Handle common placeholder mistakes
+  if (
+    rubric === "{open_rubric}" ||
+    rubric === "open_rubric" ||
+    rubric === "None"
+  )
+    rubric = "";
+
+  // Conservative default rubric
+  if (!rubric) {
+    rubric =
+      "Score 1 only if the user's answer is essentially correct and addresses the question. Otherwise score 0. Provide brief, actionable feedback and a concise model answer.";
+  }
+
+  // If no user answer, don't burn tokens
+  if (!userAnswer) {
     return {
       score: 0,
-      feedback: "OpenAI grading is not configured (missing OPENAI_API_KEY).",
-      model_answer: "",
+      feedback: "No answer provided.",
+      model_answer: refIn || "",
     };
   }
 
-  const ctx = String(context || "");
-  const ctxTrim =
-    ctx.length > 6000 ? ctx.slice(0, 6000) + "\n...[truncated]" : ctx;
+  // Build a strict JSON-only prompt
+  const sys = [
+    "You are a strict grader for an open-ended quiz question.",
+    "Return ONLY valid JSON (no markdown, no extra keys).",
+    "JSON schema:",
+    "{",
+    '  "score": 0 or 1,',
+    '  "feedback": "short feedback",',
+    '  "model_answer": "concise ideal answer"',
+    "}",
+  ].join("\n");
 
-  const system =
-    "You are a strict examiner. Grade the student's answer against the question and context. " +
-    "Return JSON ONLY with keys: score (0 or 1), feedback (1-2 sentences), model_answer (2-4 sentences). " +
-    "Score=1 only if the answer captures the key ideas accurately.";
+  const usr = [
+    "MODE: " + mode,
+    "QUESTION: " + question,
+    "RUBRIC: " + rubric,
+    context ? "CONTEXT: " + context : "CONTEXT: (none provided)",
+    refIn ? "REFERENCE_ANSWER: " + refIn : "REFERENCE_ANSWER: (none provided)",
+    "USER_ANSWER: " + userAnswer,
+  ].join("\n");
 
-  const user =
-    "Mode: " +
-    mode +
-    "\n" +
-    "Question: " +
-    question +
-    "\n\n" +
-    "Context (lesson):\n" +
-    ctxTrim +
-    "\n\n" +
-    "Student answer:\n" +
-    answer +
-    "\n\n" +
-    "Return JSON only.";
-
-  const r = await openaiChat(
-    [
-      { role: "system", content: system },
-      { role: "user", content: user },
+  const chatRes = await openaiChat({
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: usr },
     ],
-    { temperature: 0.1, maxTokens: 500 }
-  );
+    temperature: 0,
+    max_tokens: 400,
+  });
 
-  if (!r || !r.ok) {
-    return {
-      score: 0,
-      feedback: "I couldn't auto-grade this response right now.",
-      model_answer: "",
-    };
+  const raw = safeStr(
+    (chatRes &&
+      (chatRes.content || chatRes.text || chatRes.reply || chatRes.output)) ||
+      ""
+  );
+  let parsed = null;
+
+  // Parse JSON, with a second pass if it's double-encoded
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      /* ignore */
+    }
   }
 
-  const jsonText = extractFirstJsonObject(r.content) || r.content || "";
-  const obj = jsonOrNull(jsonText) || {};
+  // Fallbacks if the model didn't comply
+  const out = parsed && typeof parsed === "object" ? parsed : {};
+  let score = Number(out.score);
+  if (isNaN(score)) score = 0;
+  score = score >= 1 ? 1 : 0;
 
-  return {
-    score: obj.score,
-    feedback: safeStr(obj.feedback || ""),
-    model_answer: oneLine(
-      obj.model_answer || obj.best_answer || obj.reference_answer || ""
-    ),
-  };
+  let feedback = trimStr(out.feedback || "");
+  if (!feedback) feedback = "Feedback unavailable (formatting issue).";
+
+  let modelAns = trimStr(out.model_answer || "");
+  if (!modelAns) modelAns = trimStr(refIn || "");
+
+  return { score: score, feedback: feedback, model_answer: modelAns };
 }
 
 function buildInterpretationHeuristic({
@@ -2350,84 +2381,71 @@ async function gradeOpen(body) {
   body = body || {};
 
   const mode = safeMode(body.mode || body.mode_selected || body.lens || "");
-  const question = safeQuestion(body.question || body.open_q || body.q || "");
-  const answer = safeStr(body.answer || body.open_user_answer || "");
-  const context = safeStr(
-    body.context || body.lesson || body.API_Lesson_JSON || ""
+  const question = safeQuestion(body.question || body.confirmed_question || "");
+  const user_answer = safeStr(
+    body.user_answer || body.answer || body.open_user_answer || ""
   );
 
-  // If VF already has a model answer (from generate_exam), let it flow through
-  const modelIn = oneLine(
+  // If the caller provides a model answer, preserve it as a fallback
+  const modelIn = safeStr(
     body.model_answer ||
-      body.open_model_answer ||
-      body.best_answer ||
       body.reference_answer ||
+      (body.open && body.open[0] && body.open[0].model_answer) ||
       ""
   );
 
-  function to01(x) {
-    const n = Number(x);
-    if (!isFinite(n)) return 0;
-    return n >= 1 ? 1 : 0;
-  }
+  // Accept rubric, but tolerate missing/placeholder values
+  const rubric = safeStr(body.rubric || "");
 
-  // 1) Try upstream first (Option A)
+  // Prefer upstream (Option A), but always fall back
   const prox = await maybeProxy("GRADE_OPEN", {
-    mode,
-    question,
-    answer,
-    context,
+    mode: mode,
+    question: question,
+    user_answer: user_answer,
+    rubric: rubric,
     model_answer: modelIn,
+    context: safeStr(body.context || ""),
   });
 
   if (prox.proxied && prox.ok) {
     const out = prox.data || {};
-    const g = out.grade || out.data?.grade || out;
-
-    const grade = {
-      score: to01(g?.score),
-      feedback: safeStr(g?.feedback || g?.explanation || ""),
-      model_answer: oneLine(
-        g?.model_answer ||
-          g?.modelAnswer ||
-          g?.best_answer ||
-          g?.reference_answer ||
-          modelIn ||
-          ""
-      ),
-    };
-
-    // If upstream didn't return a model answer, generate one locally
-    if (!grade.model_answer) {
-      const llm = await openaiGradeOpen({ mode, question, answer, context });
-      if (llm && llm.model_answer)
-        grade.model_answer = oneLine(llm.model_answer);
-      if (!grade.feedback && llm && llm.feedback)
-        grade.feedback = safeStr(llm.feedback);
-      if (typeof llm?.score !== "undefined") grade.score = to01(llm.score);
-    }
-
+    // Normalize a few possible shapes
+    const g = out.grade && typeof out.grade === "object" ? out.grade : out;
+    const score = typeof g.score === "number" ? g.score : Number(g.score || 0);
+    const feedback = safeStr(g.feedback || g.explanation || out.feedback || "");
+    const model_answer = safeStr(
+      g.model_answer || out.model_answer || modelIn || ""
+    );
     return okEnvelope({
       source: "grade_open_upstream",
-      upstream_ok: true,
-      upstream_status: prox.status || 200,
-      grade,
+      grade: {
+        score: isNaN(score) ? 0 : score,
+        feedback: feedback || "No feedback returned.",
+        model_answer: model_answer,
+      },
     });
   }
 
-  // 2) Local OpenAI grading (fallback when upstream disabled/unavailable)
-  const llm = await openaiGradeOpen({ mode, question, answer, context });
+  const graded = await openaiGradeOpen({
+    mode: mode,
+    question: question,
+    user_answer: user_answer,
+    rubric: rubric,
+    model_answer: modelIn,
+    context: safeStr(body.context || ""),
+  });
 
-  // Final guardrails (never return empty strings)
-  const finalGrade = {
-    score: to01(llm?.score),
-    feedback: safeStr(llm?.feedback || "I couldn't auto-grade this response."),
-    model_answer: oneLine(llm?.model_answer || modelIn || ""),
-  };
-
+  // Hard guarantee: always return these fields
   return okEnvelope({
-    source: "grade_open_openai",
-    grade: finalGrade,
+    source: "grade_open_llm",
+    grade: {
+      score:
+        typeof graded.score === "number"
+          ? graded.score
+          : Number(graded.score || 0),
+      feedback: safeStr(graded.feedback || ""),
+      model_answer: safeStr(graded.model_answer || modelIn || ""),
+    },
   });
 }
 
@@ -2715,34 +2733,10 @@ app.post("/exam", async (req, res) => {
 });
 
 app.post("/grade_open", async (req, res) => {
-  /**
-   * /grade_open hardening:
-   * - Voiceflow sometimes sends JSON as a STRING (especially when Body is a single {var}).
-   * - If JSON is invalid, our jsonParser middleware leaves req.body as a raw string.
-   * - Normalize and attempt to recover a usable object so gradeOpen() sees question/answer/model_answer.
-   */
-  let body = normalizeIncomingBody(req.body);
-
-  // If wrapped in a single payload key, unwrap (common VF pattern)
-  if (body && typeof body === "object") {
-    if (typeof body.open_grade_payload_json === "string")
-      body = parseJsonIfString(body.open_grade_payload_json) || body;
-    if (typeof body.grade_payload_json === "string")
-      body = parseJsonIfString(body.grade_payload_json) || body;
-    if (typeof body.payload_json === "string")
-      body = parseJsonIfString(body.payload_json) || body;
-  }
-
-  // If still a string, try to salvage the first JSON object from it
-  if (typeof body === "string") {
-    const candidate = extractFirstJsonObject(body) || body;
-    const parsed = parseJsonIfString(candidate);
-    body = parsed && typeof parsed === "object" ? parsed : {};
-  }
-
-  const result = await gradeOpen(body || {});
+  const result = await gradeOpen(req.body || {});
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
+
 // -------------------------
 // Server lifecycle helpers (CI-friendly)
 // -------------------------
