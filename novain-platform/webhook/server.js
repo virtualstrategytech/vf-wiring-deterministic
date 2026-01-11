@@ -1472,70 +1472,85 @@ function extractFirstJsonObject(text) {
  * Returns: { score: 0|1, feedback: string, model_answer: string }
  */
 async function openaiGradeOpen(input) {
-  input = input || {};
-  const mode = safeMode(input.mode || "");
-  const question = safeQuestion(input.question || "");
-  const answer = safeStr(input.answer || "");
-  const context = safeStr(input.context || "");
+  // Score scale: 0–5 (integer). 5 = excellent, 3 = partial, 1 = vague, 0 = incorrect/irrelevant.
+  const openai = makeOpenAIClient();
 
-  if (!process.env.OPENAI_API_KEY) {
-    return {
-      score: 0,
-      feedback: "OpenAI grading is not configured (missing OPENAI_API_KEY).",
-      model_answer: "",
-    };
-  }
+  const q = safeStr(input && (input.open_q || input.question || input.prompt));
+  const ans = safeStr(
+    input && (input.open_user_answer || input.user_answer || input.answer)
+  );
+  const refIn = safeStr(
+    input &&
+      (input.open_model_answer ||
+        input.model_answer ||
+        input.reference_answer ||
+        input.sample_answer)
+  );
+  const rubricIn = safeStr(input && (input.open_rubric || input.rubric || ""));
 
-  const ctx = String(context || "");
-  const ctxTrim =
-    ctx.length > 6000 ? ctx.slice(0, 6000) + "\n...[truncated]" : ctx;
+  const mode = safeStr(input && input.mode);
+  const topic = safeStr(input && input.topic);
 
-  const system =
-    "You are a strict examiner. Grade the student's answer against the question and context. " +
-    "Return JSON ONLY with keys: score (0 or 1), feedback (1-2 sentences), model_answer (2-4 sentences). " +
-    "Score=1 only if the answer captures the key ideas accurately.";
+  // Keep the rubric deterministic if caller didn't provide one.
+  const rubric =
+    rubricIn ||
+    "Score 0-5. 5 = complete, correct, structured bullets. 3 = partially correct, missing key steps. 1 = vague. 0 = irrelevant. Provide short feedback and a model answer.";
 
-  const user =
-    "Mode: " +
-    mode +
-    "\n" +
-    "Question: " +
-    question +
-    "\n\n" +
-    "Context (lesson):\n" +
-    ctxTrim +
-    "\n\n" +
-    "Student answer:\n" +
-    answer +
-    "\n\n" +
-    "Return JSON only.";
+  const system = [
+    "You are a strict grader for an upskilling platform.",
+    "You MUST return ONLY a single valid JSON object (no markdown, no backticks, no extra text).",
+    'Required keys: {"score": <integer 0-5>, "feedback": "<short constructive feedback>", "model_answer": "<a strong concise answer>"}',
+    "Scoring guidance:",
+    "- 5: correct, complete, well-structured, covers key points.",
+    "- 3: partially correct; missing some key steps or contains minor issues.",
+    "- 1: vague, shallow, or mostly incomplete; limited relevance.",
+    "- 0: incorrect or irrelevant.",
+    "If the user's answer is empty or nonsensical, score 0.",
+  ].join("\n");
 
-  const r = await openaiChat(
+  const user = [
+    "Context:",
+    "mode: " + (mode || "(unknown)"),
+    "topic: " + (topic || "(unknown)"),
+    "",
+    "Question:",
+    q || "(missing question)",
+    "",
+    "User answer:",
+    ans || "(missing user answer)",
+    "",
+    "Reference model answer (may be empty):",
+    refIn || "(none provided)",
+    "",
+    "Rubric:",
+    rubric,
+  ].join("\n");
+
+  const respText = await callOpenAIChat(
+    openai,
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.1, maxTokens: 500 }
+    { temperature: 0 }
   );
 
-  if (!r || !r.ok) {
-    return {
-      score: 0,
-      feedback: "I couldn't auto-grade this response right now.",
-      model_answer: refIn || "",
-    };
-  }
-
-  const jsonText = extractFirstJsonObject(r.content) || r.content || "";
+  const jsonText = extractFirstJsonObject(respText);
   const obj = jsonOrNull(jsonText) || {};
 
-  return {
-    score: obj.score,
-    feedback: safeStr(obj.feedback || ""),
-    model_answer: oneLine(
-      obj.model_answer || obj.best_answer || obj.reference_answer || ""
-    ),
-  };
+  let score = parseInt(obj.score, 10);
+  if (isNaN(score)) score = 0;
+  if (score < 0) score = 0;
+  if (score > 5) score = 5;
+
+  let feedback = safeStr(obj.feedback || obj.explanation || obj.reason || "");
+  if (!feedback) feedback = "No feedback was produced.";
+
+  let model_answer = safeStr(obj.model_answer || obj.modelAnswer || "");
+  // Fallback to caller-provided reference answer if the model omitted it.
+  if (!model_answer) model_answer = refIn || "";
+
+  return { score, feedback: oneLine(feedback), model_answer };
 }
 
 function buildInterpretationHeuristic({
