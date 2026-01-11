@@ -1196,14 +1196,6 @@ function jsonOrNull(s) {
   }
 }
 
-// ---------- Shared helpers (must be in global scope) ----------
-function safeStr(x) {
-  return x === null || x === undefined ? "" : String(x);
-}
-function oneLine(x) {
-  return safeStr(x).replace(/\s+/g, " ").trim();
-}
-
 function safeMode(input) {
   // Accept string or object; normalize common variants.
   var raw = "";
@@ -2694,25 +2686,8 @@ app.post("/generate_exam", async (req, res) => {
 
 // ✅ Alias endpoints for Voiceflow MVP compatibility
 app.post("/generate_quiz", async (req, res) => {
-  try {
-    const body = normalizeIncomingBody(req.body);
-    const result = await generateQuiz(body || {});
-    res.status(200).json(ensureContract(req, result, "generate_quiz"));
-  } catch (err) {
-    res.status(200).json(
-      ensureContract(
-        req,
-        {
-          ok: false,
-          API_OK: false,
-          component_result: "fail",
-          error: "generate_quiz_failed",
-          message: err && err.message ? String(err.message) : "Unknown error",
-        },
-        "generate_quiz"
-      )
-    );
-  }
+  const result = await generateQuiz(req.body || {});
+  res.status(200).json(ensureContract(req, result, "generate_quiz"));
 });
 
 // Some VF exports call /exam directly
@@ -2740,10 +2715,34 @@ app.post("/exam", async (req, res) => {
 });
 
 app.post("/grade_open", async (req, res) => {
-  const result = await gradeOpen(req.body || {});
+  /**
+   * /grade_open hardening:
+   * - Voiceflow sometimes sends JSON as a STRING (especially when Body is a single {var}).
+   * - If JSON is invalid, our jsonParser middleware leaves req.body as a raw string.
+   * - Normalize and attempt to recover a usable object so gradeOpen() sees question/answer/model_answer.
+   */
+  let body = normalizeIncomingBody(req.body);
+
+  // If wrapped in a single payload key, unwrap (common VF pattern)
+  if (body && typeof body === "object") {
+    if (typeof body.open_grade_payload_json === "string")
+      body = parseJsonIfString(body.open_grade_payload_json) || body;
+    if (typeof body.grade_payload_json === "string")
+      body = parseJsonIfString(body.grade_payload_json) || body;
+    if (typeof body.payload_json === "string")
+      body = parseJsonIfString(body.payload_json) || body;
+  }
+
+  // If still a string, try to salvage the first JSON object from it
+  if (typeof body === "string") {
+    const candidate = extractFirstJsonObject(body) || body;
+    const parsed = parseJsonIfString(candidate);
+    body = parsed && typeof parsed === "object" ? parsed : {};
+  }
+
+  const result = await gradeOpen(body || {});
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
-
 // -------------------------
 // Server lifecycle helpers (CI-friendly)
 // -------------------------
