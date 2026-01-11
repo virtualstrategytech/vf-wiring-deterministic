@@ -1505,8 +1505,8 @@ async function openaiGradeOpen(opts) {
   const usr = [
     "MODE: " + mode,
     "QUESTION: " + question,
+    "CONTEXT: " + (context || "(none provided)"),
     "RUBRIC: " + rubric,
-    context ? "CONTEXT: " + context : "CONTEXT: (none provided)",
     refIn ? "REFERENCE_ANSWER: " + refIn : "REFERENCE_ANSWER: (none provided)",
     "USER_ANSWER: " + userAnswer,
   ].join("\n");
