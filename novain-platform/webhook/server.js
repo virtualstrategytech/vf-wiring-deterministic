@@ -66,23 +66,6 @@ const UPSTREAM_RETRY_BASE_MS = parseInt(
   10
 );
 
-// OpenAI call controls (separate from upstream proxy controls)
-const OPENAI_TIMEOUT_MS = parseInt(
-  process.env.OPENAI_TIMEOUT_MS || "25000",
-  10
-);
-const OPENAI_MAX_RETRIES = parseInt(process.env.OPENAI_MAX_RETRIES || "1", 10);
-const OPENAI_RETRY_BASE_MS = parseInt(
-  process.env.OPENAI_RETRY_BASE_MS || "200",
-  10
-);
-const OPENAI_TEACH_ENABLED =
-  String(process.env.OPENAI_TEACH_ENABLED || "false").toLowerCase() === "true";
-const OPENAI_TEACH_MAXTOKENS = parseInt(
-  process.env.OPENAI_TEACH_MAXTOKENS || "1500",
-  10
-);
-
 const UPSTREAM_ENABLED =
   String(process.env.UPSTREAM_ENABLED || "false").toLowerCase() === "true";
 
@@ -624,9 +607,9 @@ async function openaiChat(
       body: JSON.stringify(body),
     },
     {
-      timeoutMs: OPENAI_TIMEOUT_MS,
-      maxRetries: OPENAI_MAX_RETRIES,
-      baseMs: OPENAI_RETRY_BASE_MS,
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      maxRetries: UPSTREAM_MAX_RETRIES,
+      baseMs: UPSTREAM_RETRY_BASE_MS,
     }
   );
 
@@ -1729,9 +1712,9 @@ async function maybeProxy(endpointName, payload) {
       body: JSON.stringify(payload || {}),
     },
     {
-      timeoutMs: OPENAI_TIMEOUT_MS,
-      maxRetries: OPENAI_MAX_RETRIES,
-      baseMs: OPENAI_RETRY_BASE_MS,
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      maxRetries: UPSTREAM_MAX_RETRIES,
+      baseMs: UPSTREAM_RETRY_BASE_MS,
     }
   );
 
@@ -2513,15 +2496,13 @@ async function teachAndQuiz(input) {
       ? "You are a senior prompt engineer teaching prompt patterns. Create a concise lesson with: role, context, constraints, output format, clarifying questions, and examples."
       : "You are a senior strategy consultant. Create a concise lesson with: objective, constraints, key assumptions, 2–3 options with tradeoffs, a recommendation, risks/mitigations, and a short execution plan.";
 
-  const oa = OPENAI_TEACH_ENABLED
-    ? await openaiChat(
-        [
-          { role: "system", content: sys },
-          { role: "user", content: question || "Generate a lesson." },
-        ],
-        { temperature: 0.0, maxTokens: OPENAI_TEACH_MAXTOKENS }
-      )
-    : { ok: false, status: 0, error: "openai_teach_disabled" };
+  const oa = await openaiChat(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: question || "Generate a lesson." },
+    ],
+    { temperature: 0.15, maxTokens: 900 }
+  );
 
   const lesson = oa.ok
     ? (oa.content || "").trim() || stubText(kind)
