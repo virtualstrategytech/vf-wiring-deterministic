@@ -2494,10 +2494,7 @@ async function teachAndQuiz(input) {
       out.API_Quiz ||
       stubQuizExam(mode, question);
 
-    const fallbackLesson = stubText(
-      mode === "prompt" ? "lesson_prompt" : "lesson_business"
-    );
-
+    const fallbackLesson = stubLessonMarkdown(mode, question);
     return okEnvelope({
       source: "upstream_teach_and_quiz",
       API_Lesson: lesson || fallbackLesson,
@@ -2507,7 +2504,6 @@ async function teachAndQuiz(input) {
     });
   }
 
-  const kind = mode === "prompt" ? "lesson_prompt" : "lesson_business";
   const sys =
     mode === "prompt"
       ? "You are a senior prompt engineer teaching prompt patterns. Create a concise lesson with: role, context, constraints, output format, clarifying questions, and examples."
@@ -2523,9 +2519,11 @@ async function teachAndQuiz(input) {
       )
     : { ok: false, status: 0, error: "openai_teach_disabled" };
 
+  const fallbackLesson = stubLessonMarkdown(mode, question);
+
   const lesson = oa.ok
-    ? (oa.content || "").trim() || stubText(kind)
-    : stubText(kind);
+    ? (oa.content || "").trim() || fallbackLesson
+    : fallbackLesson;
   const quiz = stubQuizExam(mode, question);
 
   return okEnvelope({
