@@ -41,6 +41,9 @@
 const express = require("express");
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
 const requestContext = new AsyncLocalStorage();
 
@@ -55,32 +58,32 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const UPSTREAM_TIMEOUT_MS = parseInt(
   process.env.UPSTREAM_TIMEOUT_MS || "12000",
-  10
+  10,
 );
 const UPSTREAM_MAX_RETRIES = parseInt(
   process.env.UPSTREAM_MAX_RETRIES || "2",
-  10
+  10,
 );
 const UPSTREAM_RETRY_BASE_MS = parseInt(
   process.env.UPSTREAM_RETRY_BASE_MS || "350",
-  10
+  10,
 );
 
 // OpenAI call controls (separate from upstream proxy controls)
 const OPENAI_TIMEOUT_MS = parseInt(
   process.env.OPENAI_TIMEOUT_MS || "25000",
-  10
+  10,
 );
 const OPENAI_MAX_RETRIES = parseInt(process.env.OPENAI_MAX_RETRIES || "1", 10);
 const OPENAI_RETRY_BASE_MS = parseInt(
   process.env.OPENAI_RETRY_BASE_MS || "200",
-  10
+  10,
 );
 const OPENAI_TEACH_ENABLED =
   String(process.env.OPENAI_TEACH_ENABLED || "false").toLowerCase() === "true";
 const OPENAI_TEACH_MAXTOKENS = parseInt(
   process.env.OPENAI_TEACH_MAXTOKENS || "1500",
-  10
+  10,
 );
 
 const UPSTREAM_ENABLED =
@@ -96,12 +99,12 @@ const RETRIEVAL_URL = (process.env.RETRIEVAL_URL || "").trim();
 
 const DEBUG_WEBHOOK =
   String(
-    process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false"
+    process.env.DEBUG_WEBHOOK || process.env.DEBUG_WEBHOOK_ENABLED || "false",
   ).toLowerCase() === "true";
 
 // Optional hardened logging controls
 const LOG_LEVEL = String(
-  process.env.LOG_LEVEL || (DEBUG_WEBHOOK ? "debug" : "info")
+  process.env.LOG_LEVEL || (DEBUG_WEBHOOK ? "debug" : "info"),
 ).toLowerCase();
 const LOG_REQUESTS =
   String(process.env.LOG_REQUESTS || "true").toLowerCase() === "true";
@@ -338,7 +341,7 @@ app.use(
       // Keep a copy of the raw body for debug + tolerant parsing fallbacks
       req.rawBody = buf.toString("utf8");
     },
-  })
+  }),
 );
 
 // Ensure rawBody exists for text/* bodies too.
@@ -356,7 +359,7 @@ app.use((err, req, res, next) => {
     (err.type === "entity.parse.failed" ||
       err instanceof SyntaxError ||
       /Unexpected token|Expected property name|JSON/i.test(
-        String(err.message || "")
+        String(err.message || ""),
       ));
 
   if (!isJsonParseError) return next(err);
@@ -462,7 +465,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 async function fetchWithRetry(
   url,
   options,
-  { timeoutMs = 12000, maxRetries = 2, baseMs = 350 } = {}
+  { timeoutMs = 12000, maxRetries = 2, baseMs = 350 } = {},
 ) {
   const retryMax = clampNumber(maxRetries, 0, 10);
   const base = clampNumber(baseMs, 50, 5000);
@@ -600,7 +603,7 @@ function upstreamUrlFor(endpointName) {
 
 async function openaiChat(
   messages,
-  { temperature = 0.1, maxTokens = 900 } = {}
+  { temperature = 0.1, maxTokens = 900 } = {},
 ) {
   if (!OPENAI_API_KEY) {
     return { ok: false, status: 0, error: "OPENAI_API_KEY not set" };
@@ -627,7 +630,7 @@ async function openaiChat(
       timeoutMs: OPENAI_TIMEOUT_MS,
       maxRetries: OPENAI_MAX_RETRIES,
       baseMs: OPENAI_RETRY_BASE_MS,
-    }
+    },
   );
 
   if (!resp.ok) {
@@ -921,8 +924,8 @@ function stubQuizExam(mode, question) {
         "Use the longest possible prompt",
         "Avoid examples",
         "Define the goal, audience, and constraints",
-        "Clear intent and constraints lead to better, more reliable outputs."
-      )
+        "Clear intent and constraints lead to better, more reliable outputs.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -932,8 +935,8 @@ function stubQuizExam(mode, question) {
         "Removing all context",
         "Only using one-word prompts",
         "Adding a clear rubric or success criteria",
-        "Rubrics reduce ambiguity and guide the model toward the target format."
-      )
+        "Rubrics reduce ambiguity and guide the model toward the target format.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -943,8 +946,8 @@ function stubQuizExam(mode, question) {
         "Using fewer tokens",
         "Only using system messages",
         "Providing example input/output pairs",
-        "Examples anchor style and structure for the model."
-      )
+        "Examples anchor style and structure for the model.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -954,8 +957,8 @@ function stubQuizExam(mode, question) {
         "Ask the model to guess",
         "Lower the temperature to zero always",
         "Add a step-by-step process and validation checks",
-        "A process + checks reduces variance and catches mistakes."
-      )
+        "A process + checks reduces variance and catches mistakes.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -965,8 +968,8 @@ function stubQuizExam(mode, question) {
         "To reduce model capability",
         "To prevent follow-up questions",
         "To control formatting and ease downstream parsing",
-        "Schemas make results predictable and machine-readable."
-      )
+        "Schemas make results predictable and machine-readable.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -976,8 +979,8 @@ function stubQuizExam(mode, question) {
         "Ignore the gap",
         "Only repeat the prompt",
         "Ask clarifying questions or state assumptions explicitly",
-        "Explicit assumptions/clarifications are safer than inventing facts."
-      )
+        "Explicit assumptions/clarifications are safer than inventing facts.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -987,8 +990,8 @@ function stubQuizExam(mode, question) {
         "Making outputs longer",
         "Preventing the model from answering",
         "Encouraging structured intermediate steps (when allowed) to improve accuracy",
-        "Structured steps can improve correctness and completeness."
-      )
+        "Structured steps can improve correctness and completeness.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -998,8 +1001,8 @@ function stubQuizExam(mode, question) {
         "A random inspirational quote",
         "No context at all",
         "Objective, constraints, stakeholders, and timeline",
-        "These inputs anchor recommendations to reality."
-      )
+        "These inputs anchor recommendations to reality.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1009,8 +1012,8 @@ function stubQuizExam(mode, question) {
         "One run and ship it",
         "Only compare length",
         "A checklist/rubric with test cases",
-        "Repeatable evaluation drives improvement and reduces regressions."
-      )
+        "Repeatable evaluation drives improvement and reduces regressions.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1020,8 +1023,8 @@ function stubQuizExam(mode, question) {
         "Never ask questions",
         "Avoid all constraints",
         "Cite sources or say 'I don't know' when uncertain",
-        "Stating uncertainty and citing sources improves safety and trust."
-      )
+        "Stating uncertainty and citing sources improves safety and trust.",
+      ),
     );
   } else {
     mcq.push(
@@ -1032,8 +1035,8 @@ function stubQuizExam(mode, question) {
         "Build slides",
         "Hire more people",
         "Clarify goals and success metrics",
-        "A clear objective and metrics guide all downstream decisions."
-      )
+        "A clear objective and metrics guide all downstream decisions.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1043,8 +1046,8 @@ function stubQuizExam(mode, question) {
         "A password manager",
         "A vacation calendar",
         "A PRD or BRD",
-        "Requirements are documented for alignment and accountability."
-      )
+        "Requirements are documented for alignment and accountability.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1054,8 +1057,8 @@ function stubQuizExam(mode, question) {
         "Lower costs",
         "Automatic alignment",
         "Scope creep and rework",
-        "Ambiguity leads to misinterpretation, rework, and delays."
-      )
+        "Ambiguity leads to misinterpretation, rework, and delays.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1065,8 +1068,8 @@ function stubQuizExam(mode, question) {
         "Only legal",
         "Only marketing",
         "Key stakeholders and end users",
-        "Validation reduces rework and improves buy-in."
-      )
+        "Validation reduces rework and improves buy-in.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1076,8 +1079,8 @@ function stubQuizExam(mode, question) {
         "Stop the project immediately",
         "Skip documentation entirely",
         "Use iterative delivery with clear change control",
-        "Iteration + governance manages change without chaos."
-      )
+        "Iteration + governance manages change without chaos.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1087,8 +1090,8 @@ function stubQuizExam(mode, question) {
         "A long email thread",
         "A guess by one person",
         "Acceptance criteria that are testable",
-        "Testable criteria align teams and enable verification."
-      )
+        "Testable criteria align teams and enable verification.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1098,8 +1101,8 @@ function stubQuizExam(mode, question) {
         "Ignore everyone",
         "Delay indefinitely",
         "Align on objectives, tradeoffs, and decision rights",
-        "A decision framework prevents endless debates."
-      )
+        "A decision framework prevents endless debates.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1109,8 +1112,8 @@ function stubQuizExam(mode, question) {
         "Number of slide pages",
         "Office attendance",
         "Rework rate / change requests after build starts",
-        "High rework often signals unclear or unstable requirements."
-      )
+        "High rework often signals unclear or unstable requirements.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1120,8 +1123,8 @@ function stubQuizExam(mode, question) {
         "Only high-level vision",
         "Avoid writing anything down",
         "Examples, edge cases, and explicit exclusions",
-        "Concrete examples and boundaries prevent misinterpretation."
-      )
+        "Concrete examples and boundaries prevent misinterpretation.",
+      ),
     );
     mcq.push(
       mcqItem(
@@ -1131,8 +1134,8 @@ function stubQuizExam(mode, question) {
         "Delete the document",
         "Wait for problems to appear",
         "Review and confirm with stakeholders",
-        "Confirmation creates shared understanding before execution."
-      )
+        "Confirmation creates shared understanding before execution.",
+      ),
     );
   }
 
@@ -1143,44 +1146,44 @@ function stubQuizExam(mode, question) {
       tfItem(
         "Adding success criteria usually improves prompt results.",
         true,
-        "Clear criteria reduce ambiguity and guide evaluation."
-      )
+        "Clear criteria reduce ambiguity and guide evaluation.",
+      ),
     );
     tf.push(
       tfItem(
         "It’s best to hide all context from the model to avoid bias.",
         false,
-        "Relevant context is necessary; bias is managed via constraints and rubric."
-      )
+        "Relevant context is necessary; bias is managed via constraints and rubric.",
+      ),
     );
     tf.push(
       tfItem(
         "Asking for a structured output format can improve consistency.",
         true,
-        "Structure reduces formatting variance."
-      )
+        "Structure reduces formatting variance.",
+      ),
     );
   } else {
     tf.push(
       tfItem(
         "Requirements should be validated with stakeholders before build starts.",
         true,
-        "Validation reduces rework and misalignment."
-      )
+        "Validation reduces rework and misalignment.",
+      ),
     );
     tf.push(
       tfItem(
         "Unclear requirements rarely impact cost or timeline.",
         false,
-        "Ambiguity often increases both cost and timeline."
-      )
+        "Ambiguity often increases both cost and timeline.",
+      ),
     );
     tf.push(
       tfItem(
         "Acceptance criteria help teams test whether requirements are met.",
         true,
-        "They provide an objective pass/fail check."
-      )
+        "They provide an objective pass/fail check.",
+      ),
     );
   }
 
@@ -1318,7 +1321,7 @@ function normalizeExamPayload(examObj) {
         : ["", "", "", ""];
 
       var ans = safeStr(
-        it.answer || it.correct_answer || it.correct || it.correctOption || ""
+        it.answer || it.correct_answer || it.correct || it.correctOption || "",
       ).trim();
 
       // If upstream returned the full option text, convert it to a letter
@@ -1390,7 +1393,7 @@ function normalizeExamPayload(examObj) {
           it.reference_answer ||
           it.sample_answer ||
           it.answer ||
-          ""
+          "",
       );
 
       // Normalize fields on the item
@@ -1448,7 +1451,7 @@ function safeQuestion(input) {
     input?.question_for_api,
     input?.question,
     input?.user_question,
-    input?.open_question
+    input?.open_question,
   );
 }
 
@@ -1494,14 +1497,14 @@ async function openaiGradeOpen(input) {
 
   const q = safeStr(input && (input.open_q || input.question || input.prompt));
   const ans = safeStr(
-    input && (input.open_user_answer || input.user_answer || input.answer)
+    input && (input.open_user_answer || input.user_answer || input.answer),
   );
   const refIn = safeStr(
     input &&
       (input.open_model_answer ||
         input.model_answer ||
         input.reference_answer ||
-        input.sample_answer)
+        input.sample_answer),
   );
   const rubricIn = safeStr(input && (input.open_rubric || input.rubric || ""));
 
@@ -1549,7 +1552,7 @@ async function openaiGradeOpen(input) {
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0 }
+    { temperature: 0 },
   );
 
   const jsonText = extractFirstJsonObject(respText);
@@ -1602,8 +1605,9 @@ function buildInterpretationHeuristic({
         : "Strategy";
 
   const interpretation_summary =
-    `My interpretation (${domain} lens): you want ${deliverable} for: "${q}". ` +
-    `If I’m missing the mark, tell me what to change (goal, constraints, audience, or output format).`;
+    mode === "prompt"
+      ? `My interpretation (${domain} lens): you want a clearer prompt-ready version of the question "${q}" with sharper role, context, constraints, and output expectations.`
+      : `My interpretation (${domain} lens): you want a decision-ready answer to "${q}" that makes the business objective explicit, surfaces the main operating constraint, and recommends the next move.`;
 
   const interpretation = {
     mode: mode || "",
@@ -1661,7 +1665,7 @@ async function interpretQuestion({
       { role: "system", content: system },
       { role: "user", content: JSON.stringify(user) },
     ],
-    { temperature: 0.2, maxTokens: 700 }
+    { temperature: 0.2, maxTokens: 700 },
   );
 
   if (!oa.ok) {
@@ -1709,6 +1713,198 @@ async function interpretQuestion({
 }
 
 // -------------------------
+// Decision-pack export helpers
+// -------------------------
+
+const EXPORT_DIR =
+  process.env.EXPORT_DIR || path.join(os.tmpdir(), "vf_exports");
+
+function ensureDirSync(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch {}
+}
+
+function safeFilenameBase(v) {
+  const t = oneLine(v || "Decision Pack")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return t || "decision-pack";
+}
+
+function pdfEscapeText(v) {
+  return safeStr(v)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function wrapText(text, maxChars) {
+  const out = [];
+  const lines = safeStr(text)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine || "";
+    if (!line.trim()) {
+      out.push("");
+      continue;
+    }
+    const words = line.split(/\s+/);
+    let cur = "";
+    for (const w of words) {
+      if (!cur) {
+        cur = w;
+      } else if ((cur + " " + w).length <= maxChars) {
+        cur += " " + w;
+      } else {
+        out.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+function buildMinimalPdfBuffer(title, content) {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const marginLeft = 54;
+  const marginTop = 56;
+  const lineHeight = 15;
+  const maxChars = 92;
+
+  const lines = [];
+  const titleLine = oneLine(title || "Decision Pack");
+  if (titleLine) lines.push(titleLine);
+  lines.push("");
+  wrapText(content || "", maxChars).forEach((l) => lines.push(l));
+
+  const linesPerPage = Math.floor((pageHeight - marginTop - 50) / lineHeight);
+  const pages = [];
+  for (let i = 0; i < lines.length; i += linesPerPage) {
+    pages.push(lines.slice(i, i + linesPerPage));
+  }
+  if (!pages.length) pages.push([""]);
+
+  const fontObjNum = 3;
+  const pageStartObj = 4;
+  const pageCount = pages.length;
+  const contentStartObj = pageStartObj + pageCount;
+
+  const objects = [];
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  const kids = [];
+  for (let i = 0; i < pageCount; i++) kids.push(`${pageStartObj + i} 0 R`);
+  objects[2] = `<< /Type /Pages /Kids [ ${kids.join(" ")} ] /Count ${pageCount} >>`;
+  objects[fontObjNum] =
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+  for (let i = 0; i < pageCount; i++) {
+    const pageObj = pageStartObj + i;
+    const contentObj = contentStartObj + i;
+    objects[pageObj] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> /Contents ${contentObj} 0 R >>`;
+
+    const pageLines = pages[i];
+    const fontSize = i === 0 ? 16 : 12;
+    const chunks = [
+      "BT",
+      `/F1 ${fontSize} Tf`,
+      `${marginLeft} ${pageHeight - marginTop} Td`,
+    ];
+    for (let j = 0; j < pageLines.length; j++) {
+      const line = pdfEscapeText(pageLines[j]);
+      chunks.push(`(${line}) Tj`);
+      if (j < pageLines.length - 1) chunks.push(`0 -${lineHeight} Td`);
+    }
+    chunks.push("ET");
+    const stream = chunks.join("\n");
+    objects[contentObj] =
+      `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`;
+  }
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 1; i < objects.length; i++) {
+    offsets[i] = Buffer.byteLength(pdf, "utf8");
+    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefPos = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length}\n`;
+  pdf += `0000000000 65535 f \n`;
+  for (let i = 1; i < objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
+}
+
+function extractSectionValue(content, heading) {
+  const body = safeStr(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const rx = new RegExp(`${heading}\\s*\\n+([^\\n]+)`, "i");
+  const m = body.match(rx);
+  return m ? oneLine(m[1]) : "";
+}
+
+function sharpenDecisionPackContent(title, content) {
+  const body = safeStr(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!body) return body;
+
+  const interpretedQuestion = extractSectionValue(body, "Interpreted question");
+  const decisionToMake = extractSectionValue(body, "Decision to make");
+  const lowerQ = interpretedQuestion.toLowerCase();
+  const lowerD = decisionToMake.toLowerCase();
+
+  let executiveTake = "";
+  let recommendedMove = "";
+  let businessValue = "";
+
+  if (lowerQ.indexOf("activation") >= 0 && lowerD.indexOf("instrument") >= 0) {
+    executiveTake =
+      "The team wants to improve new-user activation, but instrumentation gaps mean it cannot confidently see where users are dropping off or whether onboarding changes are actually working. The first decision is whether to improve measurement before changing onboarding, so future product changes can be judged with confidence.";
+    recommendedMove =
+      "Prioritize instrumentation on the activation funnel before making broad onboarding changes. Define the activation metric, instrument the key drop-off points, and then test one onboarding improvement against that baseline.";
+    businessValue =
+      "This reduces the risk of shipping changes that cannot be evaluated, improves stakeholder confidence in what to prioritize next, and helps the team move faster on changes that can be measured and defended.";
+  } else {
+    executiveTake = `The real issue is not just the surface question, but the decision underneath it: ${decisionToMake || "what to do first and why"}. The team needs a recommendation that links the objective, the constraint, and the success signal before it scales action.`;
+    recommendedMove =
+      "Choose one concrete next move that improves decision confidence first, then test the smallest change that can produce a measurable signal.";
+    businessValue =
+      "This improves decision quality, reduces wasted work, and gives stakeholders a clearer basis for prioritization and execution.";
+  }
+
+  function replaceOrAppendSection(src, heading, value) {
+    const pattern = new RegExp(
+      `(${heading}\\s*\\n)([\\s\\S]*?)(?=\\n\\n[A-Z][^\\n]{0,80}\\n|$)`,
+      "i",
+    );
+    if (pattern.test(src)) {
+      return src.replace(pattern, `$1${value}\n`);
+    }
+    return src + `\n\n${heading}\n${value}`;
+  }
+
+  let out = body;
+  out = replaceOrAppendSection(out, "Executive take", executiveTake);
+  out = replaceOrAppendSection(out, "Recommended move", recommendedMove);
+  out = replaceOrAppendSection(out, "Business value", businessValue);
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function absoluteBaseUrl(req) {
+  const proto = (req.get("x-forwarded-proto") || req.protocol || "https")
+    .split(",")[0]
+    .trim();
+  const host = req.get("host");
+  return `${proto}://${host}`;
+}
+
+// -------------------------
 // Upstream proxy helper
 // -------------------------
 
@@ -1724,7 +1920,7 @@ async function maybeProxy(endpointName, payload) {
       method: "POST",
       headers: Object.assign(
         { "Content-Type": "application/json" },
-        SERVICE_API_KEY ? { "x-api-key": SERVICE_API_KEY } : null
+        SERVICE_API_KEY ? { "x-api-key": SERVICE_API_KEY } : null,
       ),
       body: JSON.stringify(payload || {}),
     },
@@ -1732,7 +1928,7 @@ async function maybeProxy(endpointName, payload) {
       timeoutMs: OPENAI_TIMEOUT_MS,
       maxRetries: OPENAI_MAX_RETRIES,
       baseMs: OPENAI_RETRY_BASE_MS,
-    }
+    },
   );
 
   if (!resp.ok) {
@@ -1787,11 +1983,11 @@ async function optimizeQuestion(input) {
 
     let interpretation_summary = pickFirstString(
       base.interpretation_summary,
-      base.API_Interpretation_Summary
+      base.API_Interpretation_Summary,
     );
     let interpretation_json = pickFirstString(
       base.interpretation_json,
-      base.API_Interpretation_JSON
+      base.API_Interpretation_JSON,
     );
     if (!interpretation_summary || !interpretation_json) {
       const interp = await interpretQuestion({
@@ -1823,19 +2019,31 @@ async function optimizeQuestion(input) {
       {
         role: "system",
         content:
-          "You are a senior strategy consultant. Rewrite the user question into a clearer, more actionable version. Keep it concise.",
+          "You rewrite a user's business question into one clearer, decision-ready question. Return plain text only. Do not return JSON. Do not ask follow-up questions. Keep the user's intent unchanged while making the question clearer and more actionable.",
       },
       { role: "user", content: question || "Optimize this question." },
     ],
-    { temperature: 0.1, maxTokens: 250 }
+    { temperature: 0.1, maxTokens: 250 },
   );
 
   if (!oa.ok) {
-    const stub = stubText("optimize_question");
+    const stub = question || stubText("optimize_question");
+    const interp = await interpretQuestion({
+      original_question: question,
+      optimized_question: stub,
+      mode,
+    });
     return okEnvelope({
       source: "optimize_stub",
+      mode,
+      input_question: question,
       optimized_question: stub,
+      confirmed_question: stub,
+      interpretation_summary: interp.interpretation_summary,
+      interpretation_json: interp.interpretation_json,
       API_OptimizedQuestion: stub,
+      API_Interpretation_Summary: interp.interpretation_summary,
+      API_Interpretation_JSON: interp.interpretation_json,
       upstream_status: oa.status || 429,
       upstream_error: oa.error || "openai_failed",
     });
@@ -1868,7 +2076,7 @@ async function generateLesson(input) {
   const tenantId = pickFirstString(
     input?.tenantId,
     input?.tenant_id,
-    "novain_default"
+    "novain_default",
   );
   const firstName = pickFirstString(input?.first_name, input?.firstName, "");
   const sessionId = pickFirstString(input?.session_id, input?.sessionId, "");
@@ -1886,7 +2094,7 @@ async function generateLesson(input) {
     out,
     fallbackTitle,
     fallbackReply,
-    fallbackMode
+    fallbackMode,
   ) {
     const title =
       pickFirstString(out.lessonTitle, out.API_LessonTitle, out.title) ||
@@ -1991,7 +2199,7 @@ async function generateLesson(input) {
         out,
         "📘 Business Strategy Lesson",
         out.reply,
-        "business"
+        "business",
       );
       return {
         ...norm,
@@ -2015,14 +2223,14 @@ async function generateLesson(input) {
           content: question || "Generate a business strategy lesson.",
         },
       ],
-      { temperature: 0.15, maxTokens: 900 }
+      { temperature: 0.15, maxTokens: 900 },
     );
 
     if (!oa.ok) {
       const stub = makeStubLesson(
         "lesson_business",
         "📘 Business Strategy Lesson",
-        "business"
+        "business",
       );
       return {
         ...stub,
@@ -2081,7 +2289,7 @@ async function generateLesson(input) {
           out.prompt_lesson,
           out.API_PromptLesson,
           out.lesson,
-          out.reply
+          out.reply,
         ) || "";
 
       if (
@@ -2095,7 +2303,7 @@ async function generateLesson(input) {
           out,
           "🤖 Prompt Engineering Lesson",
           promptText || out.reply,
-          "prompt"
+          "prompt",
         );
         return {
           ...norm,
@@ -2156,7 +2364,7 @@ async function generateLesson(input) {
         { role: "system", content: sys },
         { role: "user", content: user },
       ],
-      { temperature: 0.15, maxTokens: 950 }
+      { temperature: 0.15, maxTokens: 950 },
     );
 
     if (!oa.ok) {
@@ -2289,7 +2497,7 @@ async function promptLesson(input) {
         content: question || "Generate a prompt engineering lesson.",
       },
     ],
-    { temperature: 0.15, maxTokens: 900 }
+    { temperature: 0.15, maxTokens: 900 },
   );
 
   if (!oa.ok) {
@@ -2323,7 +2531,7 @@ async function generateExam(body) {
 
   const mode = safeMode(body.mode || body.mode_selected || body.lens || "");
   const question = safeQuestion(
-    body.question || body.confirmed_question || body.question_for_api || ""
+    body.question || body.confirmed_question || body.question_for_api || "",
   );
 
   // Prefer upstream (Option A), but always fall back to a deterministic stub
@@ -2398,7 +2606,7 @@ async function gradeOpen(body) {
   const question = safeQuestion(body.question || body.open_q || body.q || "");
   const answer = safeStr(body.answer || body.open_user_answer || "");
   const context = safeStr(
-    body.context || body.lesson || body.API_Lesson_JSON || ""
+    body.context || body.lesson || body.API_Lesson_JSON || "",
   );
 
   // If VF already has a model answer (from generate_exam), let it flow through
@@ -2407,7 +2615,7 @@ async function gradeOpen(body) {
       body.open_model_answer ||
       body.best_answer ||
       body.reference_answer ||
-      ""
+      "",
   );
 
   function to01(x) {
@@ -2438,7 +2646,7 @@ async function gradeOpen(body) {
           g?.best_answer ||
           g?.reference_answer ||
           modelIn ||
-          ""
+          "",
       ),
     };
 
@@ -2486,7 +2694,7 @@ async function teachAndQuiz(input) {
     const lesson = pickFirstString(
       out.lesson,
       out.API_Lesson,
-      out.lesson_display
+      out.lesson_display,
     );
     const quiz =
       out.quiz ||
@@ -2515,7 +2723,7 @@ async function teachAndQuiz(input) {
           { role: "system", content: sys },
           { role: "user", content: question || "Generate a lesson." },
         ],
-        { temperature: 0.0, maxTokens: OPENAI_TEACH_MAXTOKENS }
+        { temperature: 0.0, maxTokens: OPENAI_TEACH_MAXTOKENS },
       )
     : { ok: false, status: 0, error: "openai_teach_disabled" };
 
@@ -2705,6 +2913,75 @@ app.post("/prompt_lesson", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
+app.post("/export_pack_file", async (req, res) => {
+  try {
+    const body = normalizeIncomingBody(req.body) || {};
+    const title =
+      oneLine(body.title || body.pack_title || "Decision Pack") ||
+      "Decision Pack";
+    const format = String(body.format || "pdf").toLowerCase();
+    const rawContent = safeStr(
+      body.content || body.pack_body || body.markdown || "",
+    );
+    const finalContent = sharpenDecisionPackContent(title, rawContent);
+
+    if (format !== "pdf") {
+      return res.status(200).json({
+        ok: false,
+        API_OK: false,
+        component_result: "fail",
+        error: "unsupported_export_format",
+      });
+    }
+
+    ensureDirSync(EXPORT_DIR);
+    const fileBase = `${Date.now()}-${safeFilenameBase(title)}`;
+    const filename = `${fileBase}.pdf`;
+    const absPath = path.join(EXPORT_DIR, filename);
+    const pdfBuffer = buildMinimalPdfBuffer(title, finalContent);
+    fs.writeFileSync(absPath, pdfBuffer);
+
+    const export_url = `${absoluteBaseUrl(req)}/exports/${encodeURIComponent(filename)}`;
+    return res.status(200).json({
+      ok: true,
+      API_OK: true,
+      component_result: "success",
+      export_url,
+      title,
+      filename,
+    });
+  } catch (err) {
+    log("error", "Unhandled /export_pack_file error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(200).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "export_pack_file_failed",
+      message: err && err.message ? String(err.message) : "Unknown error",
+    });
+  }
+});
+
+app.get("/exports/:filename", (req, res) => {
+  try {
+    const filename = path.basename(String(req.params.filename || ""));
+    const absPath = path.join(EXPORT_DIR, filename);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).send("not_found");
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    return res.sendFile(absPath);
+  } catch (err) {
+    log("error", "Unhandled /exports/:filename error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(404).send("not_found");
+  }
+});
+
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
   try {
@@ -2723,8 +3000,8 @@ app.post("/generate_exam", async (req, res) => {
           error: "generate_exam_failed",
           message: err && err.message ? String(err.message) : "Unknown error",
         },
-        "generate_exam"
-      )
+        "generate_exam",
+      ),
     );
   }
 });
@@ -2753,8 +3030,8 @@ app.post("/exam", async (req, res) => {
           error: "generate_exam_failed",
           message: err && err.message ? String(err.message) : "Unknown error",
         },
-        "exam"
-      )
+        "exam",
+      ),
     );
   }
 });
