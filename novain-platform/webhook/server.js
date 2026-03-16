@@ -41,9 +41,6 @@
 const express = require("express");
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
 
 const requestContext = new AsyncLocalStorage();
 
@@ -1605,9 +1602,8 @@ function buildInterpretationHeuristic({
         : "Strategy";
 
   const interpretation_summary =
-    mode === "prompt"
-      ? `My interpretation (${domain} lens): you want a clearer prompt-ready version of the question "${q}" with sharper role, context, constraints, and output expectations.`
-      : `My interpretation (${domain} lens): you want a decision-ready answer to "${q}" that makes the business objective explicit, surfaces the main operating constraint, and recommends the next move.`;
+    `My interpretation (${domain} lens): you want ${deliverable} for: "${q}". ` +
+    `If I’m missing the mark, tell me what to change (goal, constraints, audience, or output format).`;
 
   const interpretation = {
     mode: mode || "",
@@ -1710,198 +1706,6 @@ async function interpretQuestion({
       }).interpretation_summary,
     interpretation_json: JSON.stringify(interpretation),
   };
-}
-
-// -------------------------
-// Decision-pack export helpers
-// -------------------------
-
-const EXPORT_DIR =
-  process.env.EXPORT_DIR || path.join(os.tmpdir(), "vf_exports");
-
-function ensureDirSync(dirPath) {
-  try {
-    fs.mkdirSync(dirPath, { recursive: true });
-  } catch {}
-}
-
-function safeFilenameBase(v) {
-  const t = oneLine(v || "Decision Pack")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return t || "decision-pack";
-}
-
-function pdfEscapeText(v) {
-  return safeStr(v)
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function wrapText(text, maxChars) {
-  const out = [];
-  const lines = safeStr(text)
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n");
-  for (const rawLine of lines) {
-    const line = rawLine || "";
-    if (!line.trim()) {
-      out.push("");
-      continue;
-    }
-    const words = line.split(/\s+/);
-    let cur = "";
-    for (const w of words) {
-      if (!cur) {
-        cur = w;
-      } else if ((cur + " " + w).length <= maxChars) {
-        cur += " " + w;
-      } else {
-        out.push(cur);
-        cur = w;
-      }
-    }
-    if (cur) out.push(cur);
-  }
-  return out;
-}
-
-function buildMinimalPdfBuffer(title, content) {
-  const pageWidth = 612;
-  const pageHeight = 792;
-  const marginLeft = 54;
-  const marginTop = 56;
-  const lineHeight = 15;
-  const maxChars = 92;
-
-  const lines = [];
-  const titleLine = oneLine(title || "Decision Pack");
-  if (titleLine) lines.push(titleLine);
-  lines.push("");
-  wrapText(content || "", maxChars).forEach((l) => lines.push(l));
-
-  const linesPerPage = Math.floor((pageHeight - marginTop - 50) / lineHeight);
-  const pages = [];
-  for (let i = 0; i < lines.length; i += linesPerPage) {
-    pages.push(lines.slice(i, i + linesPerPage));
-  }
-  if (!pages.length) pages.push([""]);
-
-  const fontObjNum = 3;
-  const pageStartObj = 4;
-  const pageCount = pages.length;
-  const contentStartObj = pageStartObj + pageCount;
-
-  const objects = [];
-  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-  const kids = [];
-  for (let i = 0; i < pageCount; i++) kids.push(`${pageStartObj + i} 0 R`);
-  objects[2] = `<< /Type /Pages /Kids [ ${kids.join(" ")} ] /Count ${pageCount} >>`;
-  objects[fontObjNum] =
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-
-  for (let i = 0; i < pageCount; i++) {
-    const pageObj = pageStartObj + i;
-    const contentObj = contentStartObj + i;
-    objects[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> /Contents ${contentObj} 0 R >>`;
-
-    const pageLines = pages[i];
-    const fontSize = i === 0 ? 16 : 12;
-    const chunks = [
-      "BT",
-      `/F1 ${fontSize} Tf`,
-      `${marginLeft} ${pageHeight - marginTop} Td`,
-    ];
-    for (let j = 0; j < pageLines.length; j++) {
-      const line = pdfEscapeText(pageLines[j]);
-      chunks.push(`(${line}) Tj`);
-      if (j < pageLines.length - 1) chunks.push(`0 -${lineHeight} Td`);
-    }
-    chunks.push("ET");
-    const stream = chunks.join("\n");
-    objects[contentObj] =
-      `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`;
-  }
-
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (let i = 1; i < objects.length; i++) {
-    offsets[i] = Buffer.byteLength(pdf, "utf8");
-    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
-  }
-  const xrefPos = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length}\n`;
-  pdf += `0000000000 65535 f \n`;
-  for (let i = 1; i < objects.length; i++) {
-    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
-  return Buffer.from(pdf, "utf8");
-}
-
-function extractSectionValue(content, heading) {
-  const body = safeStr(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const rx = new RegExp(`${heading}\\s*\\n+([^\\n]+)`, "i");
-  const m = body.match(rx);
-  return m ? oneLine(m[1]) : "";
-}
-
-function sharpenDecisionPackContent(title, content) {
-  const body = safeStr(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (!body) return body;
-
-  const interpretedQuestion = extractSectionValue(body, "Interpreted question");
-  const decisionToMake = extractSectionValue(body, "Decision to make");
-  const lowerQ = interpretedQuestion.toLowerCase();
-  const lowerD = decisionToMake.toLowerCase();
-
-  let executiveTake = "";
-  let recommendedMove = "";
-  let businessValue = "";
-
-  if (lowerQ.indexOf("activation") >= 0 && lowerD.indexOf("instrument") >= 0) {
-    executiveTake =
-      "The team wants to improve new-user activation, but instrumentation gaps mean it cannot confidently see where users are dropping off or whether onboarding changes are actually working. The first decision is whether to improve measurement before changing onboarding, so future product changes can be judged with confidence.";
-    recommendedMove =
-      "Prioritize instrumentation on the activation funnel before making broad onboarding changes. Define the activation metric, instrument the key drop-off points, and then test one onboarding improvement against that baseline.";
-    businessValue =
-      "This reduces the risk of shipping changes that cannot be evaluated, improves stakeholder confidence in what to prioritize next, and helps the team move faster on changes that can be measured and defended.";
-  } else {
-    executiveTake = `The real issue is not just the surface question, but the decision underneath it: ${decisionToMake || "what to do first and why"}. The team needs a recommendation that links the objective, the constraint, and the success signal before it scales action.`;
-    recommendedMove =
-      "Choose one concrete next move that improves decision confidence first, then test the smallest change that can produce a measurable signal.";
-    businessValue =
-      "This improves decision quality, reduces wasted work, and gives stakeholders a clearer basis for prioritization and execution.";
-  }
-
-  function replaceOrAppendSection(src, heading, value) {
-    const pattern = new RegExp(
-      `(${heading}\\s*\\n)([\\s\\S]*?)(?=\\n\\n[A-Z][^\\n]{0,80}\\n|$)`,
-      "i",
-    );
-    if (pattern.test(src)) {
-      return src.replace(pattern, `$1${value}\n`);
-    }
-    return src + `\n\n${heading}\n${value}`;
-  }
-
-  let out = body;
-  out = replaceOrAppendSection(out, "Executive take", executiveTake);
-  out = replaceOrAppendSection(out, "Recommended move", recommendedMove);
-  out = replaceOrAppendSection(out, "Business value", businessValue);
-  return out.replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function absoluteBaseUrl(req) {
-  const proto = (req.get("x-forwarded-proto") || req.protocol || "https")
-    .split(",")[0]
-    .trim();
-  const host = req.get("host");
-  return `${proto}://${host}`;
 }
 
 // -------------------------
@@ -2019,7 +1823,7 @@ async function optimizeQuestion(input) {
       {
         role: "system",
         content:
-          "You rewrite a user's business question into one clearer, decision-ready question. Return plain text only. Do not return JSON. Do not ask follow-up questions. Keep the user's intent unchanged while making the question clearer and more actionable.",
+          "You are a senior strategy consultant. Rewrite the user question into a clearer, more actionable version. Keep it concise.",
       },
       { role: "user", content: question || "Optimize this question." },
     ],
@@ -2027,23 +1831,11 @@ async function optimizeQuestion(input) {
   );
 
   if (!oa.ok) {
-    const stub = question || stubText("optimize_question");
-    const interp = await interpretQuestion({
-      original_question: question,
-      optimized_question: stub,
-      mode,
-    });
+    const stub = stubText("optimize_question");
     return okEnvelope({
       source: "optimize_stub",
-      mode,
-      input_question: question,
       optimized_question: stub,
-      confirmed_question: stub,
-      interpretation_summary: interp.interpretation_summary,
-      interpretation_json: interp.interpretation_json,
       API_OptimizedQuestion: stub,
-      API_Interpretation_Summary: interp.interpretation_summary,
-      API_Interpretation_JSON: interp.interpretation_json,
       upstream_status: oa.status || 429,
       upstream_error: oa.error || "openai_failed",
     });
@@ -2913,75 +2705,6 @@ app.post("/prompt_lesson", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
-app.post("/export_pack_file", async (req, res) => {
-  try {
-    const body = normalizeIncomingBody(req.body) || {};
-    const title =
-      oneLine(body.title || body.pack_title || "Decision Pack") ||
-      "Decision Pack";
-    const format = String(body.format || "pdf").toLowerCase();
-    const rawContent = safeStr(
-      body.content || body.pack_body || body.markdown || "",
-    );
-    const finalContent = sharpenDecisionPackContent(title, rawContent);
-
-    if (format !== "pdf") {
-      return res.status(200).json({
-        ok: false,
-        API_OK: false,
-        component_result: "fail",
-        error: "unsupported_export_format",
-      });
-    }
-
-    ensureDirSync(EXPORT_DIR);
-    const fileBase = `${Date.now()}-${safeFilenameBase(title)}`;
-    const filename = `${fileBase}.pdf`;
-    const absPath = path.join(EXPORT_DIR, filename);
-    const pdfBuffer = buildMinimalPdfBuffer(title, finalContent);
-    fs.writeFileSync(absPath, pdfBuffer);
-
-    const export_url = `${absoluteBaseUrl(req)}/exports/${encodeURIComponent(filename)}`;
-    return res.status(200).json({
-      ok: true,
-      API_OK: true,
-      component_result: "success",
-      export_url,
-      title,
-      filename,
-    });
-  } catch (err) {
-    log("error", "Unhandled /export_pack_file error", {
-      error: String(err && err.message ? err.message : err),
-    });
-    return res.status(200).json({
-      ok: false,
-      API_OK: false,
-      component_result: "fail",
-      error: "export_pack_file_failed",
-      message: err && err.message ? String(err.message) : "Unknown error",
-    });
-  }
-});
-
-app.get("/exports/:filename", (req, res) => {
-  try {
-    const filename = path.basename(String(req.params.filename || ""));
-    const absPath = path.join(EXPORT_DIR, filename);
-    if (!fs.existsSync(absPath)) {
-      return res.status(404).send("not_found");
-    }
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-    return res.sendFile(absPath);
-  } catch (err) {
-    log("error", "Unhandled /exports/:filename error", {
-      error: String(err && err.message ? err.message : err),
-    });
-    return res.status(404).send("not_found");
-  }
-});
-
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
   try {
@@ -3083,6 +2806,7 @@ function startServer(port) {
   const server = app.listen(p, () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
+
     log("info", "Webhook server listening", {
       port: actualPort,
       upstream_enabled: UPSTREAM_ENABLED,
@@ -3090,6 +2814,23 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
+
+    const readyLine = `SERVER_READY:${actualPort}`;
+    try {
+      process.stdout.write(readyLine + "\n");
+      process.stdout.write(`Webhook server listening on ${actualPort}\n`);
+    } catch {}
+    try {
+      process.stderr.write(readyLine + "\n");
+    } catch {}
+  });
+
+  server.on("error", (err) => {
+    const msg = err && err.message ? String(err.message) : String(err);
+    log("error", "server_listen_error", { error: msg });
+    try {
+      process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
+    } catch {}
   });
 
   currentServer = server;
