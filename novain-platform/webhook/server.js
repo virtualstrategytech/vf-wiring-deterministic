@@ -40,6 +40,9 @@
 
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const { AsyncLocalStorage } = require("async_hooks");
 
 const requestContext = new AsyncLocalStorage();
@@ -388,6 +391,7 @@ app.use((err, req, res, next) => {
 
 function requireApiKey(req, res, next) {
   if (req.path === "/health" || req.path === "/") return next();
+  if ((req.path || "").indexOf("/exports/") === 0) return next();
 
   // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
@@ -2759,6 +2763,238 @@ app.post("/exam", async (req, res) => {
   }
 });
 
+// -------------------------
+// Export PDF helpers + routes
+// -------------------------
+
+const EXPORT_DIR =
+  process.env.EXPORT_DIR || path.join(os.tmpdir(), "vf_exports");
+
+function ensureDirSync(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch {}
+}
+
+function safeFilenameBase(v) {
+  const t = oneLine(v || "Decision Pack")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return t || "Decision-Pack";
+}
+
+function pdfEscapeText(v) {
+  return safeStr(v)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function wrapText(text, maxChars) {
+  const out = [];
+  const lines = safeStr(text)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine || "";
+    if (!line.trim()) {
+      out.push("");
+      continue;
+    }
+    const words = line.split(/\s+/);
+    let cur = "";
+    for (const w of words) {
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= maxChars) cur += " " + w;
+      else {
+        out.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+function buildMinimalPdfBuffer(title, content) {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const marginLeft = 54;
+  const marginTop = 56;
+  const lineHeight = 15;
+  const maxChars = 92;
+
+  const lines = [];
+  const titleLine = oneLine(title || "Decision Pack");
+  if (titleLine) lines.push(titleLine);
+  lines.push("");
+  wrapText(content || "", maxChars).forEach((l) => lines.push(l));
+
+  const linesPerPage = Math.floor((pageHeight - marginTop - 50) / lineHeight);
+  const pages = [];
+  for (let i = 0; i < lines.length; i += linesPerPage) {
+    pages.push(lines.slice(i, i + linesPerPage));
+  }
+  if (!pages.length) pages.push([""]);
+
+  const pageStartObj = 4;
+  const pageCount = pages.length;
+  const contentStartObj = pageStartObj + pageCount;
+  const objects = [];
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  const kids = [];
+  for (let i = 0; i < pageCount; i++) kids.push(`${pageStartObj + i} 0 R`);
+  objects[2] = `<< /Type /Pages /Kids [ ${kids.join(" ")} ] /Count ${pageCount} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+  for (let i = 0; i < pageCount; i++) {
+    const pageObj = pageStartObj + i;
+    const contentObj = contentStartObj + i;
+    objects[pageObj] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`;
+    const pageLines = pages[i];
+    const fontSize = i === 0 ? 16 : 12;
+    const chunks = [
+      "BT",
+      `/F1 ${fontSize} Tf`,
+      `${marginLeft} ${pageHeight - marginTop} Td`,
+    ];
+    for (let j = 0; j < pageLines.length; j++) {
+      const line = pdfEscapeText(pageLines[j]);
+      chunks.push(`(${line}) Tj`);
+      if (j < pageLines.length - 1) chunks.push(`0 -${lineHeight} Td`);
+    }
+    chunks.push("ET");
+    const stream = chunks.join("\n");
+    objects[contentObj] =
+      `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`;
+  }
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 1; i < objects.length; i++) {
+    offsets[i] = Buffer.byteLength(pdf, "utf8");
+    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefPos = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i < objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
+}
+
+function absoluteBaseUrl(req) {
+  const proto = (req.get("x-forwarded-proto") || req.protocol || "https")
+    .split(",")[0]
+    .trim();
+  const host = req.get("host");
+  return `${proto}://${host}`;
+}
+
+app.post("/export_pack_file", async (req, res) => {
+  try {
+    const body = normalizeIncomingBody(req.body) || {};
+    const title = oneLine(
+      body.title || body.pack_title || body.filename || "Decision Pack",
+    );
+    const content = safeStr(
+      body.content || body.pack_content || body.markdown || body.text || "",
+    );
+
+    if (!content.trim()) {
+      return res.status(200).json(
+        ensureContract(
+          req,
+          {
+            ok: false,
+            API_OK: false,
+            component_result: "fail",
+            error: "missing_export_content",
+          },
+          "export_pack_file",
+        ),
+      );
+    }
+
+    ensureDirSync(EXPORT_DIR);
+    const filename = `${Date.now()}-${safeFilenameBase(title)}.pdf`;
+    const absPath = path.join(EXPORT_DIR, filename);
+    fs.writeFileSync(absPath, buildMinimalPdfBuffer(title, content));
+
+    const export_url = `${absoluteBaseUrl(req)}/exports/${encodeURIComponent(filename)}`;
+
+    return res.status(200).json(
+      ensureContract(
+        req,
+        {
+          ok: true,
+          API_OK: true,
+          component_result: "success",
+          pack_title: title,
+          Export_URL: export_url,
+          export_url: export_url,
+          download_url: export_url,
+          path: `/exports/${filename}`,
+        },
+        "export_pack_file",
+      ),
+    );
+  } catch (err) {
+    log("error", "Unhandled /export_pack_file error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(200).json(
+      ensureContract(
+        req,
+        {
+          ok: false,
+          API_OK: false,
+          component_result: "fail",
+          error: "export_pack_file_failed",
+          message: String(err && err.message ? err.message : err),
+        },
+        "export_pack_file",
+      ),
+    );
+  }
+});
+
+app.get("/exports/:filename", (req, res) => {
+  try {
+    const filename = path.basename(String(req.params.filename || ""));
+    const absPath = path.join(EXPORT_DIR, filename);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({
+        ok: false,
+        API_OK: false,
+        component_result: "not_found",
+        error: "file_not_found",
+        path: `/exports/${filename}`,
+        method: "GET",
+      });
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.sendFile(absPath);
+  } catch (err) {
+    log("error", "Unhandled /exports/:filename error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(500).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "export_download_failed",
+      method: "GET",
+    });
+  }
+});
+
 app.post("/grade_open", async (req, res) => {
   /**
    * /grade_open hardening:
@@ -2806,6 +3042,8 @@ function startServer(port) {
   const server = app.listen(p, () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
+    const readyLine = `SERVER_READY:${actualPort}`;
+    const listenLine = `Webhook server listening on ${actualPort}`;
 
     log("info", "Webhook server listening", {
       port: actualPort,
@@ -2815,22 +3053,46 @@ function startServer(port) {
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
 
-    const readyLine = `SERVER_READY:${actualPort}`;
     try {
-      process.stdout.write(readyLine + "\n");
-      process.stdout.write(`Webhook server listening on ${actualPort}\n`);
-    } catch {}
+      if (process.stdout && typeof process.stdout.write === "function") {
+        process.stdout.write(`${readyLine}\n`);
+        process.stdout.write(`${listenLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
     try {
-      process.stderr.write(readyLine + "\n");
-    } catch {}
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`${readyLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      console.log(readyLine);
+      console.log(listenLine);
+    } catch {
+      // no-op
+    }
   });
 
   server.on("error", (err) => {
-    const msg = err && err.message ? String(err.message) : String(err);
-    log("error", "server_listen_error", { error: msg });
+    log("error", "server_listen_error", {
+      error:
+        err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
+      port: p,
+    });
+
     try {
-      process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
-    } catch {}
+      const msg = err && err.message ? String(err.message) : String(err);
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
+      }
+    } catch {
+      // no-op
+    }
   });
 
   currentServer = server;
