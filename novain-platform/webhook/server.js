@@ -3039,6 +3039,9 @@ function startServer(port) {
   const server = app.listen(p, () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
+    const readyLine = `SERVER_READY:${actualPort}`;
+    const listenLine = `Webhook server listening on ${actualPort}`;
+
     log("info", "Webhook server listening", {
       port: actualPort,
       upstream_enabled: UPSTREAM_ENABLED,
@@ -3046,8 +3049,44 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
+
     try {
-      console.log(`SERVER_READY:${actualPort}`);
+      if (process.stdout && typeof process.stdout.write === "function") {
+        process.stdout.write(`${readyLine}\n`);
+        process.stdout.write(`${listenLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`${readyLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      console.log(readyLine);
+      console.log(listenLine);
+    } catch {
+      // no-op
+    }
+  });
+
+  server.on("error", (err) => {
+    log("error", "server_listen_error", {
+      error:
+        err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
+      port: p,
+    });
+
+    try {
+      const msg = err && err.message ? String(err.message) : String(err);
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
+      }
     } catch {
       // no-op
     }
