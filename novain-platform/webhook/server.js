@@ -3046,6 +3046,11 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
+    try {
+      console.log(`SERVER_READY:${actualPort}`);
+    } catch {
+      // no-op
+    }
   });
 
   currentServer = server;
