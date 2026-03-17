@@ -3336,8 +3336,6 @@ app.post("/grade_open", async (req, res) => {
 // Server lifecycle helpers (CI-friendly)
 // -------------------------
 
-let currentServer = null;
-
 function startServer(port) {
   const pRaw =
     port !== undefined && port !== null
@@ -3350,6 +3348,9 @@ function startServer(port) {
   const server = app.listen(p, () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
+    const readyLine = `SERVER_READY:${actualPort}`;
+    const listenLine = `Webhook server listening on ${actualPort}`;
+
     log("info", "Webhook server listening", {
       port: actualPort,
       upstream_enabled: UPSTREAM_ENABLED,
@@ -3357,26 +3358,35 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
+
+    try {
+      if (process.stdout && typeof process.stdout.write === "function") {
+        process.stdout.write(`${readyLine}\n`);
+        process.stdout.write(`${listenLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`${readyLine}\n`);
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      console.log(readyLine);
+      console.log(listenLine);
+    } catch {
+      // no-op
+    }
   });
 
   currentServer = server;
   return server;
 }
-
-function closeResources() {
-  if (!currentServer) return Promise.resolve();
-
-  return new Promise((resolve) => {
-    try {
-      currentServer.close(() => resolve());
-    } catch {
-      resolve();
-    } finally {
-      currentServer = null;
-    }
-  });
-}
-
 // -------------------------
 // Process-level safety nets
 // -------------------------
