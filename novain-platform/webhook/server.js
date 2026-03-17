@@ -389,6 +389,15 @@ app.use((err, req, res, next) => {
 function requireApiKey(req, res, next) {
   if (req.path === "/health" || req.path === "/") return next();
 
+  // Allow public PDF downloads from the absolute Export_URL.
+  // Keep POST /export_pack_file protected.
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    /^\/exports\//.test(req.path || "")
+  ) {
+    return next();
+  }
+
   // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
 
