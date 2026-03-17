@@ -40,9 +40,6 @@
 
 const express = require("express");
 const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
 const { AsyncLocalStorage } = require("async_hooks");
 
 const requestContext = new AsyncLocalStorage();
@@ -391,7 +388,6 @@ app.use((err, req, res, next) => {
 
 function requireApiKey(req, res, next) {
   if (req.path === "/health" || req.path === "/") return next();
-  if ((req.path || "").indexOf("/exports/") === 0) return next();
 
   // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
@@ -1579,47 +1575,105 @@ function buildInterpretationHeuristic({
   optimized_question,
   mode,
 }) {
-  const oq = (original_question || "").trim();
-  const q = (optimized_question || oq || "").trim();
-
+  const oq = trimStr(original_question || "");
+  const q = trimStr(optimized_question || oq || "");
   const lower = q.toLowerCase();
-  const wants = [];
-  if (/\broadmap|plan|steps|next step|approach\b/.test(lower))
-    wants.push("a structured plan");
-  if (/\bpricing|price|package|offer\b/.test(lower))
-    wants.push("pricing / packaging options");
-  if (/\bquiz|test|questions\b/.test(lower)) wants.push("a quiz / assessment");
-  if (/\bprompt|prompts|system prompt|few-shot\b/.test(lower))
-    wants.push("prompt design guidance");
-  if (/\bstrategy|market|position|go-to-market|gtm\b/.test(lower))
-    wants.push("business strategy guidance");
 
-  const deliverable = wants.length
-    ? wants.join(", ")
-    : "a clear, actionable answer";
+  function has(re) {
+    return re.test(lower);
+  }
 
-  const domain =
+  const objective = has(/\bactivation\b/)
+    ? "Improve activation"
+    : has(/\bconversion\b/)
+      ? "Improve conversion"
+      : has(/\bretention\b/)
+        ? "Improve retention"
+        : has(/\brevenue\b/)
+          ? "Improve revenue"
+          : has(/\bengagement\b/)
+            ? "Improve engagement"
+            : "Clarify the business objective";
+
+  const constraint = has(
+    /\binstrumentation\b|\btracking\b|\bmeasurement\b|\bsignal\b|\bdata quality\b/,
+  )
+    ? "Instrumentation and measurement limits"
+    : has(/\bbudget\b|\bcost\b/)
+      ? "Budget constraints"
+      : has(/\btime\b|\btimeline\b|\bdeadline\b/)
+        ? "Time constraints"
+        : has(/\bstakeholder\b|\balignment\b/)
+          ? "Stakeholder alignment complexity"
+          : null;
+
+  const deliverable =
     mode === "prompt"
-      ? "Prompt Engineering"
-      : mode === "business"
-        ? "Business Strategy"
-        : "Strategy";
+      ? "a better prompt and output structure"
+      : "a decision-ready recommendation";
 
-  const interpretation_summary =
-    `My interpretation (${domain} lens): you want ${deliverable} for: "${q}". ` +
-    `If I’m missing the mark, tell me what to change (goal, constraints, audience, or output format).`;
+  let audience = null;
+  if (has(/\bonboarding\b|\bactivation\b|\bproduct\b/)) {
+    audience = "the product, growth, and analytics leads";
+  }
+
+  let decision_to_make = null;
+  if (
+    has(/\bactivation\b/) &&
+    constraint === "Instrumentation and measurement limits"
+  ) {
+    decision_to_make =
+      "Whether to prioritize instrumentation fixes before scaling onboarding changes, or to run tightly scoped onboarding tests now with enough signal discipline to learn safely.";
+  } else if (has(/\bonboarding\b/)) {
+    decision_to_make =
+      "Which onboarding lever should be changed first, and what evidence threshold should justify scaling it.";
+  } else if (has(/\bkpi\b|\bmetric\b/)) {
+    decision_to_make =
+      "Which metric should anchor the decision and how success should be measured.";
+  }
+
+  const summaryParts = [];
+  if (mode === "prompt") {
+    summaryParts.push('You want a stronger prompt design for: "' + q + '".');
+  } else {
+    summaryParts.push(
+      'You are asking a product-growth question, but the real need is a decision-ready framing for: "' +
+        q +
+        '".',
+    );
+  }
+  summaryParts.push(
+    constraint
+      ? "The objective is to " +
+          objective.toLowerCase() +
+          " while working within " +
+          constraint.toLowerCase() +
+          "."
+      : "The next step is to clarify the objective, the key tradeoff, and the success metric before acting.",
+  );
 
   const interpretation = {
     mode: mode || "",
     original_question: oq,
     confirmed_question: q,
-    objective: null,
-    constraints: null,
+    objective,
+    audience,
+    constraints: constraint,
     deliverable,
+    decision_to_make,
+    key_terms: Array.from(
+      new Set(
+        q
+          .toLowerCase()
+          .split(/[^a-z0-9_]+/)
+          .filter(Boolean)
+          .filter((w) => w.length > 2),
+      ),
+    ).slice(0, 12),
   };
 
   return {
-    interpretation_summary,
+    interpretation_summary: summaryParts.join(" "),
     interpretation_json: JSON.stringify(interpretation),
   };
 }
@@ -1835,11 +1889,23 @@ async function optimizeQuestion(input) {
   );
 
   if (!oa.ok) {
-    const stub = stubText("optimize_question");
+    const stub = question || stubText("optimize_question");
+    const interp = buildInterpretationHeuristic({
+      original_question: question,
+      optimized_question: stub,
+      mode,
+    });
     return okEnvelope({
       source: "optimize_stub",
+      mode,
+      input_question: question,
       optimized_question: stub,
+      confirmed_question: stub,
+      interpretation_summary: interp.interpretation_summary,
+      interpretation_json: interp.interpretation_json,
       API_OptimizedQuestion: stub,
+      API_Interpretation_Summary: interp.interpretation_summary,
+      API_Interpretation_JSON: interp.interpretation_json,
       upstream_status: oa.status || 429,
       upstream_error: oa.error || "openai_failed",
     });
@@ -2599,6 +2665,391 @@ async function invokeComponent(input) {
   }
 }
 
+const EXPORT_DIR = path.join(process.cwd(), "exports");
+
+function ensureDirSync(dirPath) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function safeFilenameBase(v) {
+  const t = oneLine(v || "Decision-Pack")
+    .replace(/[^a-zA-Z0-9._ -]+/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-. ]+|[-. ]+$/g, "");
+  return t || "Decision-Pack";
+}
+
+function absoluteBaseUrl(req) {
+  const explicit = trimStr(
+    process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "",
+  );
+  if (explicit) return explicit.replace(/\/$/, "");
+  const proto =
+    trimStr(req.get("x-forwarded-proto") || req.protocol || "https") || "https";
+  const host = trimStr(req.get("x-forwarded-host") || req.get("host") || "");
+  if (!host) return "";
+  return proto + "://" + host;
+}
+
+function cleanExportText(v) {
+  return safeStr(v || "")
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/â/g, "'")
+    .replace(/â/g, "-")
+    .replace(/â/g, "-")
+    .replace(/â|â/g, '"');
+}
+
+function extractSectionValue(content, header) {
+  const text = cleanExportText(content);
+  const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    "(?:^|\\n)" + escaped + "\\n+([\\s\\S]*?)(?=\\n[A-Z][^\\n]{0,80}\\n|$)",
+    "i",
+  );
+  const m = text.match(re);
+  return m ? trimStr(m[1]) : "";
+}
+
+function normalizeObjectiveLabel(v) {
+  const t = trimStr(v).toLowerCase();
+  if (!t) return "Clarify the business objective";
+  if (t.indexOf("activation") >= 0) return "Improve activation";
+  if (t.indexOf("conversion") >= 0) return "Improve conversion";
+  if (t.indexOf("retention") >= 0) return "Improve retention";
+  if (t.indexOf("revenue") >= 0) return "Improve revenue";
+  if (t.indexOf("engagement") >= 0) return "Improve engagement";
+  return trimStr(v);
+}
+
+function normalizeConstraintLabel(v) {
+  const t = trimStr(v).toLowerCase();
+  if (!t) return "Measurement uncertainty";
+  if (/(instrument|tracking|measurement|signal|data quality)/.test(t)) {
+    return "Instrumentation and measurement limits";
+  }
+  if (/budget|cost/.test(t)) return "Budget constraints";
+  if (/time|timeline|deadline/.test(t)) return "Time constraints";
+  if (/stakeholder|alignment/.test(t))
+    return "Stakeholder alignment complexity";
+  return trimStr(v);
+}
+
+function deriveDecisionPackSpec(title, rawContent, body) {
+  const text = cleanExportText(rawContent || "");
+  const rawQuestion = trimStr(
+    body.question_for_api ||
+      body.optimized_question ||
+      body.confirmed_question ||
+      body.question ||
+      extractSectionValue(text, "Interpreted question") ||
+      extractSectionValue(text, "Question"),
+  );
+  const question =
+    rawQuestion || "How should we improve activation for our users?";
+  const lowerQ = question.toLowerCase();
+
+  const objective = normalizeObjectiveLabel(
+    body.primary_goal ||
+      body.objective ||
+      extractSectionValue(text, "Primary objective") ||
+      (lowerQ.indexOf("activation") >= 0 ? "activation" : ""),
+  );
+
+  const constraint = normalizeConstraintLabel(
+    body.primary_constraint ||
+      body.constraint ||
+      extractSectionValue(text, "Main constraint") ||
+      extractSectionValue(text, "Constraint") ||
+      (/(instrument|tracking|measurement|signal)/.test(lowerQ)
+        ? "instrumentation"
+        : ""),
+  );
+
+  const metric =
+    trimStr(
+      body.success_metric ||
+        body.metric ||
+        extractSectionValue(text, "Success signal") ||
+        (objective === "Improve activation"
+          ? "Activation rate from sign-up to first key action"
+          : "Primary outcome metric"),
+    ) ||
+    (objective === "Improve activation"
+      ? "Activation rate from sign-up to first key action"
+      : "Primary outcome metric");
+
+  let decision = trimStr(
+    body.decision_to_make || extractSectionValue(text, "Decision to make"),
+  );
+  if (!decision) {
+    if (
+      objective === "Improve activation" &&
+      constraint === "Instrumentation and measurement limits"
+    ) {
+      decision =
+        "Should the team first tighten event instrumentation and activation definitions before scaling onboarding changes, or can it run a narrowly scoped onboarding test now with enough signal integrity to learn confidently?";
+    } else {
+      decision =
+        "What is the highest-confidence move to advance the objective without creating avoidable execution risk?";
+    }
+  }
+
+  let executiveTake = trimStr(
+    body.executive_take || extractSectionValue(text, "Executive take"),
+  );
+  if (!executiveTake) {
+    if (
+      objective === "Improve activation" &&
+      constraint === "Instrumentation and measurement limits"
+    ) {
+      executiveTake =
+        "This is not primarily a creative-growth problem; it is a sequencing problem. The team should avoid scaling onboarding changes until it can trust where users are dropping, what counts as activation, and whether movement in the metric is real rather than instrumentation noise.";
+    } else {
+      executiveTake =
+        "The real need is to turn an open-ended question into a decision sequence with a clear tradeoff, owner, and success measure.";
+    }
+  }
+
+  let recommendedMove = trimStr(
+    body.recommended_move || extractSectionValue(text, "Recommended move"),
+  );
+  if (!recommendedMove) {
+    if (
+      objective === "Improve activation" &&
+      constraint === "Instrumentation and measurement limits"
+    ) {
+      recommendedMove =
+        "Prioritize a one-week instrumentation sprint before broad onboarding redesign. In parallel, run one tightly scoped onboarding hypothesis test only if the affected step can be measured cleanly with a stable activation definition and a named decision owner.";
+    } else {
+      recommendedMove =
+        "Choose the smallest high-confidence move that improves the objective while reducing the most material execution risk.";
+    }
+  }
+
+  let businessValue = trimStr(
+    body.business_value || extractSectionValue(text, "Business value"),
+  );
+  if (!businessValue) {
+    businessValue =
+      "A sharper decision frame prevents the team from debating abstract growth ideas and instead focuses execution on one measurable move. That reduces wasted delivery, improves stakeholder alignment, and increases confidence that any observed lift is real and defensible.";
+  }
+
+  return {
+    title: oneLine(title || body.title || body.pack_title || "Decision Pack"),
+    question,
+    objective,
+    constraint,
+    metric,
+    decision,
+    executiveTake,
+    recommendedMove,
+    businessValue,
+  };
+}
+
+function buildProfessionalDecisionPack(title, rawContent, body) {
+  const spec = deriveDecisionPackSpec(title, rawContent, body || {});
+  const isActivation = spec.objective === "Improve activation";
+
+  const execSummary = isActivation
+    ? "Activation is the stated business goal, but the immediate management question is whether the team has enough signal quality to change onboarding with confidence. Given instrumentation limits, the higher-value move is to improve measurement discipline first, then scale only the onboarding change that can be tied to a clearly observed drop-off point."
+    : "The user question points to an outcome, but the real managerial need is a sharper decision frame: what choice must be made, under what constraint, and how success will be measured.";
+
+  const hypothesis = isActivation
+    ? "If the team tightens activation event coverage and standardizes the activation definition, it will make better onboarding choices faster because it will be able to distinguish true user friction from measurement noise."
+    : "If the team clarifies the decision, constraint, and success metric before acting, execution quality will improve and rework will fall.";
+
+  const thisWeek = isActivation
+    ? [
+        "Lock the activation definition and the exact event path from sign-up to first value.",
+        "Audit instrumentation at each onboarding step and identify the top 3 missing or unreliable events.",
+        "Name one decision owner for activation and set a weekly review cadence with product, growth, and analytics.",
+        "Run one narrowly scoped onboarding experiment only on a step where exposure, completion, and downstream activation can be measured cleanly.",
+        "Define the scaling threshold in advance (for example: statistically directional lift, no deterioration in completion quality, and stable measurement coverage).",
+      ]
+    : [
+        "Name the decision owner and decision deadline.",
+        "State the primary objective in one sentence.",
+        "Make the core constraint explicit.",
+        "Choose the success metric and baseline.",
+        "Align stakeholders on the first testable move.",
+      ];
+
+  const risks = isActivation
+    ? [
+        "Broad onboarding redesign before instrumentation is trustworthy may create false positives and false negatives.",
+        "Multiple simultaneous changes will make attribution weak and slow learning.",
+        "An unclear activation definition can produce local optimization without meaningful user value.",
+      ]
+    : [
+        "Acting before the metric and tradeoff are explicit increases rework.",
+        "Too many simultaneous moves weaken attribution and accountability.",
+      ];
+
+  const lines = [
+    spec.title,
+    "==================================================",
+    "A decision-ready consulting brief that sharpens the business question, clarifies the tradeoff, and recommends the highest-confidence next move.",
+    "",
+    "Executive summary",
+    execSummary,
+    "",
+    "Interpreted question",
+    spec.question,
+    "",
+    "Core decision",
+    spec.decision,
+    "",
+    "Objective",
+    spec.objective,
+    "",
+    "Primary constraint",
+    spec.constraint,
+    "",
+    "Primary success metric",
+    spec.metric,
+    "",
+    "Executive take",
+    spec.executiveTake,
+    "",
+    "Recommendation",
+    spec.recommendedMove,
+    "",
+    "Working hypothesis",
+    hypothesis,
+    "",
+    "Why this creates value",
+    spec.businessValue,
+    "",
+    "What to do this week",
+  ];
+
+  for (let i = 0; i < thisWeek.length; i++)
+    lines.push(String(i + 1) + ". " + thisWeek[i]);
+  lines.push("");
+  lines.push("Risks / watchouts");
+  for (let i = 0; i < risks.length; i++) lines.push("- " + risks[i]);
+  lines.push("");
+  lines.push("Why Virtual Strategy Tech");
+  lines.push(
+    "Virtual Strategy Tech turns ambiguous product, analytics, and strategy questions into decision-ready outputs teams can use immediately. The value is not generic training; the value is faster alignment, better sequencing, stronger execution discipline, and upskilling through real work.",
+  );
+
+  return lines.join("\n");
+}
+
+function sharpenDecisionPackContent(title, rawContent, body) {
+  const text = cleanExportText(rawContent || "");
+  const normalizedTitle = oneLine(
+    title || body?.pack_title || body?.title || "Decision Pack",
+  ).toLowerCase();
+  if (normalizedTitle.indexOf("decision pack") >= 0) {
+    return buildProfessionalDecisionPack(title, text, body || {});
+  }
+  return text || buildProfessionalDecisionPack(title, text, body || {});
+}
+
+function pdfEscapeText(v) {
+  return safeStr(v)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function wrapPdfLines(text, maxChars) {
+  const out = [];
+  const paras = cleanExportText(text).split(/\n/);
+  const width = maxChars || 95;
+  for (let i = 0; i < paras.length; i++) {
+    const para = paras[i].trim();
+    if (!para) {
+      out.push("");
+      continue;
+    }
+    const words = para.split(/\s+/);
+    let line = "";
+    for (let j = 0; j < words.length; j++) {
+      const next = line ? line + " " + words[j] : words[j];
+      if (next.length > width) {
+        if (line) out.push(line);
+        line = words[j];
+      } else {
+        line = next;
+      }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+function buildMinimalPdfBuffer(title, content) {
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const marginLeft = 50;
+  const startY = 790;
+  const lineHeight = 15;
+  const maxLinesPerPage = 46;
+  const lines = wrapPdfLines(
+    (title ? title + "\n\n" : "") + cleanExportText(content),
+    92,
+  );
+  const pages = [];
+  for (let i = 0; i < lines.length; i += maxLinesPerPage) {
+    pages.push(lines.slice(i, i + maxLinesPerPage));
+  }
+  if (!pages.length) pages.push([oneLine(title || "Document")]);
+
+  const objects = [null];
+  const pageObjectNums = [];
+  const contentObjectNums = [];
+
+  for (let p = 0; p < pages.length; p++) {
+    const pageLines = pages[p];
+    const textOps = ["BT", "/F1 11 Tf", `${marginLeft} ${startY} Td`];
+    for (let j = 0; j < pageLines.length; j++) {
+      const line = pdfEscapeText(pageLines[j]);
+      if (j === 0) textOps.push(`(${line}) Tj`);
+      else textOps.push(`0 -${lineHeight} Td (${line}) Tj`);
+    }
+    textOps.push("ET");
+    const stream = textOps.join("\n");
+    const contentNum = objects.length;
+    contentObjectNums.push(contentNum);
+    objects.push(
+      `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`,
+    );
+
+    const pageNum = objects.length;
+    pageObjectNums.push(pageNum);
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R >> >> /Contents ${contentNum} 0 R >>`,
+    );
+  }
+
+  const kids = pageObjectNums.map((n) => `${n} 0 R`).join(" ");
+  objects[1] = `<< /Type /Catalog /Pages 2 0 R >>`;
+  objects[2] = `<< /Type /Pages /Kids [${kids}] /Count ${pageObjectNums.length} >>`;
+  objects[3] = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 1; i < objects.length; i++) {
+    offsets[i] = Buffer.byteLength(pdf, "utf8");
+    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefPos = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i < objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
+}
+
 // -------------------------
 // Routes
 // -------------------------
@@ -2709,6 +3160,77 @@ app.post("/prompt_lesson", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "prompt_lesson"));
 });
 
+app.post("/export_pack_file", async (req, res) => {
+  try {
+    const body = normalizeIncomingBody(req.body) || {};
+    const title =
+      oneLine(
+        body.title || body.pack_title || body.filename || "Decision Pack",
+      ) || "Decision Pack";
+    const format = trimStr(body.format || "pdf").toLowerCase() || "pdf";
+    const rawContent = safeStr(
+      body.content || body.pack_body || body.markdown || body.text || "",
+    );
+    const finalContent = sharpenDecisionPackContent(title, rawContent, body);
+
+    if (format !== "pdf") {
+      return res.status(200).json({
+        ok: false,
+        API_OK: false,
+        component_result: "fail",
+        error: "unsupported_export_format",
+      });
+    }
+
+    ensureDirSync(EXPORT_DIR);
+    const filename = `${Date.now()}-${safeFilenameBase(title)}.pdf`;
+    const absPath = path.join(EXPORT_DIR, filename);
+    const pdfBuffer = buildMinimalPdfBuffer(title, finalContent);
+    fs.writeFileSync(absPath, pdfBuffer);
+
+    const Export_URL = `${absoluteBaseUrl(req)}/exports/${encodeURIComponent(filename)}`;
+    return res.status(200).json({
+      ok: true,
+      API_OK: true,
+      component_result: "success",
+      title,
+      filename,
+      Export_URL,
+      export_url: Export_URL,
+      path: `/exports/${filename}`,
+      bytes: pdfBuffer.length,
+    });
+  } catch (err) {
+    log("error", "Unhandled /export_pack_file error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(200).json({
+      ok: false,
+      API_OK: false,
+      component_result: "fail",
+      error: "export_pack_file_failed",
+      message: err && err.message ? String(err.message) : "Unknown error",
+    });
+  }
+});
+
+app.get("/exports/:filename", (req, res) => {
+  try {
+    const filename = path.basename(String(req.params.filename || ""));
+    const absPath = path.join(EXPORT_DIR, filename);
+    if (!fs.existsSync(absPath)) return res.status(404).send("not_found");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Cache-Control", "private, max-age=60");
+    return res.sendFile(absPath);
+  } catch (err) {
+    log("error", "Unhandled /exports/:filename error", {
+      error: String(err && err.message ? err.message : err),
+    });
+    return res.status(404).send("not_found");
+  }
+});
+
 // Canonical exam endpoint
 app.post("/generate_exam", async (req, res) => {
   try {
@@ -2763,238 +3285,6 @@ app.post("/exam", async (req, res) => {
   }
 });
 
-// -------------------------
-// Export PDF helpers + routes
-// -------------------------
-
-const EXPORT_DIR =
-  process.env.EXPORT_DIR || path.join(os.tmpdir(), "vf_exports");
-
-function ensureDirSync(dirPath) {
-  try {
-    fs.mkdirSync(dirPath, { recursive: true });
-  } catch {}
-}
-
-function safeFilenameBase(v) {
-  const t = oneLine(v || "Decision Pack")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return t || "Decision-Pack";
-}
-
-function pdfEscapeText(v) {
-  return safeStr(v)
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function wrapText(text, maxChars) {
-  const out = [];
-  const lines = safeStr(text)
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n");
-  for (const rawLine of lines) {
-    const line = rawLine || "";
-    if (!line.trim()) {
-      out.push("");
-      continue;
-    }
-    const words = line.split(/\s+/);
-    let cur = "";
-    for (const w of words) {
-      if (!cur) cur = w;
-      else if ((cur + " " + w).length <= maxChars) cur += " " + w;
-      else {
-        out.push(cur);
-        cur = w;
-      }
-    }
-    if (cur) out.push(cur);
-  }
-  return out;
-}
-
-function buildMinimalPdfBuffer(title, content) {
-  const pageWidth = 612;
-  const pageHeight = 792;
-  const marginLeft = 54;
-  const marginTop = 56;
-  const lineHeight = 15;
-  const maxChars = 92;
-
-  const lines = [];
-  const titleLine = oneLine(title || "Decision Pack");
-  if (titleLine) lines.push(titleLine);
-  lines.push("");
-  wrapText(content || "", maxChars).forEach((l) => lines.push(l));
-
-  const linesPerPage = Math.floor((pageHeight - marginTop - 50) / lineHeight);
-  const pages = [];
-  for (let i = 0; i < lines.length; i += linesPerPage) {
-    pages.push(lines.slice(i, i + linesPerPage));
-  }
-  if (!pages.length) pages.push([""]);
-
-  const pageStartObj = 4;
-  const pageCount = pages.length;
-  const contentStartObj = pageStartObj + pageCount;
-  const objects = [];
-  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-  const kids = [];
-  for (let i = 0; i < pageCount; i++) kids.push(`${pageStartObj + i} 0 R`);
-  objects[2] = `<< /Type /Pages /Kids [ ${kids.join(" ")} ] /Count ${pageCount} >>`;
-  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-
-  for (let i = 0; i < pageCount; i++) {
-    const pageObj = pageStartObj + i;
-    const contentObj = contentStartObj + i;
-    objects[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`;
-    const pageLines = pages[i];
-    const fontSize = i === 0 ? 16 : 12;
-    const chunks = [
-      "BT",
-      `/F1 ${fontSize} Tf`,
-      `${marginLeft} ${pageHeight - marginTop} Td`,
-    ];
-    for (let j = 0; j < pageLines.length; j++) {
-      const line = pdfEscapeText(pageLines[j]);
-      chunks.push(`(${line}) Tj`);
-      if (j < pageLines.length - 1) chunks.push(`0 -${lineHeight} Td`);
-    }
-    chunks.push("ET");
-    const stream = chunks.join("\n");
-    objects[contentObj] =
-      `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`;
-  }
-
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (let i = 1; i < objects.length; i++) {
-    offsets[i] = Buffer.byteLength(pdf, "utf8");
-    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
-  }
-  const xrefPos = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length}\n`;
-  pdf += "0000000000 65535 f \n";
-  for (let i = 1; i < objects.length; i++) {
-    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
-  return Buffer.from(pdf, "utf8");
-}
-
-function absoluteBaseUrl(req) {
-  const proto = (req.get("x-forwarded-proto") || req.protocol || "https")
-    .split(",")[0]
-    .trim();
-  const host = req.get("host");
-  return `${proto}://${host}`;
-}
-
-app.post("/export_pack_file", async (req, res) => {
-  try {
-    const body = normalizeIncomingBody(req.body) || {};
-    const title = oneLine(
-      body.title || body.pack_title || body.filename || "Decision Pack",
-    );
-    const content = safeStr(
-      body.content || body.pack_content || body.markdown || body.text || "",
-    );
-
-    if (!content.trim()) {
-      return res.status(200).json(
-        ensureContract(
-          req,
-          {
-            ok: false,
-            API_OK: false,
-            component_result: "fail",
-            error: "missing_export_content",
-          },
-          "export_pack_file",
-        ),
-      );
-    }
-
-    ensureDirSync(EXPORT_DIR);
-    const filename = `${Date.now()}-${safeFilenameBase(title)}.pdf`;
-    const absPath = path.join(EXPORT_DIR, filename);
-    fs.writeFileSync(absPath, buildMinimalPdfBuffer(title, content));
-
-    const export_url = `${absoluteBaseUrl(req)}/exports/${encodeURIComponent(filename)}`;
-
-    return res.status(200).json(
-      ensureContract(
-        req,
-        {
-          ok: true,
-          API_OK: true,
-          component_result: "success",
-          pack_title: title,
-          Export_URL: export_url,
-          export_url: export_url,
-          download_url: export_url,
-          path: `/exports/${filename}`,
-        },
-        "export_pack_file",
-      ),
-    );
-  } catch (err) {
-    log("error", "Unhandled /export_pack_file error", {
-      error: String(err && err.message ? err.message : err),
-    });
-    return res.status(200).json(
-      ensureContract(
-        req,
-        {
-          ok: false,
-          API_OK: false,
-          component_result: "fail",
-          error: "export_pack_file_failed",
-          message: String(err && err.message ? err.message : err),
-        },
-        "export_pack_file",
-      ),
-    );
-  }
-});
-
-app.get("/exports/:filename", (req, res) => {
-  try {
-    const filename = path.basename(String(req.params.filename || ""));
-    const absPath = path.join(EXPORT_DIR, filename);
-    if (!fs.existsSync(absPath)) {
-      return res.status(404).json({
-        ok: false,
-        API_OK: false,
-        component_result: "not_found",
-        error: "file_not_found",
-        path: `/exports/${filename}`,
-        method: "GET",
-      });
-    }
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    return res.sendFile(absPath);
-  } catch (err) {
-    log("error", "Unhandled /exports/:filename error", {
-      error: String(err && err.message ? err.message : err),
-    });
-    return res.status(500).json({
-      ok: false,
-      API_OK: false,
-      component_result: "fail",
-      error: "export_download_failed",
-      method: "GET",
-    });
-  }
-});
-
 app.post("/grade_open", async (req, res) => {
   /**
    * /grade_open hardening:
@@ -3042,9 +3332,6 @@ function startServer(port) {
   const server = app.listen(p, () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
-    const readyLine = `SERVER_READY:${actualPort}`;
-    const listenLine = `Webhook server listening on ${actualPort}`;
-
     log("info", "Webhook server listening", {
       port: actualPort,
       upstream_enabled: UPSTREAM_ENABLED,
@@ -3052,47 +3339,6 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
-
-    try {
-      if (process.stdout && typeof process.stdout.write === "function") {
-        process.stdout.write(`${readyLine}\n`);
-        process.stdout.write(`${listenLine}\n`);
-      }
-    } catch {
-      // no-op
-    }
-
-    try {
-      if (process.stderr && typeof process.stderr.write === "function") {
-        process.stderr.write(`${readyLine}\n`);
-      }
-    } catch {
-      // no-op
-    }
-
-    try {
-      console.log(readyLine);
-      console.log(listenLine);
-    } catch {
-      // no-op
-    }
-  });
-
-  server.on("error", (err) => {
-    log("error", "server_listen_error", {
-      error:
-        err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
-      port: p,
-    });
-
-    try {
-      const msg = err && err.message ? String(err.message) : String(err);
-      if (process.stderr && typeof process.stderr.write === "function") {
-        process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
-      }
-    } catch {
-      // no-op
-    }
   });
 
   currentServer = server;
