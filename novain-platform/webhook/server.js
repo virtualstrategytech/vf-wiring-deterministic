@@ -3333,8 +3333,11 @@ app.post("/grade_open", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 // -------------------------
+// -------------------------
 // Server lifecycle helpers (CI-friendly)
 // -------------------------
+
+let currentServer = null;
 
 function startServer(port) {
   const pRaw =
@@ -3343,9 +3346,13 @@ function startServer(port) {
       : process.env.PORT !== undefined
         ? process.env.PORT
         : 10000;
-  const p = typeof pRaw === "string" ? parseInt(pRaw, 10) : pRaw;
 
-  const server = app.listen(p, () => {
+  const parsedPort = typeof pRaw === "string" ? parseInt(pRaw, 10) : pRaw;
+  const p = Number.isFinite(parsedPort) ? parsedPort : 10000;
+
+  const server = app.listen(p);
+
+  server.once("listening", () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
     const readyLine = `SERVER_READY:${actualPort}`;
@@ -3364,29 +3371,67 @@ function startServer(port) {
         process.stdout.write(`${readyLine}\n`);
         process.stdout.write(`${listenLine}\n`);
       }
-    } catch {
-      // no-op
-    }
+    } catch {}
 
     try {
       if (process.stderr && typeof process.stderr.write === "function") {
         process.stderr.write(`${readyLine}\n`);
       }
-    } catch {
-      // no-op
-    }
+    } catch {}
 
     try {
       console.log(readyLine);
       console.log(listenLine);
-    } catch {
-      // no-op
-    }
+    } catch {}
+  });
+
+  server.once("error", (err) => {
+    const msg =
+      err && err.message ? String(err.message) : "unknown_listen_error";
+
+    log("error", "Webhook server failed to start", {
+      error: msg,
+      port: p,
+    });
+
+    try {
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
+      }
+    } catch {}
+
+    try {
+      console.error(`SERVER_START_ERROR:${msg}`);
+    } catch {}
   });
 
   currentServer = server;
   return server;
 }
+
+function closeResources() {
+  if (!currentServer) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    try {
+      currentServer.close(() => resolve());
+    } catch {
+      resolve();
+    } finally {
+      currentServer = null;
+    }
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  startServer,
+  closeResources,
+};
 // -------------------------
 // Process-level safety nets
 // -------------------------
