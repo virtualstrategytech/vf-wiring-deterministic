@@ -3225,18 +3225,27 @@ app.post("/export_pack_file", async (req, res) => {
 
 app.get("/exports/:filename", (req, res) => {
   try {
-    const filename = path.basename(String(req.params.filename || ""));
-    const absPath = path.join(EXPORT_DIR, filename);
-    if (!fs.existsSync(absPath)) return res.status(404).send("not_found");
+    const filename = path.basename(req.params.filename || "");
+    const fullPath = path.join(EXPORT_DIR, filename);
+
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({
+        ok: false,
+        API_OK: false,
+        component_result: "not_found",
+        error: "file_not_found",
+      });
+    }
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Cache-Control", "private, max-age=60");
-    return res.sendFile(absPath);
+    return res.sendFile(fullPath);
   } catch (err) {
-    log("error", "Unhandled /exports/:filename error", {
+    return res.status(500).json({
+      ok: false,
+      API_OK: false,
+      component_result: "export_failed",
       error: String(err && err.message ? err.message : err),
     });
-    return res.status(404).send("not_found");
   }
 });
 
