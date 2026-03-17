@@ -3333,8 +3333,7 @@ app.post("/grade_open", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 // -------------------------
-// -------------------------
-// Server lifecycle helpers (CI-friendly)
+/// Server lifecycle helpers (CI-friendly)
 // -------------------------
 
 let currentServer = null;
@@ -3423,15 +3422,6 @@ function closeResources() {
   });
 }
 
-if (require.main === module) {
-  startServer();
-}
-
-module.exports = {
-  app,
-  startServer,
-  closeResources,
-};
 // -------------------------
 // Process-level safety nets
 // -------------------------
@@ -3449,6 +3439,7 @@ process.on("uncaughtException", (err) => {
   });
   // Do not exit automatically; let the platform restart if needed.
 });
+
 if (require.main === module) {
   startServer();
 }
@@ -3456,4 +3447,8 @@ if (require.main === module) {
 app.startServer = startServer;
 app.closeResources = closeResources;
 
-module.exports = app;
+module.exports = {
+  app,
+  startServer,
+  closeResources,
+};
