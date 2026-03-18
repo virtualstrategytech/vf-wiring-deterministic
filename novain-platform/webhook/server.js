@@ -3335,19 +3335,33 @@ app.post("/grade_open", async (req, res) => {
 // -------------------------
 /// Server lifecycle helpers (CI-friendly)
 // -------------------------
-
 let currentServer = null;
 
 function startServer(port) {
+  const shouldUseEphemeralPort =
+    port === undefined &&
+    (String(process.env.CI || "").toLowerCase() === "true" ||
+      String(process.env.USE_CHILD_PROCESS_SERVER || "").toLowerCase() ===
+        "1" ||
+      String(process.env.USE_CHILD_PROCESS_SERVER || "").toLowerCase() ===
+        "true" ||
+      String(process.env.NODE_ENV || "").toLowerCase() === "test");
+
   const pRaw =
     port !== undefined && port !== null
       ? port
-      : process.env.PORT !== undefined
+      : process.env.PORT !== undefined && process.env.PORT !== ""
         ? process.env.PORT
-        : 10000;
+        : shouldUseEphemeralPort
+          ? 0
+          : 10000;
 
   const parsedPort = typeof pRaw === "string" ? parseInt(pRaw, 10) : pRaw;
-  const p = Number.isFinite(parsedPort) ? parsedPort : 10000;
+  const p = Number.isFinite(parsedPort)
+    ? parsedPort
+    : shouldUseEphemeralPort
+      ? 0
+      : 10000;
 
   const server = app.listen(p);
 
@@ -3369,12 +3383,6 @@ function startServer(port) {
       if (process.stdout && typeof process.stdout.write === "function") {
         process.stdout.write(`${readyLine}\n`);
         process.stdout.write(`${listenLine}\n`);
-      }
-    } catch {}
-
-    try {
-      if (process.stderr && typeof process.stderr.write === "function") {
-        process.stderr.write(`${readyLine}\n`);
       }
     } catch {}
 
@@ -3402,6 +3410,8 @@ function startServer(port) {
     try {
       console.error(`SERVER_START_ERROR:${msg}`);
     } catch {}
+
+    process.exitCode = 1;
   });
 
   currentServer = server;
@@ -3437,7 +3447,6 @@ process.on("uncaughtException", (err) => {
     error:
       err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
   });
-  // Do not exit automatically; let the platform restart if needed.
 });
 
 if (require.main === module) {
