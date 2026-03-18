@@ -3457,9 +3457,28 @@ if (require.main === module) {
 
 app.startServer = startServer;
 app.closeResources = closeResources;
-
-module.exports = {
-  app,
-  startServer,
-  closeResources,
+// Compatibility for tests that import the module directly and may pass it to
+// supertest or inspect address()/close().
+app.address = function address() {
+  try {
+    return currentServer && typeof currentServer.address === "function"
+      ? currentServer.address()
+      : null;
+  } catch {
+    return null;
+  }
 };
+app.close = function close(cb) {
+  if (!currentServer || typeof currentServer.close !== "function") {
+    if (typeof cb === "function") cb();
+    return app;
+  }
+  return currentServer.close(cb);
+};
+
+// Export the Express app itself for in-process tests, while also preserving
+// named exports for callers that destructure.
+module.exports = app;
+module.exports.app = app;
+module.exports.startServer = startServer;
+module.exports.closeResources = closeResources;
