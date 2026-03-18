@@ -40,6 +40,8 @@
 
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const { AsyncLocalStorage } = require("async_hooks");
 
 const requestContext = new AsyncLocalStorage();
@@ -388,6 +390,15 @@ app.use((err, req, res, next) => {
 
 function requireApiKey(req, res, next) {
   if (req.path === "/health" || req.path === "/") return next();
+
+  // Allow public PDF downloads from the absolute Export_URL.
+  // Keep POST /export_pack_file protected.
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    /^\/exports\//.test(req.path || "")
+  ) {
+    return next();
+  }
 
   // In non-prod without a key, allow all (for local dev)
   if (!IS_PROD && !WEBHOOK_API_KEY) return next();
@@ -3315,21 +3326,39 @@ app.post("/grade_open", async (req, res) => {
   res.status(200).json(ensureContract(req, result, "grade_open"));
 });
 // -------------------------
-// Server lifecycle helpers (CI-friendly)
+/// Server lifecycle helpers (CI-friendly)
 // -------------------------
-
 let currentServer = null;
 
 function startServer(port) {
+  const shouldUseEphemeralPort =
+    port === undefined &&
+    (String(process.env.CI || "").toLowerCase() === "true" ||
+      String(process.env.USE_CHILD_PROCESS_SERVER || "").toLowerCase() ===
+        "1" ||
+      String(process.env.USE_CHILD_PROCESS_SERVER || "").toLowerCase() ===
+        "true" ||
+      String(process.env.NODE_ENV || "").toLowerCase() === "test");
+
   const pRaw =
     port !== undefined && port !== null
       ? port
-      : process.env.PORT !== undefined
+      : process.env.PORT !== undefined && process.env.PORT !== ""
         ? process.env.PORT
-        : 10000;
-  const p = typeof pRaw === "string" ? parseInt(pRaw, 10) : pRaw;
+        : shouldUseEphemeralPort
+          ? 0
+          : 10000;
 
-  const server = app.listen(p, () => {
+  const parsedPort = typeof pRaw === "string" ? parseInt(pRaw, 10) : pRaw;
+  const p = Number.isFinite(parsedPort)
+    ? parsedPort
+    : shouldUseEphemeralPort
+      ? 0
+      : 10000;
+
+  const server = app.listen(p);
+
+  server.once("listening", () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
     log("info", "Webhook server listening", {
@@ -3339,6 +3368,40 @@ function startServer(port) {
       upstream_max_retries: UPSTREAM_MAX_RETRIES,
       upstream_retry_base_ms: UPSTREAM_RETRY_BASE_MS,
     });
+
+    try {
+      if (process.stdout && typeof process.stdout.write === "function") {
+        process.stdout.write(`${readyLine}\n`);
+        process.stdout.write(`${listenLine}\n`);
+      }
+    } catch {}
+
+    try {
+      console.log(readyLine);
+      console.log(listenLine);
+    } catch {}
+  });
+
+  server.once("error", (err) => {
+    const msg =
+      err && err.message ? String(err.message) : "unknown_listen_error";
+
+    log("error", "Webhook server failed to start", {
+      error: msg,
+      port: p,
+    });
+
+    try {
+      if (process.stderr && typeof process.stderr.write === "function") {
+        process.stderr.write(`SERVER_START_ERROR:${msg}\n`);
+      }
+    } catch {}
+
+    try {
+      console.error(`SERVER_START_ERROR:${msg}`);
+    } catch {}
+
+    process.exitCode = 1;
   });
 
   currentServer = server;
@@ -3374,13 +3437,36 @@ process.on("uncaughtException", (err) => {
     error:
       err && err.stack ? String(err.stack) : safeStringifyForLog(err, 2000),
   });
-  // Do not exit automatically; let the platform restart if needed.
 });
+
 if (require.main === module) {
   startServer();
 }
 
 app.startServer = startServer;
 app.closeResources = closeResources;
+// Compatibility for tests that import the module directly and may pass it to
+// supertest or inspect address()/close().
+app.address = function address() {
+  try {
+    return currentServer && typeof currentServer.address === "function"
+      ? currentServer.address()
+      : null;
+  } catch {
+    return null;
+  }
+};
+app.close = function close(cb) {
+  if (!currentServer || typeof currentServer.close !== "function") {
+    if (typeof cb === "function") cb();
+    return app;
+  }
+  return currentServer.close(cb);
+};
 
+// Export the Express app itself for in-process tests, while also preserving
+// named exports for callers that destructure.
 module.exports = app;
+module.exports.app = app;
+module.exports.startServer = startServer;
+module.exports.closeResources = closeResources;
