@@ -3227,27 +3227,18 @@ app.post("/export_pack_file", async (req, res) => {
 
 app.get("/exports/:filename", (req, res) => {
   try {
-    const filename = path.basename(req.params.filename || "");
-    const fullPath = path.join(EXPORT_DIR, filename);
-
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({
-        ok: false,
-        API_OK: false,
-        component_result: "not_found",
-        error: "file_not_found",
-      });
-    }
+    const filename = path.basename(String(req.params.filename || ""));
+    const absPath = path.join(EXPORT_DIR, filename);
+    if (!fs.existsSync(absPath)) return res.status(404).send("not_found");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    return res.sendFile(fullPath);
+    res.setHeader("Cache-Control", "private, max-age=60");
+    return res.sendFile(absPath);
   } catch (err) {
-    return res.status(500).json({
-      ok: false,
-      API_OK: false,
-      component_result: "export_failed",
+    log("error", "Unhandled /exports/:filename error", {
       error: String(err && err.message ? err.message : err),
     });
+    return res.status(404).send("not_found");
   }
 });
 
@@ -3370,9 +3361,6 @@ function startServer(port) {
   server.once("listening", () => {
     const addr = server.address();
     const actualPort = addr && typeof addr === "object" ? addr.port : p;
-    const readyLine = `SERVER_READY:${actualPort}`;
-    const listenLine = `Webhook server listening on ${actualPort}`;
-
     log("info", "Webhook server listening", {
       port: actualPort,
       upstream_enabled: UPSTREAM_ENABLED,
